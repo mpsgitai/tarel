@@ -485,6 +485,13 @@ promoted = tarel.discovery.promote(
     candidates=("join-lines-offers-composite",),
     reason="Population challenge passed; request owner review.",
 )
+
+entity_promoted = tarel.discovery.promote(
+    completed_entity_run.id,
+    candidates=("track-title-token-v2",),
+    reason="Offer the challenged fuzzy rule for runtime validation.",
+)
+entity_candidate = entity_promoted.entity_candidates[0]
 ```
 
 The SDK and CLI share the same optimistic revision checks, candidate/step state machine, field
@@ -495,9 +502,10 @@ duration, and a query/code hash—not SQL, code, rows, paths, credentials, or ra
 `tarel.discovery.find(...)` returns selected candidates by default or all active hypotheses with
 `include_exploratory=True`. Passing `query="customer account key"` ranks the compact allowlisted
 candidate projection with dependency-free BM25. Selection remains exploratory and never changes
-graph relationships, normal context, or the reviewed entity-candidate store. `promote` is the
-separate explicit bridge for completed exact join runs: it atomically creates one or more graph
-relationship drafts, preserves ordered composite fields, and never validates them. See
+graph relationships or normal context. `promote` is the separate explicit bridge: completed exact
+join runs create graph drafts; one selected entity candidate creates an unreviewed v0.2
+entity-resolution candidate with typed program, execution identity, recomputed quality, and
+DiscoveryRun provenance. Neither path validates its result. See
 [Optional discovery runs](discovery-runs.md) for typed programs, support/challenge rules, the Codex
 skill installer, and current limits.
 

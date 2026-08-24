@@ -71,7 +71,7 @@ def add_discovery_commands(
 
     promote = commands.add_parser(
         "promote",
-        help="Promote selected exact join candidates into graph relationship review.",
+        help="Promote selected joins or one entity match into the corresponding review store.",
     )
     promote.add_argument("run_id")
     promote.add_argument(
@@ -185,6 +185,10 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
         _render(
             {
                 "edges": [edge.to_dict() for edge in result.edges],
+                "entity_candidates": [
+                    candidate.to_dict()
+                    for candidate in result.entity_candidates
+                ],
                 "graph": result.graph.name,
                 "path": str(result.path),
                 "run_id": result.run.id,
@@ -278,13 +282,48 @@ def _render(payload: dict[str, object], *, output_format: str) -> None:
         print(f"Discovery run: {payload.get('run_id')}")
         print(f"Goal: {payload.get('goal')}")
         print(f"Allowed actions: {', '.join(payload.get('allowed_actions', []))}")
+        print(f"Raw sample access: {payload.get('raw_sample_access')}")
+        hints = payload.get("field_hints")
+        if isinstance(hints, list) and hints:
+            print("Suggested field pairs:")
+            for hint in hints:
+                if isinstance(hint, dict):
+                    print(
+                        f"- {hint.get('source_field')} -> "
+                        f"{hint.get('target_field')} "
+                        f"[shared: {hint.get('shared_tokens')}]"
+                    )
+        ladder = payload.get("probe_ladder")
+        if isinstance(ladder, list) and ladder:
+            print("Probe ladder:")
+            for step in ladder:
+                if isinstance(step, dict):
+                    print(f"- {step.get('code')}: {step.get('purpose')}")
         print(f"Revision: {payload.get('revision')}")
         return
     if "agent" in payload:
         print(f"Installed TAREL discovery skill for {payload['agent']}: {payload['path']}")
         return
     promoted = payload.get("edges")
-    if isinstance(promoted, list):
+    entity_candidates = payload.get("entity_candidates")
+    if isinstance(promoted, list) and isinstance(entity_candidates, list):
+        if entity_candidates:
+            print(f"Promoted entity candidates: {len(entity_candidates)}")
+            print(f"Graph: {payload.get('graph')}")
+            for candidate in entity_candidates:
+                if isinstance(candidate, dict):
+                    quality = candidate.get("quality")
+                    rating = (
+                        quality.get("rating")
+                        if isinstance(quality, dict)
+                        else "unknown"
+                    )
+                    print(
+                        f"- {candidate.get('id')} "
+                        f"[{candidate.get('state')}; quality={rating}]"
+                    )
+            print(f"Path: {payload.get('path')}")
+            return
         print(f"Promoted discovery candidates: {len(promoted)}")
         print(f"Graph: {payload.get('graph')}")
         for edge in promoted:

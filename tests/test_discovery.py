@@ -158,6 +158,29 @@ class DiscoveryTests(TestCase):
         for forbidden in ("raw_rows", "samples", "query_text", "connection_url"):
             self.assertNotIn(forbidden, persisted)
 
+    def test_entity_next_offers_deterministic_field_hints_and_probe_ladder(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            sdk = _sdk(temporary_directory)
+            run = sdk.discovery.start(
+                "entity_matching",
+                graph="warehouse",
+                run_id="guided-entity-run",
+            ).run
+            task = sdk.discovery.next(run.id)
+
+        self.assertEqual(task.raw_sample_access, "host_controlled")
+        self.assertIn(
+            "normalized_exact_baseline",
+            [step["code"] for step in task.probe_ladder],
+        )
+        self.assertTrue(
+            any(
+                "customer_key" in str(hint["source_field"])
+                or "customer_key" in str(hint["target_field"])
+                for hint in task.field_hints
+            )
+        )
+
     def test_cli_and_sdk_share_the_same_run_and_reject_stale_submissions(self) -> None:
         previous = Path.cwd()
         with TemporaryDirectory(dir=previous) as temporary_directory:
@@ -451,6 +474,104 @@ class DiscoveryTests(TestCase):
         self.assertIsInstance(provenance, dict)
         self.assertEqual(provenance["candidate_id"], "join-v1")
 
+    def test_selected_fuzzy_entity_promotes_through_sdk_into_existing_review_path(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            sdk = _sdk(temporary_directory)
+            completed = _complete_selected_entity_run(
+                sdk,
+                run_id="entity-promotion",
+                with_execution=True,
+            )
+
+            promoted = sdk.discovery.promote(
+                completed.id,
+                candidates=("entity-fuzzy-v1",),
+                reason="Offer the challenged fuzzy rule for explicit review.",
+            )
+            entity = promoted.entity_candidates[0]
+            fallback = sdk.entity_resolution.find("warehouse")
+            ui = sdk.view.graph("warehouse")
+            reviewed = sdk.entity_resolution.decide(
+                entity.id,
+                decision="approve",
+                reason="The owner reviewed the population evidence and guards.",
+            ).candidate
+            confirmed = sdk.entity_resolution.find(
+                "warehouse",
+                mode="confirmed_only",
+            )
+
+        self.assertEqual(promoted.edges, ())
+        self.assertEqual(entity.contract_version, "tarel.entity-resolution-candidate.v0.2")
+        self.assertEqual(entity.state, "candidate")
+        self.assertEqual(entity.program.comparison, "token_set_ratio_v1")
+        self.assertEqual(entity.execution.executor_id, "test.matcher")
+        self.assertEqual(entity.execution.blocking_strategy, "token_prefix")
+        self.assertEqual(entity.quality.rating, "strong")
+        self.assertEqual(entity.quality.score, 0.9)
+        self.assertEqual(entity.evidence.confidence, entity.quality.score)
+        self.assertEqual(entity.provenance.discovery_candidate_id, "entity-fuzzy-v1")
+        self.assertEqual(fallback[0].usage, "exploratory_only")
+        projected = next(
+            edge
+            for edge in ui["edges"]
+            if edge["type"] == "entity_resolution_candidate"
+        )
+        self.assertEqual(projected["metadata"]["quality_rating"], "strong")
+        self.assertEqual(projected["metadata"]["executor_id"], "test.matcher")
+        self.assertEqual(reviewed.state, "reviewed")
+        self.assertEqual(confirmed[0].candidate.id, entity.id)
+
+    def test_cli_promotes_one_entity_candidate_and_rejects_missing_execution(self) -> None:
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            sdk = _sdk(temporary_directory)
+            completed = _complete_selected_entity_run(
+                sdk,
+                run_id="cli-entity-promotion",
+                with_execution=True,
+            )
+            output = StringIO()
+            try:
+                os.chdir(project)
+                with redirect_stdout(output):
+                    exit_code = main(
+                        [
+                            "discovery",
+                            "promote",
+                            completed.id,
+                            "--candidate",
+                            "entity-fuzzy-v1",
+                            "--reason",
+                            "Move this fuzzy rule into entity review.",
+                            "--format",
+                            "json",
+                        ]
+                    )
+            finally:
+                os.chdir(previous)
+            payload = json.loads(output.getvalue())
+            stored = sdk.entity_resolution.list(graph="warehouse")
+
+            incomplete = _complete_selected_entity_run(
+                sdk,
+                run_id="missing-execution",
+                with_execution=False,
+            )
+            with self.assertRaises(DiscoveryFailure) as rejected:
+                sdk.discovery.promote(
+                    incomplete.id,
+                    candidates=("entity-fuzzy-v1",),
+                    reason="This lacks reproducible executor metadata.",
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["edges"], [])
+        self.assertEqual(len(payload["entity_candidates"]), 1)
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(rejected.exception.code, "incomplete_entity_execution")
+
     def test_promotion_is_fail_closed_and_atomic(self) -> None:
         with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
             sdk = _sdk(temporary_directory)
@@ -685,10 +806,78 @@ def _complete_selected_run(
     ).run
 
 
+def _complete_selected_entity_run(
+    sdk: Tarel,
+    *,
+    run_id: str,
+    with_execution: bool,
+):
+    proposal = _proposal(
+        "entity-fuzzy-v1",
+        "entity_matching",
+        comparison="token_set_ratio_v1",
+        threshold=0.84,
+        source_fields=(
+            "main.orders.customer_key",
+            "main.orders.tenant_key",
+        ),
+        target_fields=(
+            "main.customers.customer_name",
+            "main.customers.tenant_key",
+        ),
+    )
+    program = proposal["program"]
+    assert isinstance(program, dict)
+    program["blocking_field_indexes"] = [0]
+    program["contradiction_field_indexes"] = [1]
+    current = sdk.discovery.start(
+        "entity_matching",
+        graph="warehouse",
+        run_id=run_id,
+    ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="propose_candidate",
+        payload=proposal,
+    ).run
+    for phase in ("support", "challenge"):
+        current = sdk.discovery.submit(
+            current.id,
+            expected_revision=current.revision,
+            action="record_observation",
+            payload=_observation_payload(
+                "entity-fuzzy-v1",
+                f"entity-fuzzy-v1-{phase}",
+                phase=phase,
+                with_execution=with_execution,
+            ),
+        ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="select_candidate",
+        payload={
+            "candidate_id": "entity-fuzzy-v1",
+            "reason": "Support and hard-case challenge remained strong.",
+        },
+    ).run
+    return sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="complete_run",
+        payload={"reason": "Selected fuzzy entity candidate is ready for review."},
+    ).run
+
+
 def _observation_payload(
-    candidate_id: str, observation_id: str, *, phase: str
+    candidate_id: str,
+    observation_id: str,
+    *,
+    phase: str,
+    with_execution: bool = False,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "candidate_id": candidate_id,
         "observation": {
             "dialect": "sqlite",
@@ -715,3 +904,14 @@ def _observation_payload(
             "truncated": False,
         },
     }
+    if with_execution:
+        observation = payload["observation"]
+        assert isinstance(observation, dict)
+        observation["execution"] = {
+            "artifact_hash": "b" * 64,
+            "blocking_strategy": "token_prefix",
+            "blocking_version": "v1",
+            "executor_id": "test.matcher",
+            "executor_version": "v1",
+        }
+    return payload

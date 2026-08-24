@@ -1877,7 +1877,7 @@ class DiscoveryAPI(_RuntimeAPI):
         candidates: tuple[str, ...],
         reason: str,
     ) -> DiscoveryPromotionResult:
-        """Move selected exact join candidates into graph review as drafts."""
+        """Move a selected candidate into its bounded review path."""
         return promote_discovery_candidates_use_case(
             run_id,
             candidate_ids=candidates,

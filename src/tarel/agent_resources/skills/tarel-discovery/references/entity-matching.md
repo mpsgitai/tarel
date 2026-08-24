@@ -18,3 +18,9 @@ must expose them before a probe is accepted.
 `normalized_levenshtein_v1` and `token_set_ratio_v1` are candidate semantics, never confirmed
 relationships. A selected discovery candidate remains `exploratory_only` until a separate review
 or controlled runtime validation approves its use.
+
+Before promotion, include versioned execution metadata on every successful support and challenge:
+executor ID/version, artifact hash, blocking strategy, and blocking version. Run discovery next
+for deterministic text-field hints, raw-sample access status, and the current probe ladder. TAREL
+recomputes promotion quality from aggregate evidence; do not optimize or report confidence without
+coverage, collision, and counterexample measurements.
