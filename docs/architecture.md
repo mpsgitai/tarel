@@ -158,8 +158,9 @@ Experimental discovery documents retain typed candidate programs, their AVO-styl
 generation lineage, aggregate observations, decisions, and step ordering. They omit query/code
 text, raw rows, samples, credentials, connection details, volatile source paths, and free-form
 database errors. Discovery is opt-in and does not alter graph or context behavior unless a caller
-explicitly promotes selected exact joins into the existing relationship review queue. That bridge
-preserves composite field ordering, writes drafts only, and leaves validation human-controlled.
+explicitly promotes a selected candidate. Exact joins enter relationship review as drafts. Entity
+programs enter the separate entity-resolution store as unreviewed candidates with versioned
+execution identity and TAREL-computed quality. Both bridges leave validation human-controlled.
 
 ## Public surface
 

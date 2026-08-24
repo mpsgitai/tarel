@@ -16,6 +16,28 @@ from tarel.sdk import EntityResolutionCandidate, Tarel
 
 
 class EntityResolutionTests(TestCase):
+    def test_legacy_direct_constructor_and_roundtrip_remain_compatible(self) -> None:
+        graph = _graph()
+        existing = _candidate(graph)
+        direct = EntityResolutionCandidate(
+            id=existing.id,
+            graph_name=existing.graph_name,
+            graph_revision=existing.graph_revision,
+            source_field_id=existing.source_field_id,
+            target_field_id=existing.target_field_id,
+            rule=existing.rule,
+            evidence=existing.evidence,
+            provenance=existing.provenance,
+        )
+        roundtrip = EntityResolutionCandidate.from_dict(direct.to_dict())
+
+        self.assertEqual(
+            direct.contract_version,
+            "tarel.entity-resolution-candidate.v0.1",
+        )
+        self.assertEqual(roundtrip, direct)
+        self.assertNotIn("program", direct.to_dict())
+
     def test_sdk_offers_unreviewed_candidate_as_explicit_fallback(self) -> None:
         with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
             sdk = Tarel(Path(temporary_directory) / ".tarel")

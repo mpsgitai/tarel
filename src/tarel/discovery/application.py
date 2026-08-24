@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -17,7 +18,15 @@ from tarel.discovery.contracts import (
     apply_discovery_action,
 )
 from tarel.discovery.store import FileDiscoveryStore
-from tarel.graph.contracts import GraphDocument, GraphEdge
+from tarel.entity_resolution.application import (
+    import_entity_resolution_candidate_use_case,
+)
+from tarel.entity_resolution.contracts import (
+    EntityResolutionCandidate,
+    EntityResolutionFailure,
+)
+from tarel.entity_resolution.discovery import entity_candidate_from_discovery
+from tarel.graph.contracts import GraphDocument, GraphEdge, GraphNode
 from tarel.graph.revision import graph_revision
 from tarel.graph.store import FileGraphStore
 from tarel.providers.contracts import Message, ProviderFailure, StructuredRequest
@@ -53,6 +62,7 @@ class DiscoveryPromotionResult:
     graph: GraphDocument
     edges: tuple[GraphEdge, ...]
     path: Path
+    entity_candidates: tuple[EntityResolutionCandidate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +77,9 @@ class DiscoveryTask:
     probes_used: int
     candidate_budget: int
     candidates_used: int
+    field_hints: tuple[dict[str, object], ...] = ()
+    probe_ladder: tuple[dict[str, str], ...] = ()
+    raw_sample_access: str = "host_controlled"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -79,7 +92,10 @@ class DiscoveryTask:
             },
             "candidates": list(self.candidates),
             "goal": self.goal,
+            "field_hints": list(self.field_hints),
             "kind": self.kind,
+            "probe_ladder": list(self.probe_ladder),
+            "raw_sample_access": self.raw_sample_access,
             "revision": self.revision,
             "run_id": self.run_id,
         }
@@ -99,6 +115,11 @@ class DiscoveryMatch:
         return "exploratory_selected" if self.candidate.state == "selected" else "exploratory_only"
 
     def to_dict(self) -> dict[str, object]:
+        subject = (
+            "entity-matching rule"
+            if self.candidate.kind == "entity_matching"
+            else "relationship"
+        )
         return {
             "candidate": self.candidate.to_dict(),
             "graph": self.graph_name,
@@ -107,7 +128,7 @@ class DiscoveryMatch:
             "score": self.score,
             "usage": self.usage,
             "warning": (
-                "Discovery selection is agent-assessed, not a human-reviewed TAREL relationship. "
+                f"Discovery selection is agent-assessed, not a human-reviewed TAREL {subject}. "
                 "Revalidate it at runtime before using it in an answer."
             ),
         }
@@ -180,7 +201,7 @@ def next_discovery_task_use_case(
     run_id: str, *, runtime: TarelRuntime | None = None
 ) -> DiscoveryTask:
     run = _discovery_store(runtime).load(run_id)
-    _validate_current_graph(run, runtime=runtime)
+    graph = _validate_current_graph(run, runtime=runtime)
     return DiscoveryTask(
         run_id=run.id,
         revision=run.revision,
@@ -192,6 +213,13 @@ def next_discovery_task_use_case(
         probes_used=run.probes_used,
         candidate_budget=run.candidate_budget,
         candidates_used=len(run.candidates),
+        field_hints=(
+            _entity_field_hints(graph)
+            if run.kind == "entity_matching"
+            else ()
+        ),
+        probe_ladder=_probe_ladder(run),
+        raw_sample_access=_raw_sample_access(run, runtime=runtime),
     )
 
 
@@ -232,7 +260,7 @@ def promote_discovery_candidates_use_case(
     reason: str,
     runtime: TarelRuntime | None = None,
 ) -> DiscoveryPromotionResult:
-    """Atomically promote selected exact join programs into graph review drafts."""
+    """Promote selected candidates into their existing bounded review path."""
     if not candidate_ids or len(candidate_ids) > 20 or len(candidate_ids) != len(
         set(candidate_ids)
     ):
@@ -241,11 +269,6 @@ def promote_discovery_candidates_use_case(
             "Promotion requires one to twenty unique candidate IDs.",
         )
     run = _discovery_store(runtime).load(run_id)
-    if run.kind != "join_discovery":
-        raise DiscoveryFailure(
-            "invalid_discovery_promotion",
-            "Only join-discovery candidates can enter relationship review.",
-        )
     if run.status != "completed":
         raise DiscoveryFailure(
             "invalid_discovery_promotion",
@@ -266,19 +289,47 @@ def promote_discovery_candidates_use_case(
                 "invalid_discovery_promotion",
                 f"Discovery candidate is not selected: {candidate_id}",
             )
-        if candidate.program.comparison != "exact" or any(
-            candidate.program.source_transforms + candidate.program.target_transforms
-        ):
-            raise DiscoveryFailure(
-                "unsupported_discovery_promotion",
-                "Only exact join candidates without transforms can enter graph review.",
-            )
         selected.append(candidate)
+
+    if run.kind == "entity_matching":
+        if len(selected) != 1:
+            raise DiscoveryFailure(
+                "invalid_discovery_promotion",
+                "Promote one entity-matching candidate at a time.",
+            )
+        candidate = entity_candidate_from_discovery(
+            run,
+            selected[0],
+            graph,
+            reason=reason,
+        )
+        try:
+            imported = import_entity_resolution_candidate_use_case(
+                candidate,
+                runtime=runtime,
+            )
+        except EntityResolutionFailure as exc:
+            raise DiscoveryFailure("discovery_promotion_failed", str(exc)) from exc
+        return DiscoveryPromotionResult(
+            run=run,
+            graph=graph,
+            edges=(),
+            entity_candidates=(imported.candidate,),
+            path=imported.path,
+        )
 
     updated = graph
     promoted: list[GraphEdge] = []
     try:
         for candidate in selected:
+            if candidate.program.comparison != "exact" or any(
+                candidate.program.source_transforms
+                + candidate.program.target_transforms
+            ):
+                raise DiscoveryFailure(
+                    "unsupported_discovery_promotion",
+                    "Only exact join candidates without transforms can enter graph review.",
+                )
             updated, edge = add_manual_relationship_fields(
                 updated,
                 from_references=candidate.program.source_fields,
@@ -304,6 +355,7 @@ def promote_discovery_candidates_use_case(
         run=run,
         graph=updated,
         edges=tuple(promoted),
+        entity_candidates=(),
         path=path,
     )
 
@@ -509,6 +561,128 @@ def _candidate_summary(candidate: DiscoveryCandidate) -> dict[str, object]:
         "state": candidate.state,
         "variation_operator": candidate.variation_operator,
     }
+
+
+def _entity_field_hints(
+    graph: GraphDocument,
+) -> tuple[dict[str, object], ...]:
+    nodes = graph.node_by_id()
+    fields: list[tuple[GraphNode, GraphNode, set[str]]] = []
+    for field in graph.nodes:
+        if field.type != "field" or not _textual_type(
+            str(field.metadata.get("data_type") or "")
+        ):
+            continue
+        parent = nodes.get(str(field.metadata.get("object_id") or ""))
+        if parent is None or parent.type not in {"table", "view"}:
+            continue
+        tokens = set(_label_tokens(field.label))
+        if tokens:
+            fields.append((field, parent, tokens))
+    ranked: list[tuple[int, str, str, str]] = []
+    for index, (source, source_parent, source_tokens) in enumerate(fields):
+        for target, target_parent, target_tokens in fields[index + 1 :]:
+            if source_parent.id == target_parent.id:
+                continue
+            overlap = source_tokens & target_tokens
+            if not overlap:
+                continue
+            source_reference = f"{source_parent.label}.{source.label}"
+            target_reference = f"{target_parent.label}.{target.label}"
+            score = len(overlap) * 10 - abs(len(source_tokens) - len(target_tokens))
+            ranked.append(
+                (
+                    score,
+                    source_reference,
+                    target_reference,
+                    ",".join(sorted(overlap)),
+                )
+            )
+    ranked.sort(key=lambda item: (-item[0], item[1].casefold(), item[2].casefold()))
+    return tuple(
+        {
+            "basis": "compatible_text_fields_with_shared_name_tokens",
+            "shared_tokens": shared,
+            "source_field": source,
+            "target_field": target,
+        }
+        for _score, source, target, shared in ranked[:8]
+    )
+
+
+def _probe_ladder(run: DiscoveryRun) -> tuple[dict[str, str], ...]:
+    if run.kind == "join_discovery":
+        return (
+            {
+                "code": "exact_baseline",
+                "purpose": "Measure an exact field-pair baseline before variations.",
+            },
+            {
+                "code": "collision_challenge",
+                "purpose": "Challenge coverage with collisions and row-expansion risk.",
+            },
+            {
+                "code": "assess",
+                "purpose": "Select or reject only after a successful challenge.",
+            },
+        )
+    return (
+        {
+            "code": "bounded_samples",
+            "purpose": "Inspect at most ten ephemeral rows only when raw-sample access is granted.",
+        },
+        {
+            "code": "normalized_exact_baseline",
+            "purpose": "Measure normalized exact coverage before fuzzy comparison.",
+        },
+        {
+            "code": "single_variation",
+            "purpose": "Vary one comparator, threshold, transform, or guard at a time.",
+        },
+        {
+            "code": "risk_challenge",
+            "purpose": "Measure hard cases, collisions, counterexamples, and guard contradictions.",
+        },
+        {
+            "code": "assess",
+            "purpose": "Select or reject with runtime-validation status kept explicit.",
+        },
+    )
+
+
+def _raw_sample_access(
+    run: DiscoveryRun,
+    *,
+    runtime: TarelRuntime | None,
+) -> str:
+    if not run.source_names:
+        return "host_controlled"
+    store = _source_store(runtime)
+    return (
+        "granted"
+        if all(
+            store.load(name).allows_enrichment("raw_samples")
+            for name in run.source_names
+        )
+        else "not_granted"
+    )
+
+
+def _textual_type(data_type: str) -> bool:
+    lowered = data_type.casefold()
+    return any(
+        marker in lowered
+        for marker in ("char", "clob", "string", "text")
+    )
+
+
+def _label_tokens(label: str) -> tuple[str, ...]:
+    expanded = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", label)
+    return tuple(
+        token
+        for token in re.findall(r"[A-Za-z0-9]+", expanded.casefold())
+        if token not in {"code", "field", "id", "key"}
+    )
 
 
 def _retrieval_document(match: DiscoveryMatch) -> RetrievalDocument:

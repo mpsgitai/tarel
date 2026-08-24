@@ -9,7 +9,13 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
-ENTITY_RESOLUTION_CONTRACT_VERSION = "tarel.entity-resolution-candidate.v0.1"
+from tarel.discovery.contracts import DiscoveryExecution, DiscoveryProgram
+
+ENTITY_RESOLUTION_CONTRACT_VERSION = "tarel.entity-resolution-candidate.v0.2"
+ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION = "tarel.entity-resolution-candidate.v0.1"
+ENTITY_RESOLUTION_CONTRACT_VERSIONS = frozenset(
+    {ENTITY_RESOLUTION_CONTRACT_VERSION, ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION}
+)
 ENTITY_RESOLUTION_STATES = frozenset({"candidate", "rejected", "reviewed"})
 ENTITY_RESOLUTION_EVIDENCE_LEVELS = frozenset(
     {"population_tested", "proposed", "sample_tested"}
@@ -24,6 +30,16 @@ _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_REASON_LENGTH = 1_000
 _MAX_OPERATIONS = 8
+_QUALITY_WARNINGS = frozenset(
+    {
+        "counterexamples_observed",
+        "failed_probes_present",
+        "low_coverage",
+        "mixed_executors",
+        "sample_only",
+        "support_missing",
+    }
+)
 
 
 class EntityResolutionFailure(RuntimeError):
@@ -128,17 +144,146 @@ class EntityResolutionEvidence:
 class EntityResolutionProvenance:
     run_id: str
     producer: str
+    discovery_candidate_id: str | None = None
+    discovery_run_revision: str | None = None
+    observation_ids: tuple[str, ...] = ()
+    promotion_reason: str | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        return {"producer": self.producer, "run_id": self.run_id}
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {"producer": self.producer, "run_id": self.run_id}
+        if self.discovery_candidate_id is not None:
+            payload["discovery_candidate_id"] = self.discovery_candidate_id
+        if self.discovery_run_revision is not None:
+            payload["discovery_run_revision"] = self.discovery_run_revision
+        if self.observation_ids:
+            payload["observation_ids"] = list(self.observation_ids)
+        if self.promotion_reason is not None:
+            payload["promotion_reason"] = self.promotion_reason
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EntityResolutionProvenance:
-        _fields(data, {"producer", "run_id"}, "entity-resolution provenance")
+        _fields(
+            data,
+            {"producer", "run_id"},
+            "entity-resolution provenance",
+            optional={
+                "discovery_candidate_id",
+                "discovery_run_revision",
+                "observation_ids",
+                "promotion_reason",
+            },
+        )
+        observation_ids = data.get("observation_ids", [])
         return cls(
             run_id=_identifier(data.get("run_id"), "run_id"),
             producer=_identifier(data.get("producer"), "producer"),
+            discovery_candidate_id=(
+                _identifier(
+                    data.get("discovery_candidate_id"), "discovery_candidate_id"
+                )
+                if data.get("discovery_candidate_id") is not None
+                else None
+            ),
+            discovery_run_revision=(
+                _sha256(
+                    data.get("discovery_run_revision"), "discovery_run_revision"
+                )
+                if data.get("discovery_run_revision") is not None
+                else None
+            ),
+            observation_ids=_identifier_array(
+                observation_ids, "observation_ids"
+            ),
+            promotion_reason=(
+                _text(
+                    data.get("promotion_reason"),
+                    "promotion_reason",
+                    limit=_MAX_REASON_LENGTH,
+                )
+                if data.get("promotion_reason") is not None
+                else None
+            ),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class EntityResolutionQuality:
+    score: float
+    rating: str
+    support_observation_id: str | None
+    challenge_observation_id: str
+    failed_observation_count: int
+    warnings: tuple[str, ...]
+    version: str = "tarel.entity-quality.v1"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "challenge_observation_id": self.challenge_observation_id,
+            "failed_observation_count": self.failed_observation_count,
+            "rating": self.rating,
+            "score": self.score,
+            "support_observation_id": self.support_observation_id,
+            "version": self.version,
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EntityResolutionQuality:
+        _fields(
+            data,
+            {
+                "challenge_observation_id",
+                "failed_observation_count",
+                "rating",
+                "score",
+                "support_observation_id",
+                "version",
+                "warnings",
+            },
+            "entity-resolution quality",
+        )
+        if data.get("version") != "tarel.entity-quality.v1":
+            raise EntityResolutionFailure(
+                "unsupported_entity_resolution",
+                "Unsupported entity-resolution quality calculation.",
+            )
+        support = data.get("support_observation_id")
+        warnings = _string_array(data.get("warnings"), "quality warnings")
+        if len(warnings) != len(set(warnings)) or set(warnings) - _QUALITY_WARNINGS:
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Entity-resolution quality warnings must be unique allowlisted codes.",
+            )
+        quality = cls(
+            score=_rate(data.get("score"), "quality score"),
+            rating=_choice(
+                data.get("rating"),
+                "quality rating",
+                frozenset({"insufficient", "moderate", "strong", "weak"}),
+            ),
+            support_observation_id=(
+                _identifier(support, "support_observation_id")
+                if support is not None
+                else None
+            ),
+            challenge_observation_id=_identifier(
+                data.get("challenge_observation_id"),
+                "challenge_observation_id",
+            ),
+            failed_observation_count=_integer(
+                data.get("failed_observation_count"),
+                "failed_observation_count",
+            ),
+            warnings=warnings,
+        )
+        expected_rating = entity_resolution_quality_rating(quality.score)
+        if quality.rating != expected_rating:
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Entity-resolution quality rating does not match its score.",
+            )
+        return quality
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,12 +321,15 @@ class EntityResolutionCandidate:
     graph_revision: str
     source_field_id: str
     target_field_id: str
-    rule: EntityResolutionRule
+    rule: EntityResolutionRule | None
     evidence: EntityResolutionEvidence
     provenance: EntityResolutionProvenance
+    program: DiscoveryProgram | None = None
+    execution: DiscoveryExecution | None = None
+    quality: EntityResolutionQuality | None = None
     state: str = "candidate"
     review: EntityResolutionReview | None = None
-    contract_version: str = ENTITY_RESOLUTION_CONTRACT_VERSION
+    contract_version: str = ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION
 
     @property
     def revision(self) -> str:
@@ -205,39 +353,50 @@ class EntityResolutionCandidate:
             "id": self.id,
             "provenance": self.provenance.to_dict(),
             "review": self.review.to_dict() if self.review else None,
-            "rule": self.rule.to_dict(),
             "source_field_id": self.source_field_id,
             "state": self.state,
             "target_field_id": self.target_field_id,
         }
+        if self.contract_version == ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION:
+            payload["rule"] = self.rule.to_dict() if self.rule else None
+        else:
+            payload["execution"] = self.execution.to_dict() if self.execution else None
+            payload["program"] = self.program.to_dict() if self.program else None
+            payload["quality"] = self.quality.to_dict() if self.quality else None
         if include_revision:
             payload["revision"] = self.revision
         return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EntityResolutionCandidate:
-        _fields(
-            data,
-            {
+        contract_version = data.get("contract_version")
+        if contract_version not in ENTITY_RESOLUTION_CONTRACT_VERSIONS:
+            raise EntityResolutionFailure(
+                "unsupported_entity_resolution",
+                "Unsupported TAREL entity-resolution candidate contract.",
+            )
+        common_fields = {
                 "contract_version",
                 "evidence",
                 "graph",
                 "id",
                 "provenance",
                 "review",
-                "rule",
                 "source_field_id",
                 "state",
                 "target_field_id",
-            },
+        }
+        version_fields = (
+            {"rule"}
+            if contract_version == ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION
+            else {"execution", "program", "quality"}
+        )
+        _fields(
+            data,
+            common_fields | version_fields,
             "entity-resolution candidate",
             optional={"revision"},
         )
-        if data.get("contract_version") != ENTITY_RESOLUTION_CONTRACT_VERSION:
-            raise EntityResolutionFailure(
-                "unsupported_entity_resolution",
-                "Unsupported TAREL entity-resolution candidate contract.",
-            )
         graph = _object(data.get("graph"), "candidate graph")
         _fields(graph, {"name", "revision"}, "candidate graph")
         review_value = data.get("review")
@@ -246,21 +405,44 @@ class EntityResolutionCandidate:
                 "invalid_entity_resolution",
                 "Entity-resolution review must be an object or null.",
             )
+        program_value = data.get("program")
+        execution_value = data.get("execution")
+        quality_value = data.get("quality")
         candidate = cls(
             id=_identifier(data.get("id"), "candidate id"),
             graph_name=_text(graph.get("name"), "graph name"),
             graph_revision=_sha256(graph.get("revision"), "graph revision"),
             source_field_id=_text(data.get("source_field_id"), "source_field_id"),
             target_field_id=_text(data.get("target_field_id"), "target_field_id"),
-            rule=EntityResolutionRule.from_dict(_object(data.get("rule"), "rule")),
+            rule=(
+                EntityResolutionRule.from_dict(_object(data.get("rule"), "rule"))
+                if contract_version == ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION
+                else None
+            ),
             evidence=EntityResolutionEvidence.from_dict(
                 _object(data.get("evidence"), "evidence")
             ),
             provenance=EntityResolutionProvenance.from_dict(
                 _object(data.get("provenance"), "provenance")
             ),
+            program=(
+                DiscoveryProgram.from_dict(_object(program_value, "program"))
+                if program_value is not None
+                else None
+            ),
+            execution=(
+                DiscoveryExecution.from_dict(_object(execution_value, "execution"))
+                if execution_value is not None
+                else None
+            ),
+            quality=(
+                EntityResolutionQuality.from_dict(_object(quality_value, "quality"))
+                if quality_value is not None
+                else None
+            ),
             state=_choice(data.get("state"), "candidate state", ENTITY_RESOLUTION_STATES),
             review=EntityResolutionReview.from_dict(review_value) if review_value else None,
+            contract_version=str(contract_version),
         )
         validate_entity_resolution_candidate(candidate)
         expected_revision = data.get("revision")
@@ -302,7 +484,7 @@ class EntityResolutionMatch:
 
 
 def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -> None:
-    if candidate.contract_version != ENTITY_RESOLUTION_CONTRACT_VERSION:
+    if candidate.contract_version not in ENTITY_RESOLUTION_CONTRACT_VERSIONS:
         raise EntityResolutionFailure(
             "unsupported_entity_resolution",
             "Unsupported TAREL entity-resolution candidate contract.",
@@ -315,7 +497,56 @@ def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -
             "invalid_entity_resolution",
             "Entity-resolution endpoints must be different fields.",
         )
-    EntityResolutionRule.from_dict(candidate.rule.to_dict())
+    if candidate.contract_version == ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION:
+        if (
+            candidate.rule is None
+            or candidate.program is not None
+            or candidate.execution is not None
+            or candidate.quality is not None
+        ):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Legacy candidates require only the normalized-exact rule.",
+            )
+        EntityResolutionRule.from_dict(candidate.rule.to_dict())
+    else:
+        if (
+            candidate.rule is not None
+            or candidate.program is None
+            or candidate.execution is None
+            or candidate.quality is None
+        ):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Discovery-derived candidates require program, execution, and quality.",
+            )
+        DiscoveryProgram.from_dict(candidate.program.to_dict())
+        DiscoveryExecution.from_dict(candidate.execution.to_dict())
+        EntityResolutionQuality.from_dict(candidate.quality.to_dict())
+        if candidate.program.kind != "entity_matching":
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Entity-resolution programs must use entity-matching semantics.",
+            )
+        if (
+            candidate.program.source_fields[0] != candidate.source_field_id
+            or candidate.program.target_fields[0] != candidate.target_field_id
+        ):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Primary entity-resolution endpoints must match the first program field pair.",
+            )
+        provenance = candidate.provenance
+        if (
+            provenance.discovery_candidate_id is None
+            or provenance.discovery_run_revision is None
+            or not provenance.observation_ids
+            or provenance.promotion_reason is None
+        ):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Discovery-derived provenance is incomplete.",
+            )
     EntityResolutionEvidence.from_dict(candidate.evidence.to_dict())
     EntityResolutionProvenance.from_dict(candidate.provenance.to_dict())
     if candidate.state == "candidate" and candidate.review is not None:
@@ -484,6 +715,31 @@ def _string_array(value: object, label: str) -> tuple[str, ...]:
             f"{label} must be an array of strings.",
         )
     return tuple(_text(item, label) for item in value)
+
+
+def _identifier_array(value: object, label: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise EntityResolutionFailure(
+            "invalid_entity_resolution",
+            f"{label} must be an array of identifiers.",
+        )
+    identifiers = tuple(_identifier(item, label) for item in value)
+    if len(identifiers) != len(set(identifiers)):
+        raise EntityResolutionFailure(
+            "invalid_entity_resolution",
+            f"{label} must contain unique identifiers.",
+        )
+    return identifiers
+
+
+def entity_resolution_quality_rating(score: float) -> str:
+    if score >= 0.9:
+        return "strong"
+    if score >= 0.7:
+        return "moderate"
+    if score >= 0.4:
+        return "weak"
+    return "insufficient"
 
 
 def _integer(value: object, label: str) -> int:

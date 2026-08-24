@@ -45,6 +45,16 @@ DISCOVERY_EVIDENCE_LEVELS = frozenset({"population_tested", "sample_tested"})
 DISCOVERY_OBSERVATION_PHASES = frozenset({"challenge", "support"})
 DISCOVERY_OBSERVATION_STATUSES = frozenset({"failed", "succeeded"})
 DISCOVERY_METRIC_BASES = frozenset({"pairs", "population", "source_distinct"})
+DISCOVERY_BLOCKING_STRATEGIES = frozenset(
+    {
+        "exact_value",
+        "full_scan_bounded",
+        "ngram",
+        "normalized_prefix",
+        "phonetic",
+        "token_prefix",
+    }
+)
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -277,6 +287,53 @@ class DiscoveryMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class DiscoveryExecution:
+    executor_id: str
+    executor_version: str
+    artifact_hash: str
+    blocking_strategy: str
+    blocking_version: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "artifact_hash": self.artifact_hash,
+            "blocking_strategy": self.blocking_strategy,
+            "blocking_version": self.blocking_version,
+            "executor_id": self.executor_id,
+            "executor_version": self.executor_version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DiscoveryExecution:
+        _fields(
+            data,
+            {
+                "artifact_hash",
+                "blocking_strategy",
+                "blocking_version",
+                "executor_id",
+                "executor_version",
+            },
+            "discovery execution",
+        )
+        return cls(
+            executor_id=_identifier(data.get("executor_id"), "executor_id"),
+            executor_version=_identifier(
+                data.get("executor_version"), "executor_version"
+            ),
+            artifact_hash=_sha256(data.get("artifact_hash"), "artifact_hash"),
+            blocking_strategy=_choice(
+                data.get("blocking_strategy"),
+                "blocking_strategy",
+                DISCOVERY_BLOCKING_STRATEGIES,
+            ),
+            blocking_version=_identifier(
+                data.get("blocking_version"), "blocking_version"
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class DiscoveryObservation:
     id: str
     phase: str
@@ -289,9 +346,10 @@ class DiscoveryObservation:
     duration_ms: int
     metrics: DiscoveryMetrics | None = None
     error_category: str | None = None
+    execution: DiscoveryExecution | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "dialect": self.dialect,
             "duration_ms": self.duration_ms,
             "error_category": self.error_category,
@@ -304,6 +362,9 @@ class DiscoveryObservation:
             "status": self.status,
             "truncated": self.truncated,
         }
+        if self.execution is not None:
+            payload["execution"] = self.execution.to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DiscoveryObservation:
@@ -323,10 +384,16 @@ class DiscoveryObservation:
                 "truncated",
             },
             "discovery observation",
+            optional={"execution"},
         )
         metrics_value = data.get("metrics")
         if metrics_value is not None and not isinstance(metrics_value, dict):
             raise DiscoveryFailure("invalid_discovery", "metrics must be an object or null.")
+        execution_value = data.get("execution")
+        if execution_value is not None and not isinstance(execution_value, dict):
+            raise DiscoveryFailure(
+                "invalid_discovery", "execution must be an object or null."
+            )
         observation = cls(
             id=_identifier(data.get("id"), "observation id"),
             phase=_choice(
@@ -350,6 +417,11 @@ class DiscoveryObservation:
             metrics=DiscoveryMetrics.from_dict(metrics_value) if metrics_value else None,
             error_category=_optional_identifier(
                 data.get("error_category"), "error_category"
+            ),
+            execution=(
+                DiscoveryExecution.from_dict(execution_value)
+                if execution_value is not None
+                else None
             ),
         )
         if observation.status == "succeeded" and observation.metrics is None:

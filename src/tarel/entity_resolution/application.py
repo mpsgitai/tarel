@@ -186,6 +186,19 @@ def _validate_candidate_binding(
             "invalid_entity_resolution",
             "Entity-resolution endpoints must be different fields.",
         )
+    if candidate.program is not None:
+        for source_field_id, target_field_id in zip(
+            candidate.program.source_fields,
+            candidate.program.target_fields,
+            strict=True,
+        ):
+            _field_by_id(graph, source_field_id)
+            _field_by_id(graph, target_field_id)
+            if source_field_id == target_field_id:
+                raise EntityResolutionFailure(
+                    "invalid_entity_resolution",
+                    "Entity-resolution program field pairs must use different fields.",
+                )
 
 
 def _match(

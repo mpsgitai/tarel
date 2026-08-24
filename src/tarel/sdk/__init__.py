@@ -3,6 +3,7 @@
 from tarel.context_caching import ContextCacheParts
 from tarel.discovery.contracts import (
     DiscoveryCandidate,
+    DiscoveryExecution,
     DiscoveryMetrics,
     DiscoveryObservation,
     DiscoveryProgram,
@@ -14,6 +15,7 @@ from tarel.entity_resolution.contracts import (
     EntityResolutionEvidence,
     EntityResolutionMatch,
     EntityResolutionProvenance,
+    EntityResolutionQuality,
     EntityResolutionRule,
 )
 from tarel.grounding import GroundingAsset, GroundingBundle, LineageTarget, SourceTarget
@@ -27,6 +29,7 @@ from tarel.workspaces.scope import ScopeSelection as WorkspaceScope
 __all__ = [
     "ContextCacheParts",
     "DiscoveryCandidate",
+    "DiscoveryExecution",
     "DiscoveryMetrics",
     "DiscoveryObservation",
     "DiscoveryProgram",
@@ -36,6 +39,7 @@ __all__ = [
     "EntityResolutionEvidence",
     "EntityResolutionMatch",
     "EntityResolutionProvenance",
+    "EntityResolutionQuality",
     "EntityResolutionRule",
     "GroundingAsset",
     "GroundingBundle",

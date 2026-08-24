@@ -110,81 +110,16 @@ reducing a report-to-source path to unexplained arrows.
 
 This prevents a scheduler dependency from silently becoming invented table lineage.
 
-## Entity-resolution hypotheses
+## Optional join and entity discovery
 
-TAREL can store and retrieve bounded normalization candidates without turning them into technical
-joins or confirmed facts. An agent may use an unreviewed candidate when no approved rule exists,
-but every CLI and SDK result exposes its evidence level, evaluated count, coverage, collision rate,
-confidence, review state, and `requires_runtime_validation` flag.
+TAREL can guide a coding agent through resumable **Join Discovery** and **Entity Matching** runs.
+It stores typed hypotheses, aggregate challenges, provenance, and review state; it executes no SQL
+or matching code and persists no raw samples. Exact joins promote only to relationship drafts,
+while fuzzy matches promote only to explicitly labelled entity candidates.
 
-```bash
-tarel entity import --source sanitized-candidate.json --format json
-
-tarel entity find music \
-  --source-field mb.ArtistCredit.Name \
-  --target-field mb.Artist.Name \
-  --mode confirmed_then_candidates \
-  --format json
-```
-
-```python
-from tarel.sdk import EntityResolutionCandidate, Tarel
-
-tarel = Tarel(".tarel")
-candidate = EntityResolutionCandidate.from_dict(sanitized_candidate_payload)
-tarel.entity_resolution.import_candidate(candidate)
-
-matches = tarel.entity_resolution.find(
-    "music",
-    source="mb.ArtistCredit.Name",
-    target="mb.Artist.Name",
-    mode="confirmed_then_candidates",
-)
-```
-
-Unreviewed matches use `exploratory_only`; TAREL never executes their rules. Current candidates can
-also be shown as optional violet edges in the local information-space graph. See
-[Entity-resolution candidates](docs/entity-resolution-candidates.md) for the complete contract,
-review commands, retrieval modes, and data boundary.
-
-## Agent-driven discovery runs
-
-Longer join discovery and entity matching are opt-in. Starting a run does not alter the graph,
-normal retrieval, context packets, annotations, or existing entity candidates:
-
-```bash
-tarel discovery start joins \
-  --graph warehouse \
-  --source warehouse-prod \
-  --preset balanced \
-  --question "How are cost centers and accounts connected?"
-
-tarel discovery next RUN_ID --format json
-```
-
-The coding agent proposes typed candidates, executes authorized read-only checks, and submits only
-aggregate support or challenge observations. Candidate parents and generations preserve the AVO
-variation path. A successful challenge is mandatory before selection, and selected results remain
-`exploratory_selected` until a separate review promotes them through an existing TAREL path.
-
-After completing a join run, explicitly move one or more selected exact candidates into the
-relationship review queue as drafts. Repeating `--candidate` keeps a multi-candidate promotion
-atomic; two- and three-field programs remain one ordered composite relationship:
-
-```bash
-tarel discovery promote RUN_ID \
-  --candidate JOIN_CANDIDATE_ID \
-  --reason "Population challenge passed; request data-owner review."
-```
-
-Promotion never validates a relationship. Normalized or transformed programs remain in the
-DiscoveryRun until the graph review contract can preserve their execution semantics.
-
-An optional provider advisor can propose metadata-only candidate batches but receives no database
-tool or samples and cannot record evidence or make decisions. Install the packaged Codex guidance
-in a project with `tarel agent setup codex`. See
-[Optional discovery runs](docs/discovery-runs.md) for the CLI/SDK lifecycle, program contract,
-provider boundary, and current limits.
+See [Optional discovery runs](docs/discovery-runs.md) for the complete CLI/SDK walkthrough and
+[Entity-resolution candidates](docs/entity-resolution-candidates.md) for retrieval, review, quality,
+and the optional violet graph projection.
 
 ## Human in the loop
 

@@ -14,6 +14,8 @@ read-only checks; TAREL does not become a general SQL executor or make entity-re
 3. Propose typed programs, then record only aggregate support or challenge observations. Never put
    SQL text, rows, sample values, connection details, free database errors, or reasoning transcripts
    in a discovery payload.
+   For entity matching, attach the exact executor ID/version/hash and allowlisted blocking
+   strategy/version to every successful support and challenge intended for promotion.
 4. Treat provider proposals as hypotheses. Only a coding agent or human may select or reject one.
    When the run enables an advisor, `tarel discovery advise RUN_ID --expected-revision REVISION`
    can add a small metadata-only proposal batch; the provider cannot execute probes.
@@ -24,6 +26,9 @@ read-only checks; TAREL does not become a general SQL executor or make entity-re
 7. After completing a join run, use `tarel discovery promote` only when the user wants selected
    exact, untransformed candidates placed into relationship review. Promote every intended
    candidate in one atomic command; promoted relationships are drafts, never validations.
+8. After completing an entity run, promote at most one selected candidate per command. Promotion
+   requires measured collisions/counterexamples and a non-empty challenge. The resulting entity
+   candidate remains exploratory until explicit review.
 
 Read [references/join-discovery.md](references/join-discovery.md) for join runs and
 [references/entity-matching.md](references/entity-matching.md) for entity runs.
