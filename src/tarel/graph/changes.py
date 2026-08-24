@@ -317,11 +317,16 @@ def _rename_signature(node: GraphNode) -> tuple[object, ...]:
 
 def _relationship_shape(edge: GraphEdge) -> dict[str, object]:
     return {
-        "from_fields": edge.metadata.get("from_fields"),
+        "from_fields": _relationship_fields(edge, "from_fields", "from_field"),
         "source_id": edge.source_id,
         "target_id": edge.target_id,
-        "to_fields": edge.metadata.get("to_fields"),
+        "to_fields": _relationship_fields(edge, "to_fields", "to_field"),
     }
+
+
+def _relationship_fields(edge: GraphEdge, plural: str, singular: str) -> object:
+    value = edge.metadata.get(plural)
+    return value if value is not None else [edge.metadata.get(singular)]
 
 
 def _required_string(data: dict[str, Any], key: str) -> str:

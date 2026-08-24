@@ -1,6 +1,14 @@
 """Small embedded Python surface over TAREL application use cases."""
 
 from tarel.context_caching import ContextCacheParts
+from tarel.discovery.contracts import (
+    DiscoveryCandidate,
+    DiscoveryMetrics,
+    DiscoveryObservation,
+    DiscoveryProgram,
+    DiscoveryRun,
+    DiscoveryTransform,
+)
 from tarel.entity_resolution.contracts import (
     EntityResolutionCandidate,
     EntityResolutionEvidence,
@@ -18,6 +26,12 @@ from tarel.workspaces.scope import ScopeSelection as WorkspaceScope
 
 __all__ = [
     "ContextCacheParts",
+    "DiscoveryCandidate",
+    "DiscoveryMetrics",
+    "DiscoveryObservation",
+    "DiscoveryProgram",
+    "DiscoveryRun",
+    "DiscoveryTransform",
     "EntityResolutionCandidate",
     "EntityResolutionEvidence",
     "EntityResolutionMatch",

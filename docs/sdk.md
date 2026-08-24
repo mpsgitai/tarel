@@ -451,6 +451,56 @@ in the audit store but are never retrieved. See
 [Entity-resolution candidates](entity-resolution-candidates.md) for CLI commands, metric
 invariants, and the violet browser projection.
 
+### Continue optional discovery runs
+
+`tarel.discovery` adds a resumable agent protocol without changing the existing relationship or
+entity-resolution APIs:
+
+```python
+started = tarel.discovery.start(
+    "entity_matching",
+    graph="music",
+    question="Which track records denote the same song?",
+    probe_budget=40,
+    candidate_budget=20,
+    advisor_provider="openrouter",  # optional metadata-only proposal advisor
+)
+
+task = tarel.discovery.next(started.run.id)
+advice = tarel.discovery.advise(
+    started.run.id,
+    expected_revision=task.revision,
+    count=3,
+)
+changed = tarel.discovery.submit(
+    started.run.id,
+    expected_revision=advice.run.revision,
+    action="record_observation",
+    payload=sanitized_aggregate_observation,
+)
+
+# After selecting candidates and completing the run:
+promoted = tarel.discovery.promote(
+    completed_join_run.id,
+    candidates=("join-lines-offers-composite",),
+    reason="Population challenge passed; request owner review.",
+)
+```
+
+The SDK and CLI share the same optimistic revision checks, candidate/step state machine, field
+binding, actor restrictions, and private atomic store. Provider advice can add hypotheses only.
+The host or coding agent executes read-only probes and submits counts, rates, limits, truncation,
+duration, and a query/code hash—not SQL, code, rows, paths, credentials, or raw errors.
+
+`tarel.discovery.find(...)` returns selected candidates by default or all active hypotheses with
+`include_exploratory=True`. Passing `query="customer account key"` ranks the compact allowlisted
+candidate projection with dependency-free BM25. Selection remains exploratory and never changes
+graph relationships, normal context, or the reviewed entity-candidate store. `promote` is the
+separate explicit bridge for completed exact join runs: it atomically creates one or more graph
+relationship drafts, preserves ordered composite fields, and never validates them. See
+[Optional discovery runs](discovery-runs.md) for typed programs, support/challenge rules, the Codex
+skill installer, and current limits.
+
 ### Feed a Space/Lineage GUI
 
 One projection contains both canvas modes, so changing the mode is local UI state and never causes
@@ -630,6 +680,7 @@ never downloads the model.
 - `tarel.focus`: list, load, build
 - `tarel.annotation`: plan, apply, inspect, edit, decide and provider batch
 - `tarel.relationship`: add, probe, discover, list and review graph-local joins
+- `tarel.discovery`: start, resume, advise, submit, retrieve and explicitly promote join drafts
 - `tarel.model`: inspect and explicitly download the optional local embedding model
 - `tarel.index`: build, resume and inspect the optional local vector index
 

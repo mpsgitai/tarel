@@ -534,8 +534,8 @@ def _context_join(edge: GraphEdge, node_by_id: dict[str, GraphNode]) -> ContextJ
         kind = "foreign_key"
         transformation = None
     else:
-        from_fields = _field_names([edge.metadata.get("from_field")], edge.id)
-        to_fields = _field_names([edge.metadata.get("to_field")], edge.id)
+        from_fields = _candidate_field_names(edge, plural="from_fields", singular="from_field")
+        to_fields = _candidate_field_names(edge, plural="to_fields", singular="to_field")
         state = "validated"
         origin = str(edge.metadata.get("origin") or "unknown")
         review = edge.metadata.get("review")
@@ -592,6 +592,15 @@ def _field_names(value: object, edge_id: str) -> tuple[str, ...]:
             f"Relationship fields are missing or invalid: {edge_id}",
         )
     return tuple(value)
+
+
+def _candidate_field_names(
+    edge: GraphEdge, *, plural: str, singular: str
+) -> tuple[str, ...]:
+    value = edge.metadata.get(plural)
+    if value is None:
+        value = [edge.metadata.get(singular)]
+    return _field_names(value, edge.id)
 
 
 def _adjacency(

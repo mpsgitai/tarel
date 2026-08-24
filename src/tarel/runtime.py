@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from tarel.discovery.store import FileDiscoveryStore
 from tarel.entity_resolution.store import FileEntityResolutionStore
 from tarel.focus.store import FileFocusStore
 from tarel.graph.change_store import FileGraphChangeStore
@@ -68,3 +69,6 @@ class TarelRuntime:
 
     def entity_resolution_store(self) -> FileEntityResolutionStore:
         return FileEntityResolutionStore(self.root / "entity-resolution")
+
+    def discovery_store(self) -> FileDiscoveryStore:
+        return FileDiscoveryStore(self.root / "discovery")

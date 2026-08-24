@@ -366,27 +366,30 @@ def _candidate_endpoints_exist(graph: GraphDocument, edge: GraphEdge) -> bool:
     nodes = graph.node_by_id()
     if edge.source_id not in nodes or edge.target_id not in nodes:
         return False
-    metadata = edge.metadata
-    return _field_exists(
-        graph,
-        edge.source_id,
-        str(metadata.get("from_field") or ""),
-    ) and _field_exists(graph, edge.target_id, str(metadata.get("to_field") or ""))
+    source_fields = _candidate_fields(edge, "from_fields", "from_field")
+    target_fields = _candidate_fields(edge, "to_fields", "to_field")
+    return bool(source_fields) and bool(target_fields) and all(
+        _field_exists(graph, edge.source_id, field)
+        for field in source_fields
+    ) and all(
+        _field_exists(graph, edge.target_id, field)
+        for field in target_fields
+    )
 
 
 def _candidate_field_ids(graph: GraphDocument, edge: GraphEdge) -> set[str]:
     fields: set[str] = set()
-    for object_id, key in (
-        (edge.source_id, "from_field"),
-        (edge.target_id, "to_field"),
+    for object_id, plural, singular in (
+        (edge.source_id, "from_fields", "from_field"),
+        (edge.target_id, "to_fields", "to_field"),
     ):
-        label = str(edge.metadata.get(key) or "")
+        labels = _candidate_fields(edge, plural, singular)
         fields.update(
             node.id
             for node in graph.nodes
             if node.type == "field"
             and node.metadata.get("object_id") == object_id
-            and node.label == label
+            and node.label in labels
         )
     return fields
 
@@ -403,9 +406,19 @@ def _field_exists(graph: GraphDocument, object_id: str, field_name: str) -> bool
 def _same_field_pair(candidate: GraphEdge, declared: GraphEdge) -> bool:
     if candidate.source_id != declared.source_id or candidate.target_id != declared.target_id:
         return False
-    return declared.metadata.get("from_fields") == [
-        candidate.metadata.get("from_field")
-    ] and declared.metadata.get("to_fields") == [candidate.metadata.get("to_field")]
+    return declared.metadata.get("from_fields") == list(
+        _candidate_fields(candidate, "from_fields", "from_field")
+    ) and declared.metadata.get("to_fields") == list(
+        _candidate_fields(candidate, "to_fields", "to_field")
+    )
+
+
+def _candidate_fields(edge: GraphEdge, plural: str, singular: str) -> tuple[str, ...]:
+    value = edge.metadata.get(plural)
+    if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+        return tuple(value)
+    fallback = edge.metadata.get(singular)
+    return (fallback,) if isinstance(fallback, str) and fallback else ()
 
 
 def _report_string(data: dict[str, Any], key: str) -> str:

@@ -78,6 +78,22 @@ from tarel.context import ContextResult
 from tarel.context_caching import ContextCacheParts, split_context_packet
 from tarel.context_output import DEFAULT_MAX_CONTEXT_CHARACTERS
 from tarel.context_packets import ContextPacketDiff, ContextPacketImpact
+from tarel.discovery.application import (
+    DiscoveryAdviceResult,
+    DiscoveryChangeResult,
+    DiscoveryMatch,
+    DiscoveryPromotionResult,
+    DiscoveryTask,
+    advise_discovery_run_use_case,
+    find_discovery_candidates_use_case,
+    list_discovery_runs_use_case,
+    load_discovery_run_use_case,
+    next_discovery_task_use_case,
+    promote_discovery_candidates_use_case,
+    start_discovery_run_use_case,
+    submit_discovery_step_use_case,
+)
+from tarel.discovery.contracts import DiscoveryRun
 from tarel.entity_resolution.application import (
     EntityResolutionChangeResult,
     decide_entity_resolution_candidate_use_case,
@@ -185,6 +201,7 @@ class Tarel:
     __slots__ = (
         "annotation",
         "context",
+        "discovery",
         "entity_resolution",
         "focus",
         "graph",
@@ -210,6 +227,7 @@ class Tarel:
         self.source = SourceAPI(self.runtime)
         self.semantic = SemanticAPI(self.runtime)
         self.context = ContextAPI(self.runtime)
+        self.discovery = DiscoveryAPI(self.runtime)
         self.entity_resolution = EntityResolutionAPI(self.runtime)
         self.grounding = GroundingAPI(self.runtime)
         self.lineage = LineageAPI(self.runtime)
@@ -1769,6 +1787,119 @@ class RelationshipAPI(_RuntimeAPI):
             edge_id=edge_id,
             state=state,
             reason=reason,
+            runtime=self._runtime,
+        )
+
+
+class DiscoveryAPI(_RuntimeAPI):
+    """Start and continue optional, bounded coding-agent discovery runs."""
+
+    def start(
+        self,
+        kind: str,
+        *,
+        graph: str,
+        sources: tuple[str, ...] = (),
+        question: str | None = None,
+        probe_budget: int = 40,
+        candidate_budget: int = 20,
+        advisor_provider: str | None = None,
+        run_id: str | None = None,
+    ) -> DiscoveryChangeResult:
+        return start_discovery_run_use_case(
+            kind,
+            graph_name=graph,
+            source_names=sources,
+            question=question,
+            probe_budget=probe_budget,
+            candidate_budget=candidate_budget,
+            advisor_provider=advisor_provider,
+            run_id=run_id,
+            runtime=self._runtime,
+        )
+
+    def load(self, run_id: str) -> DiscoveryRun:
+        return load_discovery_run_use_case(run_id, runtime=self._runtime)
+
+    def list(
+        self,
+        *,
+        graph: str | None = None,
+        kind: str | None = None,
+    ) -> tuple[DiscoveryRun, ...]:
+        return list_discovery_runs_use_case(
+            graph_name=graph, kind=kind, runtime=self._runtime
+        )
+
+    def next(self, run_id: str) -> DiscoveryTask:
+        return next_discovery_task_use_case(run_id, runtime=self._runtime)
+
+    def submit(
+        self,
+        run_id: str,
+        *,
+        expected_revision: str,
+        action: str,
+        payload: dict[str, Any],
+        actor: str = "coding_agent",
+    ) -> DiscoveryChangeResult:
+        return submit_discovery_step_use_case(
+            run_id,
+            expected_revision=expected_revision,
+            actor=actor,
+            action=action,
+            payload=payload,
+            runtime=self._runtime,
+        )
+
+    def advise(
+        self,
+        run_id: str,
+        *,
+        expected_revision: str,
+        count: int = 3,
+        model: str | None = None,
+        timeout: float = 120.0,
+    ) -> DiscoveryAdviceResult:
+        return advise_discovery_run_use_case(
+            run_id,
+            expected_revision=expected_revision,
+            count=count,
+            model=model,
+            timeout=timeout,
+            runtime=self._runtime,
+        )
+
+    def promote(
+        self,
+        run_id: str,
+        *,
+        candidates: tuple[str, ...],
+        reason: str,
+    ) -> DiscoveryPromotionResult:
+        """Move selected exact join candidates into graph review as drafts."""
+        return promote_discovery_candidates_use_case(
+            run_id,
+            candidate_ids=candidates,
+            reason=reason,
+            runtime=self._runtime,
+        )
+
+    def find(
+        self,
+        *,
+        graph: str | None = None,
+        kind: str | None = None,
+        include_exploratory: bool = False,
+        query: str | None = None,
+        limit: int = 20,
+    ) -> tuple[DiscoveryMatch, ...]:
+        return find_discovery_candidates_use_case(
+            graph_name=graph,
+            kind=kind,
+            include_exploratory=include_exploratory,
+            query=query,
+            limit=limit,
             runtime=self._runtime,
         )
 
