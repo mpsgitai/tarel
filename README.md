@@ -62,6 +62,9 @@ knowledge, review schema drift, and move from a report or measure back through E
 - **Offers entity hypotheses** — graph-bound normalization candidates remain separate from joins,
   expose aggregate coverage, collisions, confidence, and review state, and can be probed by agents
   before human approval without being presented as facts.
+- **Structures optional discovery loops** — coding agents can evolve bounded join or entity-match
+  programs through resumable support/challenge runs while TAREL validates budgets, revisions,
+  aggregate evidence, and exploratory status without storing SQL or rows.
 - **Imports external semantics** — experimental Apache Ossie, SML, and Cube YAML readers preserve,
   diagnose, and bind supported constructs to stable graph IDs while keeping them separate from
   reviewed TAREL annotations.
@@ -143,6 +146,45 @@ Unreviewed matches use `exploratory_only`; TAREL never executes their rules. Cur
 also be shown as optional violet edges in the local information-space graph. See
 [Entity-resolution candidates](docs/entity-resolution-candidates.md) for the complete contract,
 review commands, retrieval modes, and data boundary.
+
+## Agent-driven discovery runs
+
+Longer join discovery and entity matching are opt-in. Starting a run does not alter the graph,
+normal retrieval, context packets, annotations, or existing entity candidates:
+
+```bash
+tarel discovery start joins \
+  --graph warehouse \
+  --source warehouse-prod \
+  --preset balanced \
+  --question "How are cost centers and accounts connected?"
+
+tarel discovery next RUN_ID --format json
+```
+
+The coding agent proposes typed candidates, executes authorized read-only checks, and submits only
+aggregate support or challenge observations. Candidate parents and generations preserve the AVO
+variation path. A successful challenge is mandatory before selection, and selected results remain
+`exploratory_selected` until a separate review promotes them through an existing TAREL path.
+
+After completing a join run, explicitly move one or more selected exact candidates into the
+relationship review queue as drafts. Repeating `--candidate` keeps a multi-candidate promotion
+atomic; two- and three-field programs remain one ordered composite relationship:
+
+```bash
+tarel discovery promote RUN_ID \
+  --candidate JOIN_CANDIDATE_ID \
+  --reason "Population challenge passed; request data-owner review."
+```
+
+Promotion never validates a relationship. Normalized or transformed programs remain in the
+DiscoveryRun until the graph review contract can preserve their execution semantics.
+
+An optional provider advisor can propose metadata-only candidate batches but receives no database
+tool or samples and cannot record evidence or make decisions. Install the packaged Codex guidance
+in a project with `tarel agent setup codex`. See
+[Optional discovery runs](docs/discovery-runs.md) for the CLI/SDK lifecycle, program contract,
+provider boundary, and current limits.
 
 ## Human in the loop
 
@@ -357,6 +399,8 @@ activates the package explicitly.
 | `tarel knowledge` | Attach bounded Markdown/TXT context to annotation scopes |
 | `tarel relationship` | Add, discover, probe, and review joins |
 | `tarel entity` | Import, retrieve, inspect, and review entity-resolution hypotheses |
+| `tarel discovery` | Run optional resumable join-discovery and entity-matching loops |
+| `tarel agent` | Install optional coding-agent resources such as the discovery skill |
 | `tarel lineage` | Trace static lineage; import sanitized SQL/MongoDB/DuckDB/Python observations |
 | `tarel focus` | Save report- or cube-centred upstream slices |
 | `tarel workspace` | Organize systems, areas, schemas, zones, and cross-graph joins |
@@ -398,6 +442,7 @@ Git and agent-facing context.
 
 - [Architecture](https://github.com/mpsgitai/tarel/blob/master/docs/architecture.md)
 - [Embedded Python SDK](https://github.com/mpsgitai/tarel/blob/master/docs/sdk.md)
+- [Optional discovery runs](https://github.com/mpsgitai/tarel/blob/master/docs/discovery-runs.md)
 - [Retail DWH demo](https://github.com/mpsgitai/tarel/blob/master/docs/retail-demo.md)
 - [Local semantic retrieval](https://github.com/mpsgitai/tarel/blob/master/docs/local-retrieval.md)
 - [Context packet contract](https://github.com/mpsgitai/tarel/blob/master/docs/context-contract.md)

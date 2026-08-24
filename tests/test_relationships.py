@@ -14,6 +14,7 @@ from tarel.graph.refresh import refresh_graph
 from tarel.relationships.core import (
     RelationshipFailure,
     add_manual_relationship,
+    add_manual_relationship_fields,
     add_profile_candidates,
     candidate_pairs,
     decide_relationship,
@@ -97,6 +98,33 @@ class RelationshipTests(TestCase):
 
         refreshed, report = refresh_graph(graph, _anonymous_graph(declared_relationship=True))
 
+        self.assertEqual(report.superseded_relationships, 1)
+        self.assertEqual(
+            [edge.type for edge in usable_relationships(refreshed)],
+            ["foreign_key"],
+        )
+
+    def test_declared_composite_key_supersedes_one_composite_review_candidate(self) -> None:
+        graph = _anonymous_graph()
+        graph, candidate = add_manual_relationship_fields(
+            graph,
+            from_references=("x.A001.C001", "x.A001.C002"),
+            to_references=("x.B001.Z9", "x.B001.Z10"),
+            reason="Population-tested composite candidate.",
+            validated=False,
+            origin="discovery_run",
+        )
+
+        refreshed, report = refresh_graph(
+            graph,
+            _anonymous_graph(
+                declared_relationship=True,
+                composite_relationship=True,
+            ),
+        )
+
+        self.assertEqual(candidate.metadata["from_fields"], ["C001", "C002"])
+        self.assertEqual(candidate.metadata["to_fields"], ["Z9", "Z10"])
         self.assertEqual(report.superseded_relationships, 1)
         self.assertEqual(
             [edge.type for edge in usable_relationships(refreshed)],
@@ -213,7 +241,11 @@ class RelationshipTests(TestCase):
         self.assertNotIn("sample_values", metadata)
 
 
-def _anonymous_graph(*, declared_relationship: bool = False):
+def _anonymous_graph(
+    *,
+    declared_relationship: bool = False,
+    composite_relationship: bool = False,
+):
     return build_graph_from_catalog(
         "mystery",
         CatalogResult(
@@ -235,7 +267,10 @@ def _anonymous_graph(*, declared_relationship: bool = False):
                     namespace="x",
                     name="B001",
                     kind="table",
-                    fields=(CatalogField("Z9", 1, "int", False),),
+                    fields=(
+                        CatalogField("Z9", 1, "int", False),
+                        CatalogField("Z10", 2, "int", False),
+                    ),
                 ),
             ),
             relationships=(
@@ -243,10 +278,14 @@ def _anonymous_graph(*, declared_relationship: bool = False):
                     name="FK_A001_B001",
                     from_namespace="x",
                     from_object="A001",
-                    from_fields=("C001",),
+                    from_fields=("C001", "C002")
+                    if composite_relationship
+                    else ("C001",),
                     to_namespace="x",
                     to_object="B001",
-                    to_fields=("Z9",),
+                    to_fields=("Z9", "Z10")
+                    if composite_relationship
+                    else ("Z9",),
                 ),
             )
             if declared_relationship

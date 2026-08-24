@@ -11,7 +11,7 @@ CLI · Python SDK · local browser UI
        application use cases
                  │
                  ▼
- graph · annotation · semantic import · lineage · workspace · retrieval
+ graph · annotation · semantic import · lineage · discovery · workspace · retrieval
                  │
                  ▼
  connectors · providers · file stores · optional indexes
@@ -26,7 +26,7 @@ compose application use cases, but they do not own a second implementation of th
 |---|---|---|
 | Entry adapters | `tarel.cli`, `tarel.sdk`, `tarel.ui` | Parse input, call use cases, render typed results |
 | Application | `tarel.application`, `tarel.grounding_application`, domain `application.py` modules | Coordinate stores, domain transformations, and explicit side effects |
-| Domain | `graph`, `annotations`, `semantics`, `lineage`, `focus`, `relationships`, `workspaces`, `context`, `grounding` | Contracts, validation, revisions, review state, traversal, and deterministic compilation |
+| Domain | `graph`, `annotations`, `semantics`, `lineage`, `discovery`, `focus`, `relationships`, `workspaces`, `context`, `grounding` | Contracts, validation, revisions, review state, traversal, and deterministic compilation |
 | Infrastructure | `connectors`, `providers`, `retrieval`, domain stores | Observe external systems and persist local rebuildable state |
 | Runtime | `tarel.runtime` | Bind one SDK client to an explicit local state root |
 
@@ -116,7 +116,9 @@ TAREL deliberately has a few narrow extension seams:
 - **Connectors** normalize read-only probes, catalog discovery, bounded sampling, and relationship
   evidence. Reviewed external packages register through the `tarel.connectors` entry-point group.
 - **Providers** return schema-validated annotation or lineage workfiles. Provider profiles and
-  credentials stay outside persisted graphs and context packets.
+  metadata-only discovery hypotheses. Provider profiles and credentials stay outside persisted
+  graphs, discovery runs, and context packets. Providers cannot record discovery evidence or make
+  discovery decisions.
 - **Semantic readers** preserve an external semantic model, normalize supported constructs, and
   bind only exact matches to a TAREL graph. Apache Ossie, SML, and Cube YAML exercise one internal
   contract. A public plugin ABI waits until that contract has survived broader format coverage and
@@ -135,6 +137,7 @@ The selected state root contains revisioned JSON documents and rebuildable index
 .tarel/
 ├── sources/
 ├── graphs/
+├── discovery/
 ├── semantic-imports/
 ├── lineage/
 ├── focus/
@@ -150,6 +153,13 @@ optional future adapter.
 
 Enrichment workfiles are intentionally absent from this tree. A caller may redirect one to a
 private location, but TAREL does not place raw samples in graphs, indexes, or context packets.
+
+Experimental discovery documents retain typed candidate programs, their AVO-style parent and
+generation lineage, aggregate observations, decisions, and step ordering. They omit query/code
+text, raw rows, samples, credentials, connection details, volatile source paths, and free-form
+database errors. Discovery is opt-in and does not alter graph or context behavior unless a caller
+explicitly promotes selected exact joins into the existing relationship review queue. That bridge
+preserves composite field ordering, writes drafts only, and leaves validation human-controlled.
 
 ## Public surface
 

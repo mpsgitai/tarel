@@ -92,21 +92,101 @@ def add_manual_relationship(
     reason: str,
     validated: bool,
 ) -> tuple[GraphDocument, GraphEdge]:
+    return add_manual_relationship_fields(
+        graph,
+        from_references=(_from_reference(pair),),
+        to_references=(_to_reference(pair),),
+        reason=reason,
+        validated=validated,
+    )
+
+
+def add_manual_relationship_fields(
+    graph: GraphDocument,
+    *,
+    from_references: tuple[str, ...],
+    to_references: tuple[str, ...],
+    reason: str,
+    validated: bool,
+    origin: str = "human",
+    provenance: dict[str, object] | None = None,
+) -> tuple[GraphDocument, GraphEdge]:
+    """Add one reviewable relationship whose ordered field pairs form one join."""
     if not reason.strip():
         raise RelationshipFailure(
             "missing_relationship_reason",
-            "A human relationship requires a non-empty reason.",
+            "A relationship requires a non-empty reason.",
         )
-    _ensure_pair_is_new(graph, pair)
-    source = resolve_field(graph, _from_reference(pair))
-    target = resolve_field(graph, _to_reference(pair))
-    edge = _candidate_edge(
-        source,
-        target,
-        origin="human",
-        state="validated" if validated else "draft",
-        reason=reason.strip(),
-        profile=None,
+    if not 1 <= len(from_references) <= 3 or len(from_references) != len(
+        to_references
+    ):
+        raise RelationshipFailure(
+            "invalid_relationship_fields",
+            "A relationship requires one to three ordered source/target field pairs.",
+        )
+    sources = tuple(resolve_field(graph, reference) for reference in from_references)
+    targets = tuple(resolve_field(graph, reference) for reference in to_references)
+    if len({item.field_node.id for item in sources}) != len(sources) or len(
+        {item.field_node.id for item in targets}
+    ) != len(targets):
+        raise RelationshipFailure(
+            "invalid_relationship_fields",
+            "Relationship field lists cannot contain duplicates.",
+        )
+    source_object_ids = {item.object_node.id for item in sources}
+    target_object_ids = {item.object_node.id for item in targets}
+    if len(source_object_ids) != 1 or len(target_object_ids) != 1:
+        raise RelationshipFailure(
+            "invalid_relationship_fields",
+            "All source fields and all target fields must belong to one object each.",
+        )
+    if any(
+        source.field_node.id == target.field_node.id
+        for source, target in zip(sources, targets, strict=True)
+    ):
+        raise RelationshipFailure(
+            "invalid_relationship_fields",
+            "Relationship endpoints must be different fields.",
+        )
+    source_fields = tuple(item.field_node.label for item in sources)
+    target_fields = tuple(item.field_node.label for item in targets)
+    _ensure_relationship_is_new(
+        graph,
+        source_object_id=sources[0].object_node.id,
+        target_object_id=targets[0].object_node.id,
+        source_fields=source_fields,
+        target_fields=target_fields,
+    )
+    digest_input = "\n".join(
+        [
+            *(item.field_node.id for item in sources),
+            "->",
+            *(item.field_node.id for item in targets),
+        ]
+    )
+    metadata: dict[str, object] = {
+        "candidate_kind": "join_candidate",
+        "from_fields": list(source_fields),
+        "from_namespace": str(sources[0].object_node.metadata["namespace"]),
+        "from_object": str(sources[0].object_node.metadata["name"]),
+        "origin": origin,
+        "reason": reason.strip(),
+        "state": "validated" if validated else "draft",
+        "to_fields": list(target_fields),
+        "to_namespace": str(targets[0].object_node.metadata["namespace"]),
+        "to_object": str(targets[0].object_node.metadata["name"]),
+    }
+    if len(source_fields) == 1:
+        metadata["from_field"] = source_fields[0]
+        metadata["to_field"] = target_fields[0]
+    if provenance is not None:
+        metadata["provenance"] = dict(provenance)
+    edge = GraphEdge(
+        id=f"relationship_candidate:{hashlib.sha256(digest_input.encode()).hexdigest()[:20]}",
+        source_id=sources[0].object_node.id,
+        target_id=targets[0].object_node.id,
+        type="relationship_candidate",
+        metadata=metadata,
     )
     return replace(graph, edges=(*graph.edges, edge)), edge
 
@@ -425,9 +505,11 @@ def _candidate_edge(
     metadata: dict[str, object] = {
         **pair.to_dict(),
         "candidate_kind": "join_candidate",
+        "from_fields": [pair.from_field],
         "origin": origin,
         "reason": reason,
         "state": state,
+        "to_fields": [pair.to_field],
     }
     if profile is not None:
         confidence = 0.2 + (0.35 * profile.source_coverage)
@@ -458,26 +540,71 @@ def _candidate_edge(
 
 
 def _ensure_pair_is_new(graph: GraphDocument, pair: RelationshipPair) -> None:
-    if _pair_exists(graph, pair):
+    _ensure_relationship_is_new(
+        graph,
+        source_object_id=resolve_field(graph, _from_reference(pair)).object_node.id,
+        target_object_id=resolve_field(graph, _to_reference(pair)).object_node.id,
+        source_fields=(pair.from_field,),
+        target_fields=(pair.to_field,),
+    )
+
+
+def _ensure_relationship_is_new(
+    graph: GraphDocument,
+    *,
+    source_object_id: str,
+    target_object_id: str,
+    source_fields: tuple[str, ...],
+    target_fields: tuple[str, ...],
+) -> None:
+    if _relationship_exists(
+        graph,
+        source_object_id=source_object_id,
+        target_object_id=target_object_id,
+        source_fields=source_fields,
+        target_fields=target_fields,
+    ):
         raise RelationshipFailure(
             "relationship_exists",
-            f"Relationship already exists: {_from_reference(pair)} -> {_to_reference(pair)}",
+            "Relationship already exists for the selected ordered field pairs.",
         )
 
 
 def _pair_exists(graph: GraphDocument, pair: RelationshipPair) -> bool:
+    source = resolve_field(graph, _from_reference(pair))
+    target = resolve_field(graph, _to_reference(pair))
+    return _relationship_exists(
+        graph,
+        source_object_id=source.object_node.id,
+        target_object_id=target.object_node.id,
+        source_fields=(pair.from_field,),
+        target_fields=(pair.to_field,),
+    )
+
+
+def _relationship_exists(
+    graph: GraphDocument,
+    *,
+    source_object_id: str,
+    target_object_id: str,
+    source_fields: tuple[str, ...],
+    target_fields: tuple[str, ...],
+) -> bool:
     for edge in graph.edges:
+        if edge.type not in {"foreign_key", "relationship_candidate"}:
+            continue
         metadata = edge.metadata
-        if edge.type in {"foreign_key", "relationship_candidate"} and (
-            metadata.get("from_fields") == [pair.from_field]
-            and metadata.get("to_fields") == [pair.to_field]
-            and graph.node_by_id()[edge.source_id].label
-            == f"{pair.from_namespace}.{pair.from_object}"
-            and graph.node_by_id()[edge.target_id].label == f"{pair.to_namespace}.{pair.to_object}"
-        ):
-            return True
-        if edge.type == "relationship_candidate" and all(
-            metadata.get(key) == value for key, value in pair.to_dict().items()
+        existing_source_fields = metadata.get("from_fields")
+        existing_target_fields = metadata.get("to_fields")
+        if not isinstance(existing_source_fields, list):
+            existing_source_fields = [metadata.get("from_field")]
+        if not isinstance(existing_target_fields, list):
+            existing_target_fields = [metadata.get("to_field")]
+        if (
+            edge.source_id == source_object_id
+            and edge.target_id == target_object_id
+            and existing_source_fields == list(source_fields)
+            and existing_target_fields == list(target_fields)
         ):
             return True
     return False

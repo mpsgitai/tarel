@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from tarel import __version__
+from tarel.agents import AgentSetupFailure
 from tarel.annotations.contracts import AnnotationFailure, AnnotationTask
 from tarel.annotations.review import AnnotationReviewRecord
 from tarel.application import (
@@ -86,6 +87,8 @@ from tarel.connectors.contracts import (
 )
 from tarel.context import DEFAULT_MAX_CONTEXT_CHARACTERS, ContextFailure, ContextResult
 from tarel.demo import DemoFailure
+from tarel.discovery.cli import add_discovery_commands, dispatch_discovery
+from tarel.discovery.contracts import DiscoveryFailure
 from tarel.entity_resolution.cli import (
     add_entity_resolution_commands,
     dispatch_entity_resolution,
@@ -726,6 +729,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_lineage_commands(subcommands)
     add_semantic_commands(subcommands)
     add_entity_resolution_commands(subcommands)
+    add_discovery_commands(subcommands)
 
     focus = subcommands.add_parser(
         "focus",
@@ -1116,6 +1120,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         entity_result = dispatch_entity_resolution(args)
         if entity_result is not None:
             return entity_result
+
+        discovery_result = dispatch_discovery(args)
+        if discovery_result is not None:
+            return discovery_result
 
         if args.command == "focus" and args.focus_command == "build":
             result = build_focus_use_case(
@@ -2220,10 +2228,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             _render_relationship_payload(payload, output_format=args.format)
             return 0
     except (
+        AgentSetupFailure,
         AnnotationFailure,
         ConnectorFailure,
         ContextFailure,
         DemoFailure,
+        DiscoveryFailure,
         EntityResolutionFailure,
         FocusFailure,
         GraphFailure,
@@ -2521,10 +2531,17 @@ def _render_relationship_payload(payload: dict[str, object], *, output_format: s
             if isinstance(candidate, dict):
                 metadata = candidate.get("metadata", {})
                 if isinstance(metadata, dict):
+                    from_fields = metadata.get("from_fields")
+                    to_fields = metadata.get("to_fields")
+                    if not isinstance(from_fields, list):
+                        from_fields = [metadata.get("from_field")]
+                    if not isinstance(to_fields, list):
+                        to_fields = [metadata.get("to_field")]
                     print(
-                        f"- {metadata.get('from_namespace')}.{metadata.get('from_object')}."
-                        f"{metadata.get('from_field')} -> {metadata.get('to_namespace')}."
-                        f"{metadata.get('to_object')}.{metadata.get('to_field')} "
+                        f"- {metadata.get('from_namespace')}.{metadata.get('from_object')}"
+                        f"({', '.join(str(item) for item in from_fields)}) -> "
+                        f"{metadata.get('to_namespace')}.{metadata.get('to_object')}"
+                        f"({', '.join(str(item) for item in to_fields)}) "
                         f"[{metadata.get('state')}]"
                     )
         if "probed_pairs" in payload:
