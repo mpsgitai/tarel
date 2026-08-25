@@ -55,6 +55,7 @@ DISCOVERY_BLOCKING_STRATEGIES = frozenset(
         "token_prefix",
     }
 )
+DISCOVERY_SELF_PAIR_POLICIES = frozenset({"distinct_unordered"})
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -105,6 +106,32 @@ class DiscoveryTransform:
 
 
 @dataclass(frozen=True, slots=True)
+class DiscoverySelfMatch:
+    """Record identity semantics for comparisons within one graph object."""
+
+    record_key_field: str
+    pair_policy: str = "distinct_unordered"
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "pair_policy": self.pair_policy,
+            "record_key_field": self.record_key_field,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DiscoverySelfMatch:
+        _fields(data, {"pair_policy", "record_key_field"}, "self-match program")
+        return cls(
+            record_key_field=_text(data.get("record_key_field"), "record_key_field"),
+            pair_policy=_choice(
+                data.get("pair_policy"),
+                "self-match pair policy",
+                DISCOVERY_SELF_PAIR_POLICIES,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class DiscoveryProgram:
     kind: str
     source_fields: tuple[str, ...]
@@ -115,9 +142,10 @@ class DiscoveryProgram:
     blocking_field_indexes: tuple[int, ...]
     contradiction_field_indexes: tuple[int, ...]
     threshold: float | None = None
+    self_match: DiscoverySelfMatch | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "blocking_field_indexes": list(self.blocking_field_indexes),
             "comparison": self.comparison,
             "contradiction_field_indexes": list(self.contradiction_field_indexes),
@@ -134,6 +162,9 @@ class DiscoveryProgram:
             ],
             "threshold": self.threshold,
         }
+        if self.self_match is not None:
+            payload["self_match"] = self.self_match.to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DiscoveryProgram:
@@ -151,7 +182,13 @@ class DiscoveryProgram:
                 "threshold",
             },
             "discovery program",
+            optional={"self_match"},
         )
+        self_match = data.get("self_match")
+        if self_match is not None and not isinstance(self_match, dict):
+            raise DiscoveryFailure(
+                "invalid_discovery", "self_match must be an object or null."
+            )
         program = cls(
             kind=_choice(data.get("kind"), "discovery kind", DISCOVERY_KINDS),
             source_fields=_string_array(data.get("source_fields"), "source_fields"),
@@ -173,6 +210,11 @@ class DiscoveryProgram:
                 "contradiction_field_indexes",
             ),
             threshold=_optional_rate(data.get("threshold"), "threshold"),
+            self_match=(
+                DiscoverySelfMatch.from_dict(self_match)
+                if isinstance(self_match, dict)
+                else None
+            ),
         )
         validate_discovery_program(program)
         return program
@@ -760,6 +802,10 @@ def validate_discovery_program(program: DiscoveryProgram) -> None:
         raise DiscoveryFailure(
             "invalid_discovery", "Join programs do not accept entity blocking or guards."
         )
+    if program.kind == "join_discovery" and program.self_match is not None:
+        raise DiscoveryFailure(
+            "invalid_discovery", "Join programs do not accept self-entity semantics."
+        )
     if program.kind == "join_discovery" and program.source_fields == program.target_fields:
         raise DiscoveryFailure(
             "invalid_discovery", "Join programs require different source and target fields."
@@ -775,6 +821,32 @@ def validate_discovery_program(program: DiscoveryProgram) -> None:
                 "invalid_discovery",
                 "Entity programs require blocking indexes over comparison fields.",
             )
+        if program.self_match is None and any(
+            source == target
+            for source, target in zip(
+                program.source_fields, program.target_fields, strict=True
+            )
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Equal entity field pairs require an explicit self_match program.",
+            )
+        if program.self_match is not None:
+            if program.source_fields != program.target_fields:
+                raise DiscoveryFailure(
+                    "invalid_discovery",
+                    "Self-entity programs require identical ordered source and target fields.",
+                )
+            if program.source_transforms != program.target_transforms:
+                raise DiscoveryFailure(
+                    "invalid_discovery",
+                    "Self-entity programs require identical source and target transforms.",
+                )
+            if program.self_match.record_key_field in program.source_fields:
+                raise DiscoveryFailure(
+                    "invalid_discovery",
+                    "The self-entity record key must be separate from comparison fields.",
+                )
     for transforms in (*program.source_transforms, *program.target_transforms):
         if len(transforms) > _MAX_TRANSFORMS:
             raise DiscoveryFailure(
@@ -996,6 +1068,16 @@ def _record_observation(
     if candidate.state in {"selected", "rejected"}:
         raise DiscoveryFailure(
             "discovery_action_not_allowed", "Terminal candidates cannot receive observations."
+        )
+    if (
+        candidate.program.self_match is not None
+        and observation.status == "succeeded"
+        and observation.metrics is not None
+        and observation.metrics.basis != "pairs"
+    ):
+        raise DiscoveryFailure(
+            "invalid_discovery",
+            "Self-entity observations must report canonical distinct-record pairs.",
         )
     if any(
         observation.id == current.id

@@ -8,6 +8,7 @@ from tarel.discovery.contracts import (
     DiscoveryObservation,
     DiscoveryProgram,
     DiscoveryRun,
+    DiscoverySelfMatch,
     DiscoveryTransform,
 )
 from tarel.entity_resolution.contracts import (
@@ -17,6 +18,7 @@ from tarel.entity_resolution.contracts import (
     EntityResolutionProvenance,
     EntityResolutionQuality,
     EntityResolutionRule,
+    SelfEntityMatch,
 )
 from tarel.grounding import GroundingAsset, GroundingBundle, LineageTarget, SourceTarget
 from tarel.knowledge.contracts import KnowledgeContext, KnowledgeDocument, KnowledgeReference
@@ -34,6 +36,7 @@ __all__ = [
     "DiscoveryObservation",
     "DiscoveryProgram",
     "DiscoveryRun",
+    "DiscoverySelfMatch",
     "DiscoveryTransform",
     "EntityResolutionCandidate",
     "EntityResolutionEvidence",
@@ -41,6 +44,7 @@ __all__ = [
     "EntityResolutionProvenance",
     "EntityResolutionQuality",
     "EntityResolutionRule",
+    "SelfEntityMatch",
     "GroundingAsset",
     "GroundingBundle",
     "LineageTarget",

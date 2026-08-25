@@ -160,7 +160,11 @@ text, raw rows, samples, credentials, connection details, volatile source paths,
 database errors. Discovery is opt-in and does not alter graph or context behavior unless a caller
 explicitly promotes a selected candidate. Exact joins enter relationship review as drafts. Entity
 programs enter the separate entity-resolution store as unreviewed candidates with versioned
-execution identity and TAREL-computed quality. Both bridges leave validation human-controlled.
+execution identity and TAREL-computed quality. Explicit Self-Entity programs additionally bind one
+object, a separate technical record key, comparison/guard fields, and canonical unordered-pair
+semantics; external callers still own matching and grouping. Equivalent unreviewed Self-Entity
+evidence advances through an explicit immutable supersede chain. Both bridges leave validation
+human-controlled.
 
 ## Public surface
 

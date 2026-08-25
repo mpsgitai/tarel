@@ -1876,12 +1876,14 @@ class DiscoveryAPI(_RuntimeAPI):
         *,
         candidates: tuple[str, ...],
         reason: str,
+        supersedes: str | None = None,
     ) -> DiscoveryPromotionResult:
         """Move a selected candidate into its bounded review path."""
         return promote_discovery_candidates_use_case(
             run_id,
             candidate_ids=candidates,
             reason=reason,
+            supersedes_candidate_id=supersedes,
             runtime=self._runtime,
         )
 

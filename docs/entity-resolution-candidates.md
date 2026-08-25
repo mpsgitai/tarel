@@ -3,6 +3,8 @@
 TAREL has an experimental, graph-bound contract for entity-resolution hypotheses. It keeps
 identity matching separate from technical joins: an `entity_resolution_candidate` says that two
 fields may support a record-identity rule, not that they are a foreign key or an executable join.
+Its explicit Self-Entity form instead says that distinct technical records inside one object may
+represent the same real entity.
 
 Candidates are available to CLI and SDK callers before human review. Every unreviewed match is
 labelled `exploratory_only`, requires runtime validation, and carries its measured evidence. TAREL
@@ -144,6 +146,56 @@ Warnings are bounded codes rather than prose: `counterexamples_observed`,
 `failed_probes_present`, `low_coverage`, `mixed_executors`, `sample_only`, `support_missing`.
 They remain visible in the CLI, SDK, and browser projection.
 
+### Self-Entity v0.2 projection
+
+A Self-Entity candidate uses equal primary endpoints intentionally because the matcher compares
+different rows, not a field with itself. Its additional `self_match` block removes that ambiguity:
+
+```json
+{
+  "source_field_id": "tracks-title-field",
+  "target_field_id": "tracks-title-field",
+  "program": {
+    "kind": "entity_matching",
+    "source_fields": ["tracks-title-field", "tracks-artist-field"],
+    "target_fields": ["tracks-title-field", "tracks-artist-field"],
+    "source_transforms": [
+      [{"kind": "casefold", "start": null, "length": null}],
+      [{"kind": "casefold", "start": null, "length": null}]
+    ],
+    "target_transforms": [
+      [{"kind": "casefold", "start": null, "length": null}],
+      [{"kind": "casefold", "start": null, "length": null}]
+    ],
+    "comparison": "token_set_ratio_v1",
+    "threshold": 0.6,
+    "blocking_field_indexes": [0],
+    "contradiction_field_indexes": [1],
+    "self_match": {
+      "record_key_field": "tracks-id-field",
+      "pair_policy": "distinct_unordered"
+    }
+  },
+  "self_match": {
+    "object_id": "tracks-object",
+    "record_key_field_id": "tracks-id-field",
+    "comparison_field_ids": ["tracks-title-field"],
+    "contradiction_field_ids": ["tracks-artist-field"],
+    "pair_policy": "distinct_unordered"
+  }
+}
+```
+
+The outer block is the retrieval- and GUI-friendly graph projection; the nested program is the
+exact discovery semantics. `distinct_unordered` means the caller must exclude equal record keys
+and count A/B only once. Successful support and challenge evidence must therefore use the `pairs`
+metric basis. TAREL validates the declaration and aggregates but does not receive technical keys,
+pair rows, assignments, or entity groups and does not execute the matcher.
+
+All record, comparison, and contradiction fields must resolve to `object_id`. The record key must
+be separate from every scoring or guard field. Equal endpoints without this typed Self-Entity block
+are rejected during discovery proposal, not deferred until promotion.
+
 ## CLI
 
 ```bash
@@ -197,6 +249,13 @@ tarel discovery promote entity-customer-v1 \
   --candidate customer-name-token-v2 \
   --reason "Offer the challenged rule for runtime validation." \
   --format json
+
+# A later equivalent Self-Entity run must name its active unreviewed predecessor.
+tarel discovery promote entity-customer-v2 \
+  --candidate customer-name-self-v2 \
+  --supersedes discovery.entity-customer-v1.customer-name-self-v1 \
+  --reason "Replace the earlier candidate with stronger population evidence." \
+  --format json
 ```
 
 See [Optional discovery runs](discovery-runs.md) for complete proposal and observation payloads,
@@ -234,7 +293,7 @@ confirmed = tarel.entity_resolution.find(
 ```
 
 CLI and SDK call the same application use cases. The public SDK also exports the typed candidate,
-rule, evidence, provenance, and match values.
+rule, evidence, provenance, match, `DiscoverySelfMatch`, and `SelfEntityMatch` values.
 
 ## Retrieval policy
 
@@ -261,6 +320,13 @@ Approval changes `state` to `reviewed`, `usage` to `confirmed`, and
 `requires_runtime_validation` to false. Rejection removes the candidate from all `find` results
 without deleting its audit artifact.
 
+When a new Self-Entity promotion explicitly supersedes an equivalent active candidate, normal
+`find` results and the browser omit the predecessor. `list` and `show` retain both immutable
+evidence revisions, and the new provenance names `supersedes_candidate_id`. Promotion cannot
+silently supersede a reviewed decision, an unrelated program, or an already superseded revision.
+The superseded predecessor is immutable audit history and cannot receive a later review; review
+the active successor instead.
+
 Only candidates bound to the current graph revision are returned by `find` or projected into the
 browser. `list` and `show` retain older candidates for audit. This prevents a rule from silently
 surviving changed field topology.
@@ -273,7 +339,9 @@ stored `GraphDocument` or its revision. Normal relationship expansion and contex
 cannot consume them.
 
 The browser lists candidate evidence, quality rating, threshold, executor identity, blocking
-strategy, and quality warnings in each connected table inspector. A disabled-by-default
+strategy, and quality warnings in each connected table inspector. A Self-Entity card additionally
+shows object, record key, comparison fields, contradiction guards, and pair policy. A
+disabled-by-default
 **Entity candidates** toggle renders unreviewed candidates as dashed violet edges and reviewed
 rules as solid violet edges. The projection includes aggregate evidence and provenance, never raw
 records.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,7 @@ def import_entity_resolution_candidate_use_case(
     graph = _graph_store(runtime).load(candidate.graph_name)
     _validate_candidate_binding(candidate, graph)
     store = _entity_store(runtime)
+    _validate_self_supersede(candidate, store)
     if store.exists(candidate.id):
         current = store.load(candidate.id)
         if current == candidate:
@@ -114,14 +116,21 @@ def find_entity_resolution_candidates_for_graph_use_case(
         )
     source_id = _resolve_optional_field(graph, source)
     target_id = _resolve_optional_field(graph, target)
+    stored_candidates = list_entity_resolution_candidates_use_case(
+        graph_name=graph.name,
+        runtime=runtime,
+    )
+    superseded_ids = {
+        item.provenance.supersedes_candidate_id
+        for item in stored_candidates
+        if item.provenance.supersedes_candidate_id is not None
+    }
     candidates = [
         item
-        for item in list_entity_resolution_candidates_use_case(
-            graph_name=graph.name,
-            runtime=runtime,
-        )
+        for item in stored_candidates
         if item.graph_revision == graph_revision(graph)
         and item.state != "rejected"
+        and item.id not in superseded_ids
         and (source_id is None or item.source_field_id == source_id)
         and (target_id is None or item.target_field_id == target_id)
     ]
@@ -155,6 +164,14 @@ def decide_entity_resolution_candidate_use_case(
 ) -> EntityResolutionChangeResult:
     store = _entity_store(runtime)
     candidate = store.load(candidate_id)
+    if any(
+        store.load(current_id).provenance.supersedes_candidate_id == candidate_id
+        for current_id in store.list()
+    ):
+        raise EntityResolutionFailure(
+            "entity_resolution_superseded",
+            "The candidate is immutable audit history; review its active successor.",
+        )
     if expected_revision is not None and candidate.revision != expected_revision:
         raise EntityResolutionFailure(
             "stale_entity_resolution_candidate",
@@ -181,11 +198,32 @@ def _validate_candidate_binding(
         )
     source = _field_by_id(graph, candidate.source_field_id)
     target = _field_by_id(graph, candidate.target_field_id)
-    if source.id == target.id:
+    if source.id == target.id and candidate.self_match is None:
         raise EntityResolutionFailure(
             "invalid_entity_resolution",
-            "Entity-resolution endpoints must be different fields.",
+            "Equal entity-resolution endpoints require explicit self-entity semantics.",
         )
+    if candidate.self_match is not None:
+        self_match = candidate.self_match
+        object_node = graph.node_by_id().get(self_match.object_id)
+        if object_node is None or object_node.type not in {"table", "view"}:
+            raise EntityResolutionFailure(
+                "entity_resolution_object_not_found",
+                "Self-entity matching requires one current graph object.",
+            )
+        bound_fields = (
+            self_match.record_key_field_id,
+            *self_match.comparison_field_ids,
+            *self_match.contradiction_field_ids,
+        )
+        for field_id in bound_fields:
+            field = _field_by_id(graph, field_id)
+            if str(field.metadata.get("object_id") or "") != object_node.id:
+                raise EntityResolutionFailure(
+                    "invalid_entity_resolution",
+                    "Self-entity record, comparison, and contradiction fields must belong "
+                    "to the declared object.",
+                )
     if candidate.program is not None:
         for source_field_id, target_field_id in zip(
             candidate.program.source_fields,
@@ -194,7 +232,7 @@ def _validate_candidate_binding(
         ):
             _field_by_id(graph, source_field_id)
             _field_by_id(graph, target_field_id)
-            if source_field_id == target_field_id:
+            if source_field_id == target_field_id and candidate.self_match is None:
                 raise EntityResolutionFailure(
                     "invalid_entity_resolution",
                     "Entity-resolution program field pairs must use different fields.",
@@ -215,6 +253,60 @@ def _match(
 def _field_pair(candidate: EntityResolutionCandidate) -> tuple[str, str]:
     first, second = sorted((candidate.source_field_id, candidate.target_field_id))
     return first, second
+
+
+def _validate_self_supersede(
+    candidate: EntityResolutionCandidate,
+    store: FileEntityResolutionStore,
+) -> None:
+    if candidate.self_match is None:
+        return
+    existing = tuple(store.load(candidate_id) for candidate_id in store.list())
+    superseded_ids = {
+        item.provenance.supersedes_candidate_id
+        for item in existing
+        if item.provenance.supersedes_candidate_id is not None
+    }
+    equivalent = tuple(
+        item
+        for item in existing
+        if item.id != candidate.id
+        and item.state == "candidate"
+        and item.id not in superseded_ids
+        and _self_semantic_key(item) == _self_semantic_key(candidate)
+    )
+    supersedes = candidate.provenance.supersedes_candidate_id
+    if supersedes is None:
+        if equivalent:
+            ids = ", ".join(item.id for item in equivalent)
+            raise EntityResolutionFailure(
+                "entity_resolution_supersede_required",
+                "Equivalent self-entity evidence already exists; explicitly supersede one "
+                f"candidate: {ids}",
+            )
+        return
+    target = next((item for item in equivalent if item.id == supersedes), None)
+    if target is None:
+        raise EntityResolutionFailure(
+            "invalid_entity_resolution_supersede",
+            "A self-entity candidate may supersede only one active, unreviewed, "
+            "semantically equivalent candidate.",
+        )
+
+
+def _self_semantic_key(candidate: EntityResolutionCandidate) -> str | None:
+    if candidate.self_match is None or candidate.program is None:
+        return None
+    execution = candidate.execution
+    payload = {
+        "graph_name": candidate.graph_name,
+        "graph_revision": candidate.graph_revision,
+        "program": candidate.program.to_dict(),
+        "self_match": candidate.self_match.to_dict(),
+        "blocking_strategy": execution.blocking_strategy if execution else None,
+        "blocking_version": execution.blocking_version if execution else None,
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 def _field_by_id(graph: GraphDocument, field_id: str) -> GraphNode:
