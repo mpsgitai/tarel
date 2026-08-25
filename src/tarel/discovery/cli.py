@@ -78,6 +78,10 @@ def add_discovery_commands(
         "--candidate", action="append", required=True, dest="candidate_ids"
     )
     promote.add_argument("--reason", required=True)
+    promote.add_argument(
+        "--supersedes",
+        help="Active equivalent self-entity candidate replaced by this evidence revision.",
+    )
     _format(promote)
 
     show = commands.add_parser("show", help="Show one complete sanitized run document.")
@@ -181,6 +185,7 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
             args.run_id,
             candidate_ids=tuple(args.candidate_ids),
             reason=args.reason,
+            supersedes_candidate_id=args.supersedes,
         )
         _render(
             {

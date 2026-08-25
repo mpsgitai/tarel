@@ -29,6 +29,12 @@ read-only checks; TAREL does not become a general SQL executor or make entity-re
 8. After completing an entity run, promote at most one selected candidate per command. Promotion
    requires measured collisions/counterexamples and a non-empty challenge. The resulting entity
    candidate remains exploratory until explicit review.
+9. For within-object identity, use explicit `self_match` metadata with a separate record-key field
+   and `distinct_unordered` pair policy. Exclude equal record keys, canonicalize A/B and B/A as one
+   pair, and report successful evidence with `metrics.basis: pairs`.
+10. If equivalent Self-Entity evidence already exists, do not discard the new run or overwrite the
+    old artifact. Inspect the predecessor, then use `discovery promote --supersedes ID` only when
+    it is the active unreviewed form of the same typed program.
 
 Read [references/join-discovery.md](references/join-discovery.md) for join runs and
 [references/entity-matching.md](references/entity-matching.md) for entity runs.

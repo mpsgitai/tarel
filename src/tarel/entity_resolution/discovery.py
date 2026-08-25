@@ -18,6 +18,7 @@ from tarel.entity_resolution.contracts import (
     EntityResolutionEvidence,
     EntityResolutionProvenance,
     EntityResolutionQuality,
+    SelfEntityMatch,
     entity_resolution_quality_rating,
     validate_entity_resolution_candidate,
 )
@@ -31,6 +32,7 @@ def entity_candidate_from_discovery(
     graph: GraphDocument,
     *,
     reason: str,
+    supersedes_candidate_id: str | None = None,
 ) -> EntityResolutionCandidate:
     if run.kind != "entity_matching" or candidate.kind != "entity_matching":
         raise DiscoveryFailure(
@@ -69,6 +71,7 @@ def entity_candidate_from_discovery(
     _require_measured_risk(challenge.metrics)
     quality = _quality(candidate, support=support, challenge=challenge)
     program = _program_with_field_ids(candidate.program, graph)
+    self_match = _self_match(program, graph)
     producer = next(
         (
             step.actor
@@ -92,10 +95,12 @@ def entity_candidate_from_discovery(
             discovery_run_revision=run.revision,
             observation_ids=tuple(item.id for item in candidate.observations),
             promotion_reason=reason,
+            supersedes_candidate_id=supersedes_candidate_id,
         ),
         program=program,
         execution=challenge.execution,
         quality=quality,
+        self_match=self_match,
         contract_version=ENTITY_RESOLUTION_CONTRACT_VERSION,
     )
     validate_entity_resolution_candidate(entity_candidate)
@@ -252,7 +257,52 @@ def _program_with_field_ids(
     payload = program.to_dict()
     payload["source_fields"] = source_ids
     payload["target_fields"] = target_ids
+    if program.self_match is not None:
+        try:
+            record_key_id = resolve_field(
+                graph, program.self_match.record_key_field
+            ).field_node.id
+        except RelationshipFailure as exc:
+            raise DiscoveryFailure("discovery_promotion_failed", str(exc)) from exc
+        self_match = dict(payload["self_match"])
+        self_match["record_key_field"] = record_key_id
+        payload["self_match"] = self_match
     return DiscoveryProgram.from_dict(payload)
+
+
+def _self_match(
+    program: DiscoveryProgram,
+    graph: GraphDocument,
+) -> SelfEntityMatch | None:
+    if program.self_match is None:
+        return None
+    nodes = graph.node_by_id()
+    record_key = nodes.get(program.self_match.record_key_field)
+    if record_key is None or record_key.type != "field":
+        raise DiscoveryFailure(
+            "discovery_promotion_failed",
+            "Self-entity record key is not a current graph field.",
+        )
+    object_id = str(record_key.metadata.get("object_id") or "")
+    comparison_indexes = tuple(
+        index
+        for index in range(len(program.source_fields))
+        if index not in program.contradiction_field_indexes
+    )
+    return SelfEntityMatch.from_dict(
+        {
+            "comparison_field_ids": [
+                program.source_fields[index] for index in comparison_indexes
+            ],
+            "contradiction_field_ids": [
+                program.source_fields[index]
+                for index in program.contradiction_field_indexes
+            ],
+            "object_id": object_id,
+            "pair_policy": program.self_match.pair_policy,
+            "record_key_field_id": program.self_match.record_key_field,
+        }
+    )
 
 
 def _promoted_id(run_id: str, candidate_id: str) -> str:

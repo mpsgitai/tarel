@@ -148,6 +148,7 @@ class EntityResolutionProvenance:
     discovery_run_revision: str | None = None
     observation_ids: tuple[str, ...] = ()
     promotion_reason: str | None = None
+    supersedes_candidate_id: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"producer": self.producer, "run_id": self.run_id}
@@ -159,6 +160,8 @@ class EntityResolutionProvenance:
             payload["observation_ids"] = list(self.observation_ids)
         if self.promotion_reason is not None:
             payload["promotion_reason"] = self.promotion_reason
+        if self.supersedes_candidate_id is not None:
+            payload["supersedes_candidate_id"] = self.supersedes_candidate_id
         return payload
 
     @classmethod
@@ -172,6 +175,7 @@ class EntityResolutionProvenance:
                 "discovery_run_revision",
                 "observation_ids",
                 "promotion_reason",
+                "supersedes_candidate_id",
             },
         )
         observation_ids = data.get("observation_ids", [])
@@ -202,6 +206,14 @@ class EntityResolutionProvenance:
                     limit=_MAX_REASON_LENGTH,
                 )
                 if data.get("promotion_reason") is not None
+                else None
+            ),
+            supersedes_candidate_id=(
+                _identifier(
+                    data.get("supersedes_candidate_id"),
+                    "supersedes_candidate_id",
+                )
+                if data.get("supersedes_candidate_id") is not None
                 else None
             ),
         )
@@ -287,6 +299,73 @@ class EntityResolutionQuality:
 
 
 @dataclass(frozen=True, slots=True)
+class SelfEntityMatch:
+    """Graph-bound identity semantics for distinct records of one object."""
+
+    object_id: str
+    record_key_field_id: str
+    comparison_field_ids: tuple[str, ...]
+    contradiction_field_ids: tuple[str, ...]
+    pair_policy: str = "distinct_unordered"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "comparison_field_ids": list(self.comparison_field_ids),
+            "contradiction_field_ids": list(self.contradiction_field_ids),
+            "object_id": self.object_id,
+            "pair_policy": self.pair_policy,
+            "record_key_field_id": self.record_key_field_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SelfEntityMatch:
+        _fields(
+            data,
+            {
+                "comparison_field_ids",
+                "contradiction_field_ids",
+                "object_id",
+                "pair_policy",
+                "record_key_field_id",
+            },
+            "self-entity match",
+        )
+        self_match = cls(
+            object_id=_text(data.get("object_id"), "object_id"),
+            record_key_field_id=_text(
+                data.get("record_key_field_id"), "record_key_field_id"
+            ),
+            comparison_field_ids=_string_array(
+                data.get("comparison_field_ids"), "comparison_field_ids"
+            ),
+            contradiction_field_ids=_string_array(
+                data.get("contradiction_field_ids"), "contradiction_field_ids"
+            ),
+            pair_policy=_choice(
+                data.get("pair_policy"),
+                "pair_policy",
+                frozenset({"distinct_unordered"}),
+            ),
+        )
+        if not self_match.comparison_field_ids:
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Self-entity matching requires comparison fields.",
+            )
+        fields = (
+            self_match.record_key_field_id,
+            *self_match.comparison_field_ids,
+            *self_match.contradiction_field_ids,
+        )
+        if len(fields) != len(set(fields)):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Self-entity record, comparison, and contradiction fields must be distinct.",
+            )
+        return self_match
+
+
+@dataclass(frozen=True, slots=True)
 class EntityResolutionReview:
     decision: str
     reason: str
@@ -327,6 +406,7 @@ class EntityResolutionCandidate:
     program: DiscoveryProgram | None = None
     execution: DiscoveryExecution | None = None
     quality: EntityResolutionQuality | None = None
+    self_match: SelfEntityMatch | None = None
     state: str = "candidate"
     review: EntityResolutionReview | None = None
     contract_version: str = ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION
@@ -363,6 +443,8 @@ class EntityResolutionCandidate:
             payload["execution"] = self.execution.to_dict() if self.execution else None
             payload["program"] = self.program.to_dict() if self.program else None
             payload["quality"] = self.quality.to_dict() if self.quality else None
+            if self.self_match is not None:
+                payload["self_match"] = self.self_match.to_dict()
         if include_revision:
             payload["revision"] = self.revision
         return payload
@@ -395,7 +477,7 @@ class EntityResolutionCandidate:
             data,
             common_fields | version_fields,
             "entity-resolution candidate",
-            optional={"revision"},
+            optional={"revision", "self_match"},
         )
         graph = _object(data.get("graph"), "candidate graph")
         _fields(graph, {"name", "revision"}, "candidate graph")
@@ -408,6 +490,11 @@ class EntityResolutionCandidate:
         program_value = data.get("program")
         execution_value = data.get("execution")
         quality_value = data.get("quality")
+        self_match_value = data.get("self_match")
+        if self_match_value is not None and not isinstance(self_match_value, dict):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution", "self_match must be an object or null."
+            )
         candidate = cls(
             id=_identifier(data.get("id"), "candidate id"),
             graph_name=_text(graph.get("name"), "graph name"),
@@ -438,6 +525,11 @@ class EntityResolutionCandidate:
             quality=(
                 EntityResolutionQuality.from_dict(_object(quality_value, "quality"))
                 if quality_value is not None
+                else None
+            ),
+            self_match=(
+                SelfEntityMatch.from_dict(self_match_value)
+                if isinstance(self_match_value, dict)
                 else None
             ),
             state=_choice(data.get("state"), "candidate state", ENTITY_RESOLUTION_STATES),
@@ -472,6 +564,7 @@ class EntityResolutionMatch:
         return {
             "candidate": self.candidate.to_dict(),
             "requires_runtime_validation": self.requires_runtime_validation,
+            "scope": "self_object" if self.candidate.self_match else "cross_object",
             "source": self.source_reference,
             "target": self.target_reference,
             "usage": self.usage,
@@ -492,10 +585,10 @@ def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -
     _identifier(candidate.id, "candidate id")
     _text(candidate.graph_name, "graph name")
     _sha256(candidate.graph_revision, "graph revision")
-    if candidate.source_field_id == candidate.target_field_id:
+    if candidate.source_field_id == candidate.target_field_id and candidate.self_match is None:
         raise EntityResolutionFailure(
             "invalid_entity_resolution",
-            "Entity-resolution endpoints must be different fields.",
+            "Equal entity-resolution endpoints require explicit self-entity semantics.",
         )
     if candidate.contract_version == ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION:
         if (
@@ -503,6 +596,7 @@ def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -
             or candidate.program is not None
             or candidate.execution is not None
             or candidate.quality is not None
+            or candidate.self_match is not None
         ):
             raise EntityResolutionFailure(
                 "invalid_entity_resolution",
@@ -536,6 +630,40 @@ def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -
                 "invalid_entity_resolution",
                 "Primary entity-resolution endpoints must match the first program field pair.",
             )
+        if (candidate.program.self_match is None) != (candidate.self_match is None):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "Discovery and entity-resolution self-match semantics must agree.",
+            )
+        if candidate.self_match is not None:
+            SelfEntityMatch.from_dict(candidate.self_match.to_dict())
+            comparison_indexes = tuple(
+                index
+                for index in range(len(candidate.program.source_fields))
+                if index not in candidate.program.contradiction_field_indexes
+            )
+            expected_comparison = tuple(
+                candidate.program.source_fields[index]
+                for index in comparison_indexes
+            )
+            expected_contradictions = tuple(
+                candidate.program.source_fields[index]
+                for index in candidate.program.contradiction_field_indexes
+            )
+            if (
+                candidate.source_field_id != candidate.target_field_id
+                or candidate.self_match.record_key_field_id
+                != candidate.program.self_match.record_key_field
+                or candidate.self_match.comparison_field_ids != expected_comparison
+                or candidate.self_match.contradiction_field_ids
+                != expected_contradictions
+                or candidate.self_match.pair_policy
+                != candidate.program.self_match.pair_policy
+            ):
+                raise EntityResolutionFailure(
+                    "invalid_entity_resolution",
+                    "Self-entity projection does not match its discovery program.",
+                )
         provenance = candidate.provenance
         if (
             provenance.discovery_candidate_id is None
@@ -549,6 +677,14 @@ def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -
             )
     EntityResolutionEvidence.from_dict(candidate.evidence.to_dict())
     EntityResolutionProvenance.from_dict(candidate.provenance.to_dict())
+    if candidate.provenance.supersedes_candidate_id is not None and (
+        candidate.self_match is None
+        or candidate.provenance.supersedes_candidate_id == candidate.id
+    ):
+        raise EntityResolutionFailure(
+            "invalid_entity_resolution",
+            "Only Self-Entity evidence may supersede a different candidate.",
+        )
     if candidate.state == "candidate" and candidate.review is not None:
         raise EntityResolutionFailure(
             "invalid_entity_resolution",

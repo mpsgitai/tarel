@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
 from tarel.discovery.contracts import DiscoveryFailure
+from tarel.entity_resolution.contracts import EntityResolutionFailure
 from tarel.graph.build import build_graph_from_catalog
 from tarel.relationships.core import usable_relationships
 from tarel.sdk import Tarel
@@ -505,6 +506,7 @@ class DiscoveryTests(TestCase):
         self.assertEqual(entity.contract_version, "tarel.entity-resolution-candidate.v0.2")
         self.assertEqual(entity.state, "candidate")
         self.assertEqual(entity.program.comparison, "token_set_ratio_v1")
+        self.assertIsNone(entity.self_match)
         self.assertEqual(entity.execution.executor_id, "test.matcher")
         self.assertEqual(entity.execution.blocking_strategy, "token_prefix")
         self.assertEqual(entity.quality.rating, "strong")
@@ -512,6 +514,7 @@ class DiscoveryTests(TestCase):
         self.assertEqual(entity.evidence.confidence, entity.quality.score)
         self.assertEqual(entity.provenance.discovery_candidate_id, "entity-fuzzy-v1")
         self.assertEqual(fallback[0].usage, "exploratory_only")
+        self.assertEqual(fallback[0].to_dict()["scope"], "cross_object")
         projected = next(
             edge
             for edge in ui["edges"]
@@ -521,6 +524,193 @@ class DiscoveryTests(TestCase):
         self.assertEqual(projected["metadata"]["executor_id"], "test.matcher")
         self.assertEqual(reviewed.state, "reviewed")
         self.assertEqual(confirmed[0].candidate.id, entity.id)
+
+    def test_self_entity_matching_is_validated_early_and_promotes_as_exploratory(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            sdk = _sdk(temporary_directory)
+            run = sdk.discovery.start(
+                "entity_matching",
+                graph="warehouse",
+                run_id="self-entity-validation",
+            ).run
+            hints = sdk.discovery.next(run.id).field_hints
+            implicit = _self_entity_proposal("implicit-self")
+            implicit_program = implicit["program"]
+            assert isinstance(implicit_program, dict)
+            implicit_program.pop("self_match")
+            with self.assertRaises(DiscoveryFailure) as missing_mode:
+                sdk.discovery.submit(
+                    run.id,
+                    expected_revision=run.revision,
+                    action="propose_candidate",
+                    payload=implicit,
+                )
+            missing_key = _self_entity_proposal("missing-key")
+            missing_key_program = missing_key["program"]
+            assert isinstance(missing_key_program, dict)
+            missing_key_program["self_match"] = {
+                "pair_policy": "distinct_unordered"
+            }
+            with self.assertRaises(DiscoveryFailure) as record_key:
+                sdk.discovery.submit(
+                    run.id,
+                    expected_revision=run.revision,
+                    action="propose_candidate",
+                    payload=missing_key,
+                )
+            invalid_pair_policy = _self_entity_proposal("ordered-pairs")
+            policy_program = invalid_pair_policy["program"]
+            assert isinstance(policy_program, dict)
+            policy_program["self_match"] = {
+                "pair_policy": "ordered",
+                "record_key_field": "main.orders.order_id",
+            }
+            with self.assertRaises(DiscoveryFailure) as pair_policy:
+                sdk.discovery.submit(
+                    run.id,
+                    expected_revision=run.revision,
+                    action="propose_candidate",
+                    payload=invalid_pair_policy,
+                )
+            unchanged = sdk.discovery.load(run.id)
+
+            completed = _complete_selected_self_entity_run(
+                sdk,
+                run_id="self-entity-promotion",
+            )
+            promoted = sdk.discovery.promote(
+                completed.id,
+                candidates=("self-customer-v1",),
+                reason="Offer challenged within-object identity evidence for review.",
+            )
+            entity = promoted.entity_candidates[0]
+            matches = sdk.entity_resolution.find("warehouse")
+            ui = sdk.view.graph("warehouse")
+            projected = next(
+                edge
+                for edge in ui["edges"]
+                if edge["type"] == "entity_resolution_candidate"
+            )
+
+        self.assertEqual(missing_mode.exception.code, "invalid_discovery")
+        self.assertEqual(record_key.exception.code, "invalid_discovery")
+        self.assertEqual(pair_policy.exception.code, "invalid_discovery")
+        self.assertEqual(unchanged.candidates, ())
+        self.assertTrue(
+            any(
+                hint.get("source_field") == hint.get("target_field")
+                and hint.get("record_key_field") == "main.orders.order_id"
+                for hint in hints
+            )
+        )
+        self.assertEqual(entity.source_field_id, entity.target_field_id)
+        self.assertIsNotNone(entity.self_match)
+        assert entity.self_match is not None
+        self.assertEqual(entity.self_match.pair_policy, "distinct_unordered")
+        self.assertEqual(len(entity.self_match.comparison_field_ids), 1)
+        self.assertEqual(len(entity.self_match.contradiction_field_ids), 1)
+        self.assertNotIn(
+            entity.self_match.record_key_field_id,
+            entity.self_match.comparison_field_ids,
+        )
+        self.assertEqual(matches[0].usage, "exploratory_only")
+        self.assertTrue(matches[0].requires_runtime_validation)
+        self.assertEqual(matches[0].to_dict()["scope"], "self_object")
+        self.assertEqual(projected["metadata"]["entity_scope"], "self_object")
+        self.assertEqual(projected["metadata"]["record_key_field"], "order_id")
+        self.assertEqual(projected["metadata"]["comparison_fields"], ["customer_key"])
+        self.assertEqual(projected["metadata"]["guard_fields"], ["tenant_key"])
+
+    def test_self_entity_pairs_and_supersede_are_explicit(self) -> None:
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            sdk = _sdk(temporary_directory)
+            run = sdk.discovery.start(
+                "entity_matching",
+                graph="warehouse",
+                run_id="self-pair-policy",
+            ).run
+            proposed = sdk.discovery.submit(
+                run.id,
+                expected_revision=run.revision,
+                action="propose_candidate",
+                payload=_self_entity_proposal("self-pair-v1"),
+            ).run
+            with self.assertRaises(DiscoveryFailure) as pair_basis:
+                sdk.discovery.submit(
+                    proposed.id,
+                    expected_revision=proposed.revision,
+                    action="record_observation",
+                    payload=_observation_payload(
+                        "self-pair-v1",
+                        "self-pair-invalid",
+                        phase="support",
+                        with_execution=True,
+                    ),
+                )
+
+            first_run = _complete_selected_self_entity_run(
+                sdk,
+                run_id="self-evidence-v1",
+            )
+            first = sdk.discovery.promote(
+                first_run.id,
+                candidates=("self-customer-v1",),
+                reason="First population evidence revision.",
+            ).entity_candidates[0]
+            second_run = _complete_selected_self_entity_run(
+                sdk,
+                run_id="self-evidence-v2",
+            )
+            with self.assertRaises(DiscoveryFailure) as explicit_required:
+                sdk.discovery.promote(
+                    second_run.id,
+                    candidates=("self-customer-v1",),
+                    reason="New population evidence must name its predecessor.",
+                )
+            output = StringIO()
+            try:
+                os.chdir(project)
+                with redirect_stdout(output):
+                    exit_code = main(
+                        [
+                            "discovery",
+                            "promote",
+                            second_run.id,
+                            "--candidate",
+                            "self-customer-v1",
+                            "--supersedes",
+                            first.id,
+                            "--reason",
+                            "Supersede the earlier unreviewed evidence revision.",
+                            "--format",
+                            "json",
+                        ]
+                    )
+            finally:
+                os.chdir(previous)
+            promoted_id = json.loads(output.getvalue())["entity_candidates"][0]["id"]
+            active = sdk.entity_resolution.find("warehouse", mode="include_candidates")
+            audit = sdk.entity_resolution.list(graph="warehouse")
+            promoted = sdk.entity_resolution.load(promoted_id)
+            with self.assertRaises(EntityResolutionFailure) as stale_review:
+                sdk.entity_resolution.decide(
+                    first.id,
+                    decision="approve",
+                    reason="A superseded evidence revision cannot be reviewed.",
+                )
+
+        self.assertEqual(pair_basis.exception.code, "invalid_discovery")
+        self.assertEqual(
+            explicit_required.exception.code,
+            "entity_resolution_supersede_required",
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual([item.candidate.id for item in active], [promoted.id])
+        self.assertEqual(len(audit), 2)
+        self.assertEqual(promoted.provenance.supersedes_candidate_id, first.id)
+        self.assertEqual(stale_review.exception.code, "entity_resolution_superseded")
 
     def test_cli_promotes_one_entity_candidate_and_rejects_missing_execution(self) -> None:
         previous = Path.cwd()
@@ -870,12 +1060,85 @@ def _complete_selected_entity_run(
     ).run
 
 
+def _self_entity_proposal(candidate_id: str) -> dict[str, object]:
+    proposal = _proposal(
+        candidate_id,
+        "entity_matching",
+        comparison="token_set_ratio_v1",
+        threshold=0.84,
+        source_fields=(
+            "main.orders.customer_key",
+            "main.orders.tenant_key",
+        ),
+        target_fields=(
+            "main.orders.customer_key",
+            "main.orders.tenant_key",
+        ),
+    )
+    program = proposal["program"]
+    assert isinstance(program, dict)
+    program["blocking_field_indexes"] = [0]
+    program["contradiction_field_indexes"] = [1]
+    program["self_match"] = {
+        "pair_policy": "distinct_unordered",
+        "record_key_field": "main.orders.order_id",
+    }
+    return proposal
+
+
+def _complete_selected_self_entity_run(
+    sdk: Tarel,
+    *,
+    run_id: str,
+):
+    current = sdk.discovery.start(
+        "entity_matching",
+        graph="warehouse",
+        run_id=run_id,
+    ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="propose_candidate",
+        payload=_self_entity_proposal("self-customer-v1"),
+    ).run
+    for phase in ("support", "challenge"):
+        current = sdk.discovery.submit(
+            current.id,
+            expected_revision=current.revision,
+            action="record_observation",
+            payload=_observation_payload(
+                "self-customer-v1",
+                f"{run_id}-{phase}",
+                phase=phase,
+                with_execution=True,
+                basis="pairs",
+            ),
+        ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="select_candidate",
+        payload={
+            "candidate_id": "self-customer-v1",
+            "reason": "Canonical distinct-record pairs survived the challenge.",
+        },
+    ).run
+    return sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="complete_run",
+        payload={"reason": "Self-entity candidate is ready for explicit promotion."},
+    ).run
+
+
 def _observation_payload(
     candidate_id: str,
     observation_id: str,
     *,
     phase: str,
     with_execution: bool = False,
+    basis: str = "source_distinct",
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "candidate_id": candidate_id,
@@ -886,7 +1149,7 @@ def _observation_payload(
             "evidence_level": "population_tested",
             "id": observation_id,
             "metrics": {
-                "basis": "source_distinct",
+                "basis": basis,
                 "collision_count": 0,
                 "collision_rate": 0.0,
                 "confidence": 0.96,

@@ -24,3 +24,32 @@ executor ID/version, artifact hash, blocking strategy, and blocking version. Run
 for deterministic text-field hints, raw-sample access status, and the current probe ladder. TAREL
 recomputes promotion quality from aggregate evidence; do not optimize or report confidence without
 coverage, collision, and counterexample measurements.
+
+## Self-Entity Matching
+
+Use Self-Entity Matching only when distinct technical records of one table or view may denote the
+same real entity. Repeat the identical ordered fields and transforms on source and target, and add:
+
+```json
+{
+  "self_match": {
+    "record_key_field": "tracks.track_id",
+    "pair_policy": "distinct_unordered"
+  }
+}
+```
+
+The record key must be separate from comparison and contradiction fields, and every field must
+belong to the same graph object. Do not infer this mode from domain words or equal field names;
+without `self_match`, equal endpoints are invalid.
+
+The executor must remove same-record pairs, canonicalize each remaining pair by technical key, and
+count A/B once rather than A/B plus B/A. Record successful support and challenge with
+`metrics.basis: pairs`. Persist no record keys, matched pairs, rows, assignments, or groups in
+TAREL. The fixed pair policy is a caller obligation recorded for reproducibility, not proof that
+TAREL executed or audited matcher code.
+
+Promotion remains exploratory and requires the usual measured risk and versioned execution data.
+If TAREL reports `entity_resolution_supersede_required`, inspect the existing active candidate and
+name it with `--supersedes` only when the typed program and blocking semantics are equivalent. The
+old artifact remains audit history; a reviewed candidate cannot be silently replaced.

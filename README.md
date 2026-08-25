@@ -116,6 +116,8 @@ TAREL can guide a coding agent through resumable **Join Discovery** and **Entity
 It stores typed hypotheses, aggregate challenges, provenance, and review state; it executes no SQL
 or matching code and persists no raw samples. Exact joins promote only to relationship drafts,
 while fuzzy matches promote only to explicitly labelled entity candidates.
+Entity Matching can also compare distinct records inside one object when the proposal explicitly
+declares a separate technical record key and canonical unordered-pair semantics.
 
 See [Optional discovery runs](docs/discovery-runs.md) for the complete CLI/SDK walkthrough and
 [Entity-resolution candidates](docs/entity-resolution-candidates.md) for retrieval, review, quality,

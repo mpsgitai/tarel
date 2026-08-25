@@ -13,6 +13,7 @@ from tarel.discovery.contracts import (
     DISCOVERY_CONTRACT_VERSION,
     DiscoveryCandidate,
     DiscoveryFailure,
+    DiscoveryProgram,
     DiscoveryRun,
     allowed_discovery_actions,
     apply_discovery_action,
@@ -258,6 +259,7 @@ def promote_discovery_candidates_use_case(
     *,
     candidate_ids: tuple[str, ...],
     reason: str,
+    supersedes_candidate_id: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> DiscoveryPromotionResult:
     """Promote selected candidates into their existing bounded review path."""
@@ -302,6 +304,7 @@ def promote_discovery_candidates_use_case(
             selected[0],
             graph,
             reason=reason,
+            supersedes_candidate_id=supersedes_candidate_id,
         )
         try:
             imported = import_entity_resolution_candidate_use_case(
@@ -309,13 +312,28 @@ def promote_discovery_candidates_use_case(
                 runtime=runtime,
             )
         except EntityResolutionFailure as exc:
-            raise DiscoveryFailure("discovery_promotion_failed", str(exc)) from exc
+            code = (
+                exc.code
+                if exc.code
+                in {
+                    "entity_resolution_supersede_required",
+                    "invalid_entity_resolution_supersede",
+                }
+                else "discovery_promotion_failed"
+            )
+            raise DiscoveryFailure(code, str(exc)) from exc
         return DiscoveryPromotionResult(
             run=run,
             graph=graph,
             edges=(),
             entity_candidates=(imported.candidate,),
             path=imported.path,
+        )
+
+    if supersedes_candidate_id is not None:
+        raise DiscoveryFailure(
+            "invalid_discovery_promotion",
+            "Join promotion does not accept entity supersede semantics.",
         )
 
     updated = graph
@@ -489,6 +507,7 @@ def find_discovery_candidates_use_case(
 
 
 def _validate_program_bindings(graph: GraphDocument, program: dict[str, Any]) -> None:
+    typed = DiscoveryProgram.from_dict(program)
     field_values: list[object] = []
     for key in ("source_fields", "target_fields"):
         value = program.get(key)
@@ -504,6 +523,23 @@ def _validate_program_bindings(graph: GraphDocument, program: dict[str, Any]) ->
             resolve_field(graph, reference)
         except RelationshipFailure as exc:
             raise DiscoveryFailure("discovery_field_not_found", str(exc)) from exc
+    if typed.self_match is None:
+        return
+    try:
+        record_key = resolve_field(graph, typed.self_match.record_key_field)
+        endpoints = tuple(
+            resolve_field(graph, reference)
+            for reference in (*typed.source_fields, *typed.target_fields)
+        )
+    except RelationshipFailure as exc:
+        raise DiscoveryFailure("discovery_field_not_found", str(exc)) from exc
+    object_ids = {item.object_node.id for item in endpoints}
+    object_ids.add(record_key.object_node.id)
+    if len(object_ids) != 1:
+        raise DiscoveryFailure(
+            "invalid_discovery",
+            "Self-entity record key and comparison fields must belong to one graph object.",
+        )
 
 
 def _validate_current_graph(
@@ -568,6 +604,7 @@ def _entity_field_hints(
 ) -> tuple[dict[str, object], ...]:
     nodes = graph.node_by_id()
     fields: list[tuple[GraphNode, GraphNode, set[str]]] = []
+    self_hints: list[dict[str, object]] = []
     for field in graph.nodes:
         if field.type != "field" or not _textual_type(
             str(field.metadata.get("data_type") or "")
@@ -579,6 +616,16 @@ def _entity_field_hints(
         tokens = set(_label_tokens(field.label))
         if tokens:
             fields.append((field, parent, tokens))
+        primary_key = tuple(str(item) for item in parent.metadata.get("primary_key") or ())
+        if primary_key and field.label not in primary_key:
+            self_hints.append(
+                {
+                    "basis": "self_entity_text_field_with_declared_record_key",
+                    "record_key_field": f"{parent.label}.{primary_key[0]}",
+                    "source_field": f"{parent.label}.{field.label}",
+                    "target_field": f"{parent.label}.{field.label}",
+                }
+            )
     ranked: list[tuple[int, str, str, str]] = []
     for index, (source, source_parent, source_tokens) in enumerate(fields):
         for target, target_parent, target_tokens in fields[index + 1 :]:
@@ -599,15 +646,25 @@ def _entity_field_hints(
                 )
             )
     ranked.sort(key=lambda item: (-item[0], item[1].casefold(), item[2].casefold()))
-    return tuple(
+    cross_hints = tuple(
         {
             "basis": "compatible_text_fields_with_shared_name_tokens",
             "shared_tokens": shared,
             "source_field": source,
             "target_field": target,
         }
-        for _score, source, target, shared in ranked[:8]
+        for _score, source, target, shared in ranked
     )
+    ordered_self = tuple(
+        sorted(
+            self_hints,
+            key=lambda item: (
+                str(item["source_field"]).casefold(),
+                str(item["record_key_field"]).casefold(),
+            ),
+        )
+    )
+    return (*ordered_self[:4], *cross_hints[: 8 - min(4, len(ordered_self))])
 
 
 def _probe_ladder(run: DiscoveryRun) -> tuple[dict[str, str], ...]:
@@ -710,6 +767,9 @@ def _retrieval_document(match: DiscoveryMatch) -> RetrievalDocument:
             f"Comparison: {program.comparison}",
             f"Source fields: {', '.join(program.source_fields)}",
             f"Target fields: {', '.join(program.target_fields)}",
+            f"Entity scope: {'self_object' if program.self_match else 'cross_object'}",
+            f"Record key: {program.self_match.record_key_field if program.self_match else ''}",
+            f"Pair policy: {program.self_match.pair_policy if program.self_match else ''}",
             f"Transforms: {', '.join(sorted(set(transforms)))}",
             *evidence,
         )
@@ -758,7 +818,8 @@ def _advice_messages(
                 "Propose bounded TAREL discovery hypotheses from graph metadata and aggregate "
                 "evidence only. Return the requested JSON shape. Do not include SQL, samples, "
                 "rows, credentials, reasoning transcripts, or claims of executed evidence. "
-                "Use only supplied field references and supported program operations."
+                "Use only supplied field references and supported program operations. Equal "
+                "field pairs require explicit self_match metadata with a separate record key."
             ),
         ),
         Message(
@@ -811,6 +872,15 @@ def _advice_schema(count: int) -> dict[str, object]:
                 "maxItems": 3,
                 "minItems": 1,
                 "type": "array",
+            },
+            "self_match": {
+                "additionalProperties": False,
+                "properties": {
+                    "pair_policy": {"enum": ["distinct_unordered"]},
+                    "record_key_field": {"type": "string"},
+                },
+                "required": ["pair_policy", "record_key_field"],
+                "type": ["object", "null"],
             },
             "target_fields": {
                 "items": {"type": "string"}, "maxItems": 3, "minItems": 1, "type": "array"

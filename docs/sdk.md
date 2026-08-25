@@ -492,6 +492,38 @@ entity_promoted = tarel.discovery.promote(
     reason="Offer the challenged fuzzy rule for runtime validation.",
 )
 entity_candidate = entity_promoted.entity_candidates[0]
+
+# A Self-Entity proposal uses equal field lists only with an explicit record key and
+# canonical distinct-record pair policy.
+self_entity_proposal = {
+    "candidate_id": "track-title-self-v1",
+    "parent_ids": [],
+    "variation_operator": "seed_from_graph",
+    "program": {
+        "kind": "entity_matching",
+        "source_fields": ["tracks.title", "tracks.artist"],
+        "target_fields": ["tracks.title", "tracks.artist"],
+        "source_transforms": [title_transforms, guard_transforms],
+        "target_transforms": [title_transforms, guard_transforms],
+        "comparison": "token_set_ratio_v1",
+        "threshold": 0.6,
+        "blocking_field_indexes": [0],
+        "contradiction_field_indexes": [1],
+        "self_match": {
+            "record_key_field": "tracks.track_id",
+            "pair_policy": "distinct_unordered",
+        },
+    },
+}
+
+# When equivalent active Self-Entity evidence already exists, the caller must make the
+# immutable evidence-revision chain explicit.
+revised = tarel.discovery.promote(
+    completed_self_entity_run.id,
+    candidates=("track-title-self-v2",),
+    supersedes=previous_self_entity_candidate.id,
+    reason="Supersede the earlier unreviewed population evidence.",
+)
 ```
 
 The SDK and CLI share the same optimistic revision checks, candidate/step state machine, field

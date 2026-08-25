@@ -51,6 +51,29 @@ def project_entity_resolution_edges(
             contradiction_fields = []
         quality = candidate.quality
         execution = candidate.execution
+        self_match = candidate.self_match
+        self_object = nodes.get(self_match.object_id) if self_match else None
+        record_key = (
+            nodes.get(self_match.record_key_field_id) if self_match else None
+        )
+        comparison_labels = (
+            [
+                nodes[field_id].label
+                for field_id in self_match.comparison_field_ids
+                if field_id in nodes
+            ]
+            if self_match
+            else []
+        )
+        contradiction_labels = (
+            [
+                nodes[field_id].label
+                for field_id in self_match.contradiction_field_ids
+                if field_id in nodes
+            ]
+            if self_match
+            else []
+        )
         edges.append(
             GraphEdge(
                 id=f"entity_resolution_candidate:{candidate.id}",
@@ -59,6 +82,7 @@ def project_entity_resolution_edges(
                 type="entity_resolution_candidate",
                 metadata={
                     "candidate_id": candidate.id,
+                    "entity_scope": "self_object" if self_match else "cross_object",
                     "collision_rate": evidence.collision_rate,
                     "confidence": evidence.confidence,
                     "counterexample_count": evidence.counterexample_count,
@@ -82,6 +106,14 @@ def project_entity_resolution_edges(
                         execution.blocking_strategy if execution else None
                     ),
                     "run_id": candidate.provenance.run_id,
+                    "self_object": self_object.label if self_object else None,
+                    "record_key_field": record_key.label if record_key else None,
+                    "comparison_fields": comparison_labels,
+                    "guard_fields": contradiction_labels,
+                    "pair_policy": self_match.pair_policy if self_match else None,
+                    "supersedes_candidate_id": (
+                        candidate.provenance.supersedes_candidate_id
+                    ),
                     "source_field": source.label,
                     "state": candidate.state,
                     "target_field": target.label,

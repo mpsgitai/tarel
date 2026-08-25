@@ -51,7 +51,9 @@ tarel discovery submit join-abc123 \
 
 The response also reports raw-sample access, a deterministic probe ladder, and up to eight
 metadata-only text-field pair hints. Hints use compatible types and shared field-name tokens; they
-are starting points, not inferred relationships.
+are starting points, not inferred relationships. Entity runs may also suggest a text field paired
+with itself when its object declares a record key; this is only a hint for explicit Self-Entity
+Matching, not permission to compare a row with itself.
 
 Stale writers receive `stale_discovery_run`. Valid actions are:
 
@@ -75,12 +77,19 @@ A program binds one to three source/target field pairs from the current graph. I
 - a threshold for fuzzy entity comparisons;
 - entity-only blocking field indexes;
 - entity-only contradiction-guard field indexes.
+- optional `self_match` metadata with a separate record-key field and fixed
+  `distinct_unordered` pair policy.
 
 Join programs accept only exact or normalized-exact equality. Typo-tolerant comparison is always
 entity matching and can never silently become a graph join. `fixed_segment` is the only parameterized
 transform; the remaining transforms have no free expression language. A join cannot use entity
 blocking or guards. An entity program requires at least one comparison field, and its blocking
 fields cannot also be contradiction guards.
+
+Without `self_match`, every entity source/target field pair must be different. With `self_match`,
+the ordered source and target fields and transforms must be identical, the record key must be a
+separate field, and graph validation requires every field to belong to the same object. These
+rules are enforced during `propose_candidate`, before evidence can be recorded.
 
 Blocking identifies fields used to obtain bounded comparison candidates. A contradiction guard
 prevents a match when both normalized values are present and incompatible; for example, a fuzzy
@@ -289,6 +298,100 @@ tarel entity review ENTITY_CANDIDATE_ID \
 
 Consumers that cannot tolerate exploratory matching use `--mode confirmed_only`.
 
+## Worked Self-Entity Matching example
+
+Self-Entity Matching is the explicit within-object form of Entity Matching. It compares distinct
+technical records from one table or view; it is not a self-join relationship and it does not
+compare a record with itself. For example, several technical track IDs may represent the same song
+after title normalization while artist remains a contradiction guard.
+
+The proposal repeats the same ordered fields on both sides and adds `self_match`. The technical
+record key is separate from every comparison and guard field:
+
+```json
+{
+  "candidate_id": "track-title-self-v1",
+  "parent_ids": [],
+  "variation_operator": "seed_from_graph",
+  "program": {
+    "kind": "entity_matching",
+    "source_fields": ["music.tracks.title", "music.tracks.artist"],
+    "target_fields": ["music.tracks.title", "music.tracks.artist"],
+    "source_transforms": [
+      [
+        {"kind": "unicode_nfkc", "start": null, "length": null},
+        {"kind": "casefold", "start": null, "length": null},
+        {"kind": "strip_numeric_prefix", "start": null, "length": null},
+        {"kind": "strip_punctuation", "start": null, "length": null},
+        {"kind": "collapse_whitespace", "start": null, "length": null},
+        {"kind": "trim", "start": null, "length": null}
+      ],
+      [{"kind": "casefold", "start": null, "length": null}]
+    ],
+    "target_transforms": [
+      [
+        {"kind": "unicode_nfkc", "start": null, "length": null},
+        {"kind": "casefold", "start": null, "length": null},
+        {"kind": "strip_numeric_prefix", "start": null, "length": null},
+        {"kind": "strip_punctuation", "start": null, "length": null},
+        {"kind": "collapse_whitespace", "start": null, "length": null},
+        {"kind": "trim", "start": null, "length": null}
+      ],
+      [{"kind": "casefold", "start": null, "length": null}]
+    ],
+    "comparison": "token_set_ratio_v1",
+    "threshold": 0.6,
+    "blocking_field_indexes": [0],
+    "contradiction_field_indexes": [1],
+    "self_match": {
+      "record_key_field": "music.tracks.track_id",
+      "pair_policy": "distinct_unordered"
+    }
+  }
+}
+```
+
+`distinct_unordered` is the only accepted pair policy. It requires the caller-owned executor to:
+
+- exclude pairs whose two technical record keys are equal;
+- canonicalize the remaining pair by record key so A/B and B/A are one pair;
+- report successful observations with `metrics.basis: "pairs"`;
+- retain no raw keys, rows, or matched groups in TAREL.
+
+TAREL validates and persists this obligation but cannot prove that external matcher code obeyed
+it. Reproducibility therefore still requires executor ID/version, artifact hash, blocking strategy,
+query/code hash, and separate population support and adverse challenge observations. The actual
+groups or record-key-to-entity assignments remain runtime output owned by the caller.
+
+Promotion creates a v0.2 candidate with graph-bound object ID, record-key field ID, comparison and
+contradiction field IDs, and the typed program. It remains `exploratory_only` until review and is
+rendered as an optional violet loop on the object in the GUI.
+
+```bash
+tarel entity find music \
+  --source-field music.tracks.title \
+  --target-field music.tracks.title \
+  --mode confirmed_then_candidates \
+  --format json
+```
+
+If an active, semantically identical unreviewed Self-Entity candidate already exists, promotion
+fails with `entity_resolution_supersede_required`. Preserve the new evidence with an explicit,
+auditable evidence revision:
+
+```bash
+tarel discovery promote entity-tracks-v2 \
+  --candidate track-title-self-v2 \
+  --supersedes discovery.entity-tracks-v1.track-title-self-v1 \
+  --reason "New population challenge supersedes the earlier unreviewed evidence." \
+  --format json
+```
+
+The older artifact remains available through `entity list` and `entity show`, while normal
+retrieval and the GUI expose only the latest active candidate. A reviewed candidate cannot be
+silently superseded; new evidence does not revoke a human decision. A superseded predecessor is
+audit-only and cannot be reviewed after the fact.
+
 ## Evidence and decision boundary
 
 Each observation is `support` or `challenge`, `succeeded` or `failed`, and contains only:
@@ -377,6 +480,10 @@ The result always starts as candidate and is immediately available as explorator
 entity find, the SDK, and the optional violet GUI overlay. Only explicit entity review changes it
 to reviewed. Promotion never executes matching and never turns the rule into a graph join.
 
+Cross-object programs retain distinct source and target endpoints. Self-object programs retain an
+additional typed projection of object, record key, comparison fields, contradiction fields, and
+the `distinct_unordered` pair policy. Both use the same promotion application path.
+
 ## Optional provider advisor
 
 Start a run with a configured provider profile to permit metadata-only hypothesis batches:
@@ -463,6 +570,12 @@ The protocol fails closed instead of silently weakening a run:
   provenance.
 - `invalid_discovery_promotion`: the candidate kind, comparison, transforms, selection, or run
   state cannot enter the requested review store.
+- `entity_resolution_supersede_required`: equivalent active Self-Entity evidence exists and the
+  caller must name the predecessor explicitly.
+- `invalid_entity_resolution_supersede`: the named predecessor is reviewed, already superseded,
+  inactive, or not semantically equivalent.
+- `entity_resolution_superseded`: a caller attempted to review an audit-only predecessor instead
+  of its active successor.
 
 A failed source probe is itself a valid observation when it contains a bounded `error_category`
 and no metrics. It consumes probe budget and remains auditable, but cannot serve as successful
