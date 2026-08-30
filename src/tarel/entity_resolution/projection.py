@@ -52,6 +52,7 @@ def project_entity_resolution_edges(
         quality = candidate.quality
         execution = candidate.execution
         self_match = candidate.self_match
+        identity_group = candidate.identity_group
         self_object = nodes.get(self_match.object_id) if self_match else None
         record_key = (
             nodes.get(self_match.record_key_field_id) if self_match else None
@@ -111,6 +112,14 @@ def project_entity_resolution_edges(
                     "comparison_fields": comparison_labels,
                     "guard_fields": contradiction_labels,
                     "pair_policy": self_match.pair_policy if self_match else None,
+                    "identity_group_id": identity_group.id if identity_group else None,
+                    "identity_member_count": (
+                        len(identity_group.member_keys) if identity_group else None
+                    ),
+                    "identity_mapping_persisted": identity_group is not None,
+                    "identity_group_confidence": (
+                        identity_group.confidence if identity_group else None
+                    ),
                     "supersedes_candidate_id": (
                         candidate.provenance.supersedes_candidate_id
                     ),

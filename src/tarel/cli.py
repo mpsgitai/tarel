@@ -346,6 +346,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Permit ephemeral raw samples of at most ten rows per object.",
     )
+    source_configure.add_argument(
+        "--allow-entity-aliases",
+        action="store_true",
+        help="Permit protected complete identity inspection and durable key groups.",
+    )
     source_configure.add_argument("--replace", action="store_true")
     _add_format_argument(source_configure)
 
@@ -1206,6 +1211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         ("aggregates", args.allow_aggregates),
                         ("small_domains", args.allow_small_domains),
                         ("raw_samples", args.allow_raw_samples),
+                        ("entity_aliases", args.allow_entity_aliases),
                     )
                     if allowed
                 ),

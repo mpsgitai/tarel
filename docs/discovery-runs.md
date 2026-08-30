@@ -62,6 +62,11 @@ Stale writers receive `stale_discovery_run`. Valid actions are:
 - `select_candidate` or `reject_candidate` after a challenge;
 - `pause_run`, `resume_run`, or `complete_run`.
 
+An identity-inspection run adds a stricter sequence:
+`register_identity_inventory`, `record_inventory_page`, `record_entity_group`, and
+`record_entity_reflection`. `next` exposes only the actions legal at the current phase. See
+[Self-Entity discovery](self-entity-discovery.md) for the complete protected-key workflow.
+
 Candidates retain their parent IDs, generation, variation operator, typed program, aggregate
 support/challenge observations, assessment, and producing actor. Step sequences are contiguous and
 the whole run has a content-derived SHA-256 revision. Files are written atomically with private
@@ -356,12 +361,14 @@ record key is separate from every comparison and guard field:
 - exclude pairs whose two technical record keys are equal;
 - canonicalize the remaining pair by record key so A/B and B/A are one pair;
 - report successful observations with `metrics.basis: "pairs"`;
-- retain no raw keys, rows, or matched groups in TAREL.
+- retain no raw keys, rows, or matched groups in an ordinary Self-Entity run.
 
 TAREL validates and persists this obligation but cannot prove that external matcher code obeyed
 it. Reproducibility therefore still requires executor ID/version, artifact hash, blocking strategy,
-query/code hash, and separate population support and adverse challenge observations. The actual
-groups or record-key-to-entity assignments remain runtime output owned by the caller.
+query/code hash, and separate population support and adverse challenge observations. Actual groups
+remain caller-owned unless the run explicitly enables `identity_inspection`; that reduced mode can
+promote one concrete group into the protected entity sidecar after source policy, support,
+challenge, and reflection checks. Inventory rows always remain ephemeral.
 
 Promotion creates a v0.2 candidate with graph-bound object ID, record-key field ID, comparison and
 contradiction field IDs, and the typed program. It remains `exploratory_only` until review and is
@@ -374,6 +381,11 @@ tarel entity find music \
   --mode confirmed_then_candidates \
   --format json
 ```
+
+For direct lookup of an explicitly persisted group, use `tarel entity resolve`. It returns actual
+keys only through the protected `entity resolve` path; ordinary CLI listings plus graph, GUI,
+search, and context projections see only group metadata. In-process SDK candidate objects remain
+typed audit artifacts and must be treated as protected data.
 
 If an active, semantically identical unreviewed Self-Entity candidate already exists, promotion
 fails with `entity_resolution_supersede_required`. Preserve the new evidence with an explicit,

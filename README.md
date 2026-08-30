@@ -61,7 +61,8 @@ knowledge, review schema drift, and move from a report or measure back through E
   synonyms, field semantics, and possible joins; people validate, edit, defer, or reject them.
 - **Offers entity hypotheses** — graph-bound normalization candidates remain separate from joins,
   expose aggregate coverage, collisions, confidence, and review state, and can be probed by agents
-  before human approval without being presented as facts.
+  before human approval without being presented as facts. Optional Self-Entity inspection can
+  additionally retain explicitly authorized same-object key groups in a protected sidecar.
 - **Structures optional discovery loops** — coding agents can evolve bounded join or entity-match
   programs through resumable support/challenge runs while TAREL validates budgets, revisions,
   aggregate evidence, and exploratory status without storing SQL or rows.
@@ -114,14 +115,18 @@ This prevents a scheduler dependency from silently becoming invented table linea
 
 TAREL can guide a coding agent through resumable **Join Discovery** and **Entity Matching** runs.
 It stores typed hypotheses, aggregate challenges, provenance, and review state; it executes no SQL
-or matching code and persists no raw samples. Exact joins promote only to relationship drafts,
+or matching code and persists no inventory rows. Exact joins promote only to relationship drafts,
 while fuzzy matches promote only to explicitly labelled entity candidates.
 Entity Matching can also compare distinct records inside one object when the proposal explicitly
-declares a separate technical record key and canonical unordered-pair semantics.
+declares a separate technical record key and canonical unordered-pair semantics. Its optional
+`--identity-inspection` path sends a complete, label-sorted key/label inventory ephemerally through
+the caller, structures support/challenge/reflection probes, and persists concrete alias keys only
+when the source grants `entity_aliases`; aggregate permission is additionally required for probes.
 
 See [Optional discovery runs](docs/discovery-runs.md) for the complete CLI/SDK walkthrough and
 [Entity-resolution candidates](docs/entity-resolution-candidates.md) for retrieval, review, quality,
-and the optional violet graph projection.
+and the optional violet graph projection. The focused
+[Self-Entity discovery guide](docs/self-entity-discovery.md) describes the reduced AVO loop.
 
 ## Human in the loop
 

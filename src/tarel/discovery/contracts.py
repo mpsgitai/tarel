@@ -9,6 +9,17 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
+from tarel.discovery.identity import (
+    IDENTITY_ACTIONS,
+    EntityGroupReflection,
+    IdentityFailure,
+    IdentityInspection,
+    add_group,
+    add_manifest,
+    add_page,
+    add_reflection,
+)
+
 DISCOVERY_CONTRACT_VERSION = "tarel.discovery-run.v0.1.experimental"
 DISCOVERY_KINDS = frozenset({"entity_matching", "join_discovery"})
 DISCOVERY_STATUSES = frozenset({"completed", "open", "paused"})
@@ -22,13 +33,20 @@ DISCOVERY_ACTIONS = frozenset(
         "reject_candidate",
         "resume_run",
         "select_candidate",
+        *IDENTITY_ACTIONS,
     }
 )
 DISCOVERY_CANDIDATE_STATES = frozenset(
     {"challenged", "proposed", "rejected", "selected", "tested"}
 )
 DISCOVERY_COMPARISONS = frozenset(
-    {"exact", "normalized_exact", "normalized_levenshtein_v1", "token_set_ratio_v1"}
+    {
+        "exact",
+        "llm_assessed",
+        "normalized_exact",
+        "normalized_levenshtein_v1",
+        "token_set_ratio_v1",
+    }
 )
 DISCOVERY_TRANSFORMS = frozenset(
     {
@@ -653,6 +671,7 @@ class DiscoveryRun:
     candidates: tuple[DiscoveryCandidate, ...] = ()
     steps: tuple[DiscoveryStep, ...] = ()
     completion_reason: str | None = None
+    identity_inspection: IdentityInspection | None = None
     contract_version: str = DISCOVERY_CONTRACT_VERSION
 
     @property
@@ -669,7 +688,12 @@ class DiscoveryRun:
         )
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
-    def to_dict(self, *, include_revision: bool = True) -> dict[str, object]:
+    def to_dict(
+        self,
+        *,
+        include_revision: bool = True,
+        include_identity_values: bool = True,
+    ) -> dict[str, object]:
         payload: dict[str, object] = {
             "actor_mode": self.actor_mode,
             "advisor_provider": self.advisor_provider,
@@ -688,6 +712,10 @@ class DiscoveryRun:
         }
         if include_revision:
             payload["revision"] = self.revision
+        if self.identity_inspection is not None:
+            payload["identity_inspection"] = self.identity_inspection.to_dict(
+                include_values=include_identity_values
+            )
         return payload
 
     @classmethod
@@ -711,7 +739,7 @@ class DiscoveryRun:
                 "steps",
             },
             "discovery run",
-            optional={"revision"},
+            optional={"identity_inspection", "revision"},
         )
         if data.get("contract_version") != DISCOVERY_CONTRACT_VERSION:
             raise DiscoveryFailure(
@@ -731,6 +759,19 @@ class DiscoveryRun:
             raise DiscoveryFailure(
                 "invalid_discovery", "run steps must be an array of objects."
             )
+        inspection_value = data.get("identity_inspection")
+        if inspection_value is not None and not isinstance(inspection_value, dict):
+            raise DiscoveryFailure(
+                "invalid_discovery", "identity_inspection must be an object or null."
+            )
+        try:
+            identity_inspection = (
+                IdentityInspection.from_dict(inspection_value)
+                if isinstance(inspection_value, dict)
+                else None
+            )
+        except IdentityFailure as exc:
+            raise DiscoveryFailure(exc.code, str(exc)) from exc
         run = cls(
             id=_identifier(data.get("id"), "run id"),
             kind=_choice(data.get("kind"), "discovery kind", DISCOVERY_KINDS),
@@ -758,6 +799,7 @@ class DiscoveryRun:
             completion_reason=_optional_text(
                 data.get("completion_reason"), "completion_reason"
             ),
+            identity_inspection=identity_inspection,
         )
         validate_discovery_run(run)
         expected_revision = data.get("revision")
@@ -869,6 +911,17 @@ def validate_discovery_program(program: DiscoveryProgram) -> None:
         raise DiscoveryFailure(
             "invalid_discovery", "Exact comparisons do not accept a threshold."
         )
+    if program.comparison == "llm_assessed":
+        if program.kind != "entity_matching" or program.self_match is None:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "LLM-assessed identity groups require explicit Self-Entity semantics.",
+            )
+        if any((*program.source_transforms, *program.target_transforms)):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "LLM-assessed groups describe concrete keys, not an executable transform rule.",
+            )
     if program.kind == "join_discovery" and program.comparison not in {
         "exact",
         "normalized_exact",
@@ -885,6 +938,13 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
         )
     _identifier(run.id, "run id")
     _sha256(run.graph_revision, "graph revision")
+    if run.identity_inspection is not None and (
+        run.kind != "entity_matching" or len(run.source_names) != 1
+    ):
+        raise DiscoveryFailure(
+            "invalid_discovery",
+            "Identity inspection requires one entity-matching run bound to exactly one source.",
+        )
     if run.actor_mode == "agent_with_provider_advisor" and run.advisor_provider is None:
         raise DiscoveryFailure(
             "invalid_discovery", "Provider-advisor mode requires an advisor provider name."
@@ -919,6 +979,8 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
             raise DiscoveryFailure(
                 "invalid_discovery", "Candidate generation does not match its parents."
             )
+        if run.identity_inspection is not None:
+            _validate_identity_candidate(run, candidate)
     if run.probes_used > run.probe_budget:
         raise DiscoveryFailure("invalid_discovery", "Discovery probe budget was exceeded.")
     sequences = [item.sequence for item in run.steps]
@@ -931,6 +993,41 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
         for candidate in run.candidates
         for observation in candidate.observations
     }
+    inspection = run.identity_inspection
+    if inspection is not None:
+        observation_ids.update(item.id for item in inspection.pages)
+        observation_ids.update(item.id for item in inspection.groups)
+        observation_ids.update(item.id for item in inspection.reflections)
+        for group in inspection.groups:
+            if group.candidate_id not in candidate_by_id:
+                raise DiscoveryFailure(
+                    "invalid_identity_inspection",
+                    "Entity alias groups must reference a candidate from the same run.",
+                )
+        for reflection in inspection.reflections:
+            candidate = candidate_by_id.get(reflection.candidate_id)
+            if candidate is None or reflection.observation_id not in {
+                item.id for item in candidate.observations
+            }:
+                raise DiscoveryFailure(
+                    "invalid_identity_inspection",
+                    "Entity reflections must reference their candidate's observation.",
+                )
+        for candidate in run.candidates:
+            if candidate.state not in {"rejected", "selected"}:
+                continue
+            reflection = _latest_identity_reflection(run, candidate)
+            decision = reflection.decision if reflection else None
+            expected = (
+                {"accept_as_exploratory", "recommend_promotion"}
+                if candidate.state == "selected"
+                else {"reject_group"}
+            )
+            if decision not in expected:
+                raise DiscoveryFailure(
+                    "invalid_identity_inspection",
+                    "Terminal identity candidates require a matching group reflection.",
+                )
     for step in run.steps:
         if step.candidate_id is not None and step.candidate_id not in candidate_by_id:
             raise DiscoveryFailure(
@@ -955,16 +1052,57 @@ def allowed_discovery_actions(run: DiscoveryRun) -> tuple[str, ...]:
         return ()
     if run.status == "paused":
         return ("resume_run",)
+    inspection = run.identity_inspection
+    if inspection is not None:
+        if inspection.manifest is None:
+            return ("register_identity_inventory", "pause_run")
+        if not inspection.coverage_complete:
+            return ("record_inventory_page", "pause_run")
     actions: list[str] = []
     if len(run.candidates) < run.candidate_budget:
         actions.append("propose_candidate")
     active = [item for item in run.candidates if item.state not in {"selected", "rejected"}]
-    if active and run.probes_used < run.probe_budget:
-        actions.append("record_observation")
-    if any(item.state == "challenged" for item in active):
-        actions.extend(("select_candidate", "reject_candidate"))
+    if inspection is None:
+        if active and run.probes_used < run.probe_budget:
+            actions.append("record_observation")
+        if any(item.state == "challenged" for item in active):
+            actions.extend(("select_candidate", "reject_candidate"))
+    else:
+        missing_groups = [
+            item for item in active if inspection.group_for_candidate(item.id) is None
+        ]
+        if missing_groups:
+            actions.append("record_entity_group")
+        if any(
+            inspection.group_for_candidate(item.id) is not None for item in active
+        ) and run.probes_used < run.probe_budget:
+            actions.append("record_observation")
+        challenged = [item for item in active if item.state == "challenged"]
+        if any(_latest_identity_reflection(run, item) is None for item in challenged):
+            actions.append("record_entity_reflection")
+        decisions = {
+            item.id: (
+                reflection.decision
+                if (reflection := _latest_identity_reflection(run, item))
+                else None
+            )
+            for item in challenged
+        }
+        if any(
+            decision in {"accept_as_exploratory", "recommend_promotion"}
+            for decision in decisions.values()
+        ):
+            actions.append("select_candidate")
+        if any(decision == "reject_group" for decision in decisions.values()):
+            actions.append("reject_candidate")
     actions.append("pause_run")
-    if run.candidates:
+    if (inspection is None and run.candidates) or (
+        inspection is not None
+        and (
+            not run.candidates
+            or any(item.state in {"rejected", "selected"} for item in run.candidates)
+        )
+    ):
         actions.append("complete_run")
     return tuple(actions)
 
@@ -983,11 +1121,17 @@ def apply_discovery_action(
             "discovery_action_not_allowed",
             f"Action {action} is not allowed for the current discovery state.",
         )
-    if actor == "provider" and action != "propose_candidate":
+    if actor == "provider" and action not in {
+        "propose_candidate",
+        "record_entity_group",
+        "record_entity_reflection",
+    }:
         raise DiscoveryFailure(
             "discovery_action_not_allowed",
             "Providers may propose hypotheses, but cannot report evidence or make decisions.",
         )
+    if action in IDENTITY_ACTIONS:
+        return _apply_identity_action(run, action=action, actor=actor, payload=payload)
     if action == "propose_candidate":
         updated, candidate_id = _propose_candidate(run, payload)
         return _append_step(updated, actor, action, candidate_id=candidate_id)
@@ -1016,6 +1160,74 @@ def apply_discovery_action(
         actor,
         action,
         note=reason,
+    )
+
+
+def _apply_identity_action(
+    run: DiscoveryRun,
+    *,
+    action: str,
+    actor: str,
+    payload: dict[str, Any],
+) -> DiscoveryRun:
+    inspection = run.identity_inspection
+    if inspection is None:
+        raise DiscoveryFailure(
+            "discovery_action_not_allowed",
+            "This discovery run did not enable identity inspection.",
+        )
+    if actor == "provider" and action in {
+        "record_inventory_page",
+        "register_identity_inventory",
+    }:
+        raise DiscoveryFailure(
+            "discovery_action_not_allowed",
+            "Providers cannot attest inventory coverage or source execution.",
+        )
+    try:
+        if action == "register_identity_inventory":
+            changed_inspection = add_manifest(inspection, payload)
+            candidate_id = None
+            reference = None
+        elif action == "record_inventory_page":
+            changed_inspection = add_page(inspection, payload)
+            candidate_id = None
+            reference = changed_inspection.pages[-1].id
+        elif action == "record_entity_group":
+            changed_inspection = add_group(inspection, payload)
+            group = changed_inspection.groups[-1]
+            _candidate(run, group.candidate_id)
+            candidate_id = group.candidate_id
+            reference = group.id
+        else:
+            reflection = EntityGroupReflection.from_dict(payload)
+            candidate = _candidate(run, reflection.candidate_id)
+            challenge = next(
+                (
+                    item
+                    for item in candidate.observations
+                    if item.id == reflection.observation_id
+                    and item.phase == "challenge"
+                    and item.status == "succeeded"
+                ),
+                None,
+            )
+            if candidate.state != "challenged" or challenge is None:
+                raise DiscoveryFailure(
+                    "invalid_entity_reflection",
+                    "Entity reflection requires a successful challenge observation.",
+                )
+            changed_inspection = add_reflection(inspection, payload)
+            candidate_id = reflection.candidate_id
+            reference = reflection.id
+    except IdentityFailure as exc:
+        raise DiscoveryFailure(exc.code, str(exc)) from exc
+    return _append_step(
+        replace(run, identity_inspection=changed_inspection),
+        actor,
+        action,
+        candidate_id=candidate_id,
+        observation_id=reference,
     )
 
 
@@ -1053,6 +1265,8 @@ def _propose_candidate(
         raise DiscoveryFailure(
             "invalid_discovery", "Candidate program does not match the run kind."
         )
+    if run.identity_inspection is not None:
+        _validate_identity_candidate(run, candidate)
     return replace(run, candidates=(*run.candidates, candidate)), candidate.id
 
 
@@ -1068,6 +1282,14 @@ def _record_observation(
     if candidate.state in {"selected", "rejected"}:
         raise DiscoveryFailure(
             "discovery_action_not_allowed", "Terminal candidates cannot receive observations."
+        )
+    if (
+        run.identity_inspection is not None
+        and run.identity_inspection.group_for_candidate(candidate_id) is None
+    ):
+        raise DiscoveryFailure(
+            "entity_alias_group_required",
+            "Register the concrete entity alias group before executing probes.",
         )
     if (
         candidate.program.self_match is not None
@@ -1119,12 +1341,81 @@ def _assess_candidate(
             "discovery_action_not_allowed",
             "Selection requires one successful challenge observation.",
         )
+    if run.identity_inspection is not None:
+        reflection = _latest_identity_reflection(run, candidate)
+        decision = reflection.decision if reflection else None
+        allowed = (
+            {"accept_as_exploratory", "recommend_promotion"}
+            if action == "select_candidate"
+            else {"reject_group"}
+        )
+        if decision not in allowed:
+            raise DiscoveryFailure(
+                "discovery_action_not_allowed",
+                "Candidate assessment must follow its latest structured entity reflection.",
+            )
     changed = replace(
         candidate,
         state="selected" if action == "select_candidate" else "rejected",
         assessment_reason=reason,
     )
     return _replace_candidate(run, changed), candidate_id, reason
+
+
+def _validate_identity_candidate(
+    run: DiscoveryRun, candidate: DiscoveryCandidate
+) -> None:
+    inspection = run.identity_inspection
+    manifest = inspection.manifest if inspection else None
+    if manifest is None or not inspection.coverage_complete:
+        raise DiscoveryFailure(
+            "identity_inventory_incomplete",
+            "LLM-assessed groups require a complete identity inventory.",
+        )
+    program = candidate.program
+    if program.comparison != "llm_assessed" or program.self_match is None:
+        raise DiscoveryFailure(
+            "invalid_identity_candidate",
+            "Identity-inspection candidates must be LLM-assessed Self-Entity groups.",
+        )
+    expected_fields = (manifest.label_field,)
+    if (
+        program.self_match.record_key_field != manifest.record_key_field
+        or program.source_fields != expected_fields
+        or program.target_fields != expected_fields
+        or program.contradiction_field_indexes
+    ):
+        raise DiscoveryFailure(
+            "invalid_identity_candidate",
+            "Candidate key and label must match its identity inventory.",
+        )
+
+
+def _latest_identity_reflection(
+    run: DiscoveryRun, candidate: DiscoveryCandidate
+) -> EntityGroupReflection | None:
+    inspection = run.identity_inspection
+    if inspection is None:
+        return None
+    challenge = next(
+        (
+            item
+            for item in reversed(candidate.observations)
+            if item.phase == "challenge" and item.status == "succeeded"
+        ),
+        None,
+    )
+    if challenge is None:
+        return None
+    return next(
+        (
+            item
+            for item in reversed(inspection.reflections)
+            if item.candidate_id == candidate.id
+            and item.observation_id == challenge.id
+        ),
+        None,
+    )
 
 
 def _append_step(

@@ -762,6 +762,279 @@ class DiscoveryTests(TestCase):
         self.assertEqual(len(stored), 1)
         self.assertEqual(rejected.exception.code, "incomplete_entity_execution")
 
+    def test_identity_inventory_promotes_protected_aliases_and_resolves_via_sdk_and_cli(
+        self,
+    ) -> None:
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            sdk = _sdk(temporary_directory)
+            sdk.source.configure(
+                "warehouse-source",
+                connector="sqlite",
+                graphs=("warehouse",),
+                enrichment_permissions=(
+                    "aggregates",
+                    "entity_aliases",
+                ),
+            )
+            completed = _complete_identity_inspection_run(sdk, run_id="identity-loop")
+            promoted = sdk.discovery.promote(
+                completed.id,
+                candidates=("same-customer-17",),
+                reason="Two independent probes support this same-object alias group.",
+            ).entity_candidates[0]
+            exploratory = sdk.entity_resolution.resolve(
+                "warehouse", object="main.orders", key="1001"
+            )
+            confirmed_before = sdk.entity_resolution.resolve(
+                "warehouse",
+                object="main.orders",
+                key="1001",
+                mode="confirmed_only",
+            )
+            ui = sdk.view.graph("warehouse")
+            ui_text = json.dumps(ui, sort_keys=True)
+            edge = next(
+                item
+                for item in ui["edges"]
+                if item["type"] == "entity_resolution_candidate"
+            )
+            stored_mode = (
+                sdk.runtime.entity_resolution_store().path(promoted.id).stat().st_mode
+                & 0o777
+            )
+            output = StringIO()
+            show_output = StringIO()
+            discovery_output = StringIO()
+            try:
+                os.chdir(project)
+                with redirect_stdout(output):
+                    cli_exit = main(
+                        [
+                            "entity",
+                            "resolve",
+                            "warehouse",
+                            "--object",
+                            "main.orders",
+                            "--key",
+                            "1001",
+                            "--mode",
+                            "include_candidates",
+                            "--format",
+                            "json",
+                        ]
+                    )
+                with redirect_stdout(show_output):
+                    show_exit = main(
+                        ["entity", "show", promoted.id, "--format", "json"]
+                    )
+                with redirect_stdout(discovery_output):
+                    discovery_exit = main(
+                        ["discovery", "show", completed.id, "--format", "json"]
+                    )
+            finally:
+                os.chdir(previous)
+            cli_payload = json.loads(output.getvalue())
+            show_payload = json.loads(show_output.getvalue())
+            discovery_payload = json.loads(discovery_output.getvalue())
+            reviewed = sdk.entity_resolution.decide(
+                promoted.id,
+                decision="approve",
+                reason="The concrete alias group and its counterexample probe were reviewed.",
+            ).candidate
+            confirmed_after = sdk.entity_resolution.resolve(
+                "warehouse",
+                object="main.orders",
+                key="1001",
+                mode="confirmed_only",
+            )
+            sdk.source.configure(
+                "warehouse-source",
+                connector="sqlite",
+                graphs=("warehouse",),
+                enrichment_permissions=("aggregates",),
+                replace=True,
+            )
+            with self.assertRaises(EntityResolutionFailure) as revoked:
+                sdk.entity_resolution.resolve(
+                    "warehouse", object="main.orders", key="not-present"
+                )
+
+        self.assertEqual(completed.identity_inspection.phase, "group_validation")
+        self.assertEqual(exploratory[0].group.member_keys, ("1001", "1004"))
+        self.assertEqual(exploratory[0].usage, "exploratory_only")
+        self.assertEqual(confirmed_before, ())
+        self.assertEqual(stored_mode, 0o600)
+        self.assertEqual(edge["metadata"]["identity_member_count"], 2)
+        self.assertTrue(edge["metadata"]["identity_mapping_persisted"])
+        self.assertNotIn("1001", ui_text)
+        self.assertNotIn("1004", ui_text)
+        self.assertNotIn("ordered identity inventory", ui_text)
+        self.assertEqual(cli_exit, 0)
+        self.assertEqual(cli_payload["aliases"][0]["group"]["member_keys"], ["1001", "1004"])
+        self.assertEqual(show_exit, 0)
+        self.assertNotIn("member_keys", show_payload["identity_group"])
+        self.assertNotIn("rationale", show_payload["identity_group"])
+        discovery_group = discovery_payload["identity_inspection"]["groups"][0]
+        self.assertEqual(discovery_exit, 0)
+        self.assertNotIn("member_keys", discovery_group)
+        self.assertNotIn("rationale", discovery_group)
+        self.assertEqual(reviewed.state, "reviewed")
+        self.assertEqual(confirmed_after[0].usage, "confirmed")
+        self.assertEqual(revoked.exception.code, "entity_aliases_not_allowed")
+
+    def test_identity_inspection_fails_closed_on_policy_budget_and_scope(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            sdk = _sdk(temporary_directory)
+            sdk.source.configure(
+                "identity-enabled",
+                connector="sqlite",
+                graphs=("warehouse",),
+                enrichment_permissions=("aggregates", "entity_aliases"),
+            )
+            run = sdk.discovery.start(
+                "entity_matching",
+                graph="warehouse",
+                sources=("identity-enabled",),
+                identity_inspection=True,
+                run_id="identity-policy",
+            ).run
+            over_budget = _identity_manifest(run)
+            over_budget["source_name"] = "identity-enabled"
+            over_budget["estimated_tokens"] = 2_000
+            over_budget["token_budget"] = 1_000
+            with self.assertRaises(DiscoveryFailure) as budget:
+                sdk.discovery.submit(
+                    run.id,
+                    expected_revision=run.revision,
+                    action="register_identity_inventory",
+                    payload=over_budget,
+                )
+            wrong_scope = _identity_manifest(run)
+            wrong_scope["source_name"] = "identity-enabled"
+            wrong_scope["label_field"] = "main.customers.customer_name"
+            with self.assertRaises(DiscoveryFailure) as scope:
+                sdk.discovery.submit(
+                    run.id,
+                    expected_revision=run.revision,
+                    action="register_identity_inventory",
+                    payload=wrong_scope,
+                )
+            sdk.source.configure(
+                "sample-only",
+                connector="sqlite",
+                graphs=("warehouse",),
+                enrichment_permissions=("aggregates", "raw_samples"),
+            )
+            denied_run = sdk.discovery.start(
+                "entity_matching",
+                graph="warehouse",
+                sources=("sample-only",),
+                identity_inspection=True,
+                run_id="identity-denied",
+            ).run
+            with self.assertRaises(DiscoveryFailure) as aliases:
+                sdk.discovery.submit(
+                    denied_run.id,
+                    expected_revision=denied_run.revision,
+                    action="register_identity_inventory",
+                    payload=_identity_manifest(denied_run),
+                )
+
+        self.assertEqual(budget.exception.code, "identity_token_budget_exceeded")
+        self.assertEqual(scope.exception.code, "invalid_identity_inventory")
+        self.assertEqual(aliases.exception.code, "entity_aliases_not_allowed")
+
+    def test_cli_starts_the_same_identity_state_loaded_by_sdk(self) -> None:
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            sdk = _sdk(temporary_directory)
+            sdk.source.configure(
+                "warehouse-source",
+                connector="sqlite",
+                graphs=("warehouse",),
+                enrichment_permissions=("aggregates", "entity_aliases"),
+            )
+            output = StringIO()
+            try:
+                os.chdir(project)
+                with redirect_stdout(output):
+                    exit_code = main(
+                        [
+                            "discovery",
+                            "start",
+                            "entities",
+                            "--graph",
+                            "warehouse",
+                            "--source",
+                            "warehouse-source",
+                            "--identity-inspection",
+                            "--id",
+                            "cli-identity",
+                            "--format",
+                            "json",
+                        ]
+                    )
+            finally:
+                os.chdir(previous)
+            loaded = sdk.discovery.load("cli-identity")
+            task = sdk.discovery.next("cli-identity")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIsNotNone(loaded.identity_inspection)
+        self.assertEqual(task.allowed_actions[0], "register_identity_inventory")
+        self.assertEqual(task.identity_inspection["phase"], "started")
+
+    def test_identity_inspection_can_complete_without_a_candidate(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            sdk = _sdk(temporary_directory)
+            sdk.source.configure(
+                "warehouse-source",
+                connector="sqlite",
+                graphs=("warehouse",),
+                enrichment_permissions=("aggregates", "entity_aliases"),
+            )
+            run = sdk.discovery.start(
+                "entity_matching",
+                graph="warehouse",
+                sources=("warehouse-source",),
+                identity_inspection=True,
+                run_id="identity-no-match",
+            ).run
+            manifest = _identity_manifest(run)
+            manifest["source_name"] = "warehouse-source"
+            manifest["row_count"] = 0
+            manifest["identity_count"] = 0
+            manifest["estimated_tokens"] = 0
+            run = sdk.discovery.submit(
+                run.id,
+                expected_revision=run.revision,
+                action="register_identity_inventory",
+                payload=manifest,
+            ).run
+            page = _identity_page()
+            page["identity_count"] = 0
+            run = sdk.discovery.submit(
+                run.id,
+                expected_revision=run.revision,
+                action="record_inventory_page",
+                payload=page,
+            ).run
+            task = sdk.discovery.next(run.id)
+            completed = sdk.discovery.submit(
+                run.id,
+                expected_revision=run.revision,
+                action="complete_run",
+                payload={"reason": "The complete inventory contained no entity aliases."},
+            ).run
+
+        self.assertTrue(task.identity_inspection["coverage_complete"])
+        self.assertIn("complete_run", task.allowed_actions)
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.candidates, ())
+
     def test_promotion_is_fail_closed_and_atomic(self) -> None:
         with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
             sdk = _sdk(temporary_directory)
@@ -944,6 +1217,184 @@ def _proposal(
         },
         "variation_operator": "seed_from_graph",
     }
+
+
+def _identity_manifest(run) -> dict[str, object]:
+    return {
+        "estimated_tokens": 240,
+        "graph_name": run.graph_name,
+        "graph_revision": run.graph_revision,
+        "identity_count": 4,
+        "inventory_hash": "d" * 64,
+        "label_field": "main.orders.customer_key",
+        "object_reference": "main.orders",
+        "order": "label_then_key",
+        "page_count": 1,
+        "record_key_field": "main.orders.order_id",
+        "row_count": 6,
+        "source_name": "warehouse-source" if run.id == "identity-loop" else "sample-only",
+        "token_budget": 1_000,
+        "truncated": False,
+    }
+
+
+def _identity_page() -> dict[str, object]:
+    return {
+        "content_hash": "e" * 64,
+        "error_category": None,
+        "id": "identity-page-0",
+        "identity_count": 4,
+        "index": 0,
+        "status": "succeeded",
+    }
+
+
+def _identity_proposal() -> dict[str, object]:
+    return {
+        "candidate_id": "same-customer-17",
+        "parent_ids": [],
+        "program": {
+            "blocking_field_indexes": [0],
+            "comparison": "llm_assessed",
+            "contradiction_field_indexes": [],
+            "kind": "entity_matching",
+            "self_match": {
+                "pair_policy": "distinct_unordered",
+                "record_key_field": "main.orders.order_id",
+            },
+            "source_fields": ["main.orders.customer_key"],
+            "source_transforms": [[]],
+            "target_fields": ["main.orders.customer_key"],
+            "target_transforms": [[]],
+            "threshold": None,
+        },
+        "variation_operator": "llm_identity_inventory",
+    }
+
+
+def _identity_group() -> dict[str, object]:
+    return {
+        "candidate_id": "same-customer-17",
+        "confidence": 0.87,
+        "evidence_refs": ["identity-page-0"],
+        "id": "customer-alias-17",
+        "member_keys": ["1004", "1001"],
+        "model": "provider/model:test@v1",
+        "producer": "test-provider",
+        "rationale": "The ordered identity inventory suggests one business entity.",
+    }
+
+
+def _identity_observation(*, phase: str) -> dict[str, object]:
+    return {
+        "candidate_id": "same-customer-17",
+        "observation": {
+            "dialect": "sqlite",
+            "duration_ms": 6,
+            "error_category": None,
+            "evidence_level": "sample_tested",
+            "execution": {
+                "artifact_hash": "b" * 64,
+                "blocking_strategy": "exact_value",
+                "blocking_version": "v1",
+                "executor_id": "test.read-only-sql",
+                "executor_version": "v1",
+            },
+            "id": f"identity-{phase}",
+            "metrics": {
+                "basis": "pairs",
+                "collision_count": 0,
+                "collision_rate": 0.0,
+                "confidence": 0.9,
+                "counterexample_count": 0,
+                "coverage": 1.0,
+                "distinct_source_count": 2,
+                "distinct_target_count": 2,
+                "evaluated_count": 1,
+                "matched_count": 1,
+            },
+            "phase": phase,
+            "query_hash": ("a" if phase == "support" else "c") * 64,
+            "row_limit": 50,
+            "status": "succeeded",
+            "truncated": False,
+        },
+    }
+
+
+def _complete_identity_inspection_run(sdk: Tarel, *, run_id: str):
+    current = sdk.discovery.start(
+        "entity_matching",
+        graph="warehouse",
+        sources=("warehouse-source",),
+        identity_inspection=True,
+        run_id=run_id,
+    ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="register_identity_inventory",
+        payload=_identity_manifest(current),
+    ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="record_inventory_page",
+        payload=_identity_page(),
+    ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        actor="provider",
+        action="propose_candidate",
+        payload=_identity_proposal(),
+    ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        actor="provider",
+        action="record_entity_group",
+        payload=_identity_group(),
+    ).run
+    for phase in ("support", "challenge"):
+        current = sdk.discovery.submit(
+            current.id,
+            expected_revision=current.revision,
+            action="record_observation",
+            payload=_identity_observation(phase=phase),
+        ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        actor="provider",
+        action="record_entity_reflection",
+        payload={
+            "candidate_id": "same-customer-17",
+            "confidence": 0.86,
+            "decision": "accept_as_exploratory",
+            "evidence_refs": ["customer-alias-17"],
+            "id": "identity-reflection-17",
+            "model": "provider/model:test@v1",
+            "observation_id": "identity-challenge",
+            "producer": "test-provider",
+            "summary": "The independent guard probe found no contradiction.",
+        },
+    ).run
+    current = sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="select_candidate",
+        payload={
+            "candidate_id": "same-customer-17",
+            "reason": "The concrete key group survived support and challenge probes.",
+        },
+    ).run
+    return sdk.discovery.submit(
+        current.id,
+        expected_revision=current.revision,
+        action="complete_run",
+        payload={"reason": "The selected alias group is ready for protected promotion."},
+    ).run
 
 
 def _complete_selected_run(

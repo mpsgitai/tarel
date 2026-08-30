@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from tarel.discovery.contracts import DiscoveryExecution, DiscoveryProgram
+from tarel.discovery.identity import EntityAliasGroup, IdentityFailure
 
 ENTITY_RESOLUTION_CONTRACT_VERSION = "tarel.entity-resolution-candidate.v0.2"
 ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION = "tarel.entity-resolution-candidate.v0.1"
@@ -149,6 +150,7 @@ class EntityResolutionProvenance:
     observation_ids: tuple[str, ...] = ()
     promotion_reason: str | None = None
     supersedes_candidate_id: str | None = None
+    source_names: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"producer": self.producer, "run_id": self.run_id}
@@ -162,6 +164,8 @@ class EntityResolutionProvenance:
             payload["promotion_reason"] = self.promotion_reason
         if self.supersedes_candidate_id is not None:
             payload["supersedes_candidate_id"] = self.supersedes_candidate_id
+        if self.source_names:
+            payload["source_names"] = list(self.source_names)
         return payload
 
     @classmethod
@@ -176,6 +180,7 @@ class EntityResolutionProvenance:
                 "observation_ids",
                 "promotion_reason",
                 "supersedes_candidate_id",
+                "source_names",
             },
         )
         observation_ids = data.get("observation_ids", [])
@@ -215,6 +220,9 @@ class EntityResolutionProvenance:
                 )
                 if data.get("supersedes_candidate_id") is not None
                 else None
+            ),
+            source_names=_identifier_array(
+                data.get("source_names", []), "source_names"
             ),
         )
 
@@ -407,6 +415,7 @@ class EntityResolutionCandidate:
     execution: DiscoveryExecution | None = None
     quality: EntityResolutionQuality | None = None
     self_match: SelfEntityMatch | None = None
+    identity_group: EntityAliasGroup | None = None
     state: str = "candidate"
     review: EntityResolutionReview | None = None
     contract_version: str = ENTITY_RESOLUTION_LEGACY_CONTRACT_VERSION
@@ -425,7 +434,12 @@ class EntityResolutionCandidate:
     def human_reviewed(self) -> bool:
         return self.review is not None
 
-    def to_dict(self, *, include_revision: bool = True) -> dict[str, object]:
+    def to_dict(
+        self,
+        *,
+        include_revision: bool = True,
+        include_identity_values: bool = True,
+    ) -> dict[str, object]:
         payload: dict[str, object] = {
             "contract_version": self.contract_version,
             "evidence": self.evidence.to_dict(),
@@ -445,6 +459,10 @@ class EntityResolutionCandidate:
             payload["quality"] = self.quality.to_dict() if self.quality else None
             if self.self_match is not None:
                 payload["self_match"] = self.self_match.to_dict()
+            if self.identity_group is not None:
+                payload["identity_group"] = self.identity_group.to_dict(
+                    include_members=include_identity_values
+                )
         if include_revision:
             payload["revision"] = self.revision
         return payload
@@ -477,7 +495,7 @@ class EntityResolutionCandidate:
             data,
             common_fields | version_fields,
             "entity-resolution candidate",
-            optional={"revision", "self_match"},
+            optional={"identity_group", "revision", "self_match"},
         )
         graph = _object(data.get("graph"), "candidate graph")
         _fields(graph, {"name", "revision"}, "candidate graph")
@@ -495,6 +513,19 @@ class EntityResolutionCandidate:
             raise EntityResolutionFailure(
                 "invalid_entity_resolution", "self_match must be an object or null."
             )
+        identity_group_value = data.get("identity_group")
+        if identity_group_value is not None and not isinstance(identity_group_value, dict):
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution", "identity_group must be an object or null."
+            )
+        try:
+            identity_group = (
+                EntityAliasGroup.from_dict(identity_group_value)
+                if isinstance(identity_group_value, dict)
+                else None
+            )
+        except IdentityFailure as exc:
+            raise EntityResolutionFailure("invalid_entity_resolution", str(exc)) from exc
         candidate = cls(
             id=_identifier(data.get("id"), "candidate id"),
             graph_name=_text(graph.get("name"), "graph name"),
@@ -532,6 +563,7 @@ class EntityResolutionCandidate:
                 if isinstance(self_match_value, dict)
                 else None
             ),
+            identity_group=identity_group,
             state=_choice(data.get("state"), "candidate state", ENTITY_RESOLUTION_STATES),
             review=EntityResolutionReview.from_dict(review_value) if review_value else None,
             contract_version=str(contract_version),
@@ -562,7 +594,7 @@ class EntityResolutionMatch:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "candidate": self.candidate.to_dict(),
+            "candidate": self.candidate.to_dict(include_identity_values=False),
             "requires_runtime_validation": self.requires_runtime_validation,
             "scope": "self_object" if self.candidate.self_match else "cross_object",
             "source": self.source_reference,
@@ -572,6 +604,39 @@ class EntityResolutionMatch:
                 None
                 if self.candidate.state == "reviewed"
                 else "Unreviewed hypothesis; probe it at runtime before presenting a result."
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EntityAliasMatch:
+    candidate_id: str
+    group: EntityAliasGroup
+    state: str
+    object_reference: str
+    record_key_field: str
+
+    @property
+    def usage(self) -> str:
+        return "confirmed" if self.state == "reviewed" else "exploratory_only"
+
+    @property
+    def requires_runtime_validation(self) -> bool:
+        return self.state != "reviewed"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "candidate_id": self.candidate_id,
+            "group": self.group.to_dict(),
+            "object": self.object_reference,
+            "record_key_field": self.record_key_field,
+            "requires_runtime_validation": self.requires_runtime_validation,
+            "state": self.state,
+            "usage": self.usage,
+            "warning": (
+                None
+                if self.state == "reviewed"
+                else "Unreviewed alias group; validate it before presenting a result."
             ),
         }
 
@@ -597,6 +662,7 @@ def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -
             or candidate.execution is not None
             or candidate.quality is not None
             or candidate.self_match is not None
+            or candidate.identity_group is not None
         ):
             raise EntityResolutionFailure(
                 "invalid_entity_resolution",
@@ -664,6 +730,30 @@ def validate_entity_resolution_candidate(candidate: EntityResolutionCandidate) -
                     "invalid_entity_resolution",
                     "Self-entity projection does not match its discovery program.",
                 )
+        if candidate.identity_group is not None:
+            try:
+                EntityAliasGroup.from_dict(candidate.identity_group.to_dict())
+            except IdentityFailure as exc:
+                raise EntityResolutionFailure(
+                    "invalid_entity_resolution", str(exc)
+                ) from exc
+            if (
+                candidate.self_match is None
+                or candidate.program.comparison != "llm_assessed"
+                or candidate.identity_group.candidate_id
+                != candidate.provenance.discovery_candidate_id
+                or not candidate.provenance.source_names
+            ):
+                raise EntityResolutionFailure(
+                    "invalid_entity_resolution",
+                    "Persisted alias groups require their LLM-assessed Self-Entity candidate "
+                    "and explicit source provenance.",
+                )
+        elif candidate.program.comparison == "llm_assessed":
+            raise EntityResolutionFailure(
+                "invalid_entity_resolution",
+                "LLM-assessed Self-Entity candidates require one concrete alias group.",
+            )
         provenance = candidate.provenance
         if (
             provenance.discovery_candidate_id is None

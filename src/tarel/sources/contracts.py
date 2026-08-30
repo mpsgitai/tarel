@@ -10,7 +10,9 @@ from pathlib import PurePosixPath
 from typing import Any
 
 SOURCE_CONTRACT_VERSION = "tarel.source.v0.1"
-ENRICHMENT_PERMISSIONS = frozenset({"aggregates", "raw_samples", "small_domains"})
+ENRICHMENT_PERMISSIONS = frozenset(
+    {"aggregates", "entity_aliases", "raw_samples", "small_domains"}
+)
 
 _SOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _CONNECTOR_NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -148,6 +150,13 @@ def validate_source(profile: SourceProfile) -> None:
         raise SourceFailure(
             "invalid_enrichment_policy",
             "Small-domain access requires aggregate profiling permission.",
+        )
+    if "entity_aliases" in profile.enrichment_permissions and not profile.allows_enrichment(
+        "aggregates"
+    ):
+        raise SourceFailure(
+            "invalid_enrichment_policy",
+            "Entity-alias inspection requires aggregate permission for validation evidence.",
         )
     for graph in profile.graphs:
         if not _SOURCE_NAME.fullmatch(graph):

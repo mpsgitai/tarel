@@ -102,8 +102,10 @@ from tarel.entity_resolution.application import (
     import_entity_resolution_candidate_use_case,
     list_entity_resolution_candidates_use_case,
     load_entity_resolution_candidate_use_case,
+    resolve_entity_aliases_use_case,
 )
 from tarel.entity_resolution.contracts import (
+    EntityAliasMatch,
     EntityResolutionCandidate,
     EntityResolutionMatch,
 )
@@ -1804,6 +1806,7 @@ class DiscoveryAPI(_RuntimeAPI):
         probe_budget: int = 40,
         candidate_budget: int = 20,
         advisor_provider: str | None = None,
+        identity_inspection: bool = False,
         run_id: str | None = None,
     ) -> DiscoveryChangeResult:
         return start_discovery_run_use_case(
@@ -1814,6 +1817,7 @@ class DiscoveryAPI(_RuntimeAPI):
             probe_budget=probe_budget,
             candidate_budget=candidate_budget,
             advisor_provider=advisor_provider,
+            identity_inspection=identity_inspection,
             run_id=run_id,
             runtime=self._runtime,
         )
@@ -1963,6 +1967,23 @@ class EntityResolutionAPI(_RuntimeAPI):
             decision=decision,
             reason=reason,
             expected_revision=expected_revision,
+            runtime=self._runtime,
+        )
+
+    def resolve(
+        self,
+        graph: str,
+        *,
+        object: str,
+        key: str,
+        mode: str = "confirmed_then_candidates",
+    ) -> tuple[EntityAliasMatch, ...]:
+        """Resolve one record key through protected same-object alias groups."""
+        return resolve_entity_aliases_use_case(
+            graph,
+            object_reference=object,
+            record_key=key,
+            mode=mode,
             runtime=self._runtime,
         )
 

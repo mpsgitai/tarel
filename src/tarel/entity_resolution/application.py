@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tarel.entity_resolution.contracts import (
     ENTITY_RESOLUTION_MODES,
+    EntityAliasMatch,
     EntityResolutionCandidate,
     EntityResolutionFailure,
     EntityResolutionMatch,
@@ -20,6 +21,7 @@ from tarel.graph.revision import graph_revision
 from tarel.graph.store import FileGraphStore
 from tarel.relationships.core import RelationshipFailure, resolve_field
 from tarel.runtime import TarelRuntime
+from tarel.sources.store import FileSourceStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +44,7 @@ def import_entity_resolution_candidate_use_case(
         )
     graph = _graph_store(runtime).load(candidate.graph_name)
     _validate_candidate_binding(candidate, graph)
+    _validate_alias_policy(candidate, runtime=runtime)
     store = _entity_store(runtime)
     _validate_self_supersede(candidate, store)
     if store.exists(candidate.id):
@@ -154,6 +157,81 @@ def find_entity_resolution_candidates_for_graph_use_case(
     )
 
 
+def resolve_entity_aliases_use_case(
+    graph_name: str,
+    *,
+    object_reference: str,
+    record_key: str,
+    mode: str = "confirmed_then_candidates",
+    runtime: TarelRuntime | None = None,
+) -> tuple[EntityAliasMatch, ...]:
+    if mode not in ENTITY_RESOLUTION_MODES:
+        raise EntityResolutionFailure(
+            "invalid_entity_resolution_mode",
+            f"Unsupported entity-resolution retrieval mode: {mode}",
+        )
+    if not record_key:
+        raise EntityResolutionFailure(
+            "invalid_entity_resolution", "Entity alias lookup requires a record key."
+        )
+    graph = _graph_store(runtime).load(graph_name)
+    object_node = next(
+        (
+            node
+            for node in graph.nodes
+            if node.type in {"table", "view"}
+            and (node.id == object_reference or node.label == object_reference)
+        ),
+        None,
+    )
+    if object_node is None:
+        raise EntityResolutionFailure(
+            "entity_resolution_object_not_found",
+            f"Entity-resolution object not found: {object_reference}",
+        )
+    bound_candidates = [
+        item
+        for item in list_entity_resolution_candidates_use_case(
+            graph_name=graph_name, runtime=runtime
+        )
+        if item.graph_revision == graph_revision(graph)
+        and item.state != "rejected"
+        and item.self_match is not None
+        and item.self_match.object_id == object_node.id
+        and item.identity_group is not None
+    ]
+    for candidate in bound_candidates:
+        _validate_alias_policy(candidate, runtime=runtime)
+    candidates = [
+        item
+        for item in bound_candidates
+        if item.identity_group is not None
+        and record_key in item.identity_group.member_keys
+    ]
+    if mode == "confirmed_only":
+        candidates = [item for item in candidates if item.state == "reviewed"]
+    elif mode == "confirmed_then_candidates":
+        reviewed = [item for item in candidates if item.state == "reviewed"]
+        if reviewed:
+            candidates = reviewed
+    matches = []
+    for candidate in sorted(candidates, key=lambda item: item.id):
+        assert candidate.self_match is not None
+        assert candidate.identity_group is not None
+        matches.append(
+            EntityAliasMatch(
+                candidate_id=candidate.id,
+                group=candidate.identity_group,
+                state=candidate.state,
+                object_reference=object_node.label,
+                record_key_field=_field_reference(
+                    graph, candidate.self_match.record_key_field_id
+                ),
+            )
+        )
+    return tuple(matches)
+
+
 def decide_entity_resolution_candidate_use_case(
     candidate_id: str,
     *,
@@ -179,6 +257,7 @@ def decide_entity_resolution_candidate_use_case(
         )
     graph = _graph_store(runtime).load(candidate.graph_name)
     _validate_candidate_binding(candidate, graph)
+    _validate_alias_policy(candidate, runtime=runtime)
     changed = review_candidate(candidate, decision=decision, reason=reason)
     return EntityResolutionChangeResult(
         candidate=changed,
@@ -250,8 +329,18 @@ def _match(
     )
 
 
-def _field_pair(candidate: EntityResolutionCandidate) -> tuple[str, str]:
+def _field_pair(candidate: EntityResolutionCandidate) -> tuple[str, ...]:
     first, second = sorted((candidate.source_field_id, candidate.target_field_id))
+    if candidate.identity_group is not None:
+        return (
+            first,
+            second,
+            json.dumps(
+                candidate.identity_group.member_keys,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
     return first, second
 
 
@@ -303,10 +392,40 @@ def _self_semantic_key(candidate: EntityResolutionCandidate) -> str | None:
         "graph_revision": candidate.graph_revision,
         "program": candidate.program.to_dict(),
         "self_match": candidate.self_match.to_dict(),
+        "identity_group": (
+            list(candidate.identity_group.member_keys)
+            if candidate.identity_group is not None
+            else None
+        ),
         "blocking_strategy": execution.blocking_strategy if execution else None,
         "blocking_version": execution.blocking_version if execution else None,
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _validate_alias_policy(
+    candidate: EntityResolutionCandidate,
+    *,
+    runtime: TarelRuntime | None,
+) -> None:
+    if candidate.identity_group is None:
+        return
+    if not candidate.provenance.source_names:
+        raise EntityResolutionFailure(
+            "entity_aliases_not_allowed",
+            "Durable entity aliases require explicit source provenance.",
+        )
+    store = _source_store(runtime)
+    for source_name in candidate.provenance.source_names:
+        source = store.load(source_name)
+        if (
+            candidate.graph_name not in source.graphs
+            or not source.allows_enrichment("entity_aliases")
+        ):
+            raise EntityResolutionFailure(
+                "entity_aliases_not_allowed",
+                f"Source {source_name} does not permit durable entity alias keys.",
+            )
 
 
 def _field_by_id(graph: GraphDocument, field_id: str) -> GraphNode:
@@ -348,3 +467,7 @@ def _graph_store(runtime: TarelRuntime | None) -> FileGraphStore:
 
 def _entity_store(runtime: TarelRuntime | None) -> FileEntityResolutionStore:
     return FileEntityResolutionStore() if runtime is None else runtime.entity_resolution_store()
+
+
+def _source_store(runtime: TarelRuntime | None) -> FileSourceStore:
+    return FileSourceStore() if runtime is None else runtime.source_store()

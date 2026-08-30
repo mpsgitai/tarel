@@ -45,9 +45,11 @@ without `self_match`, equal endpoints are invalid.
 
 The executor must remove same-record pairs, canonicalize each remaining pair by technical key, and
 count A/B once rather than A/B plus B/A. Record successful support and challenge with
-`metrics.basis: pairs`. Persist no record keys, matched pairs, rows, assignments, or groups in
-TAREL. The fixed pair policy is a caller obligation recorded for reproducibility, not proof that
-TAREL executed or audited matcher code.
+`metrics.basis: pairs`. Ordinary Self-Entity programs persist no record keys or assignments. The
+separate identity-inspection path may persist one concrete protected key group per candidate only
+when the source explicitly grants `entity_aliases`; inventory rows remain ephemeral in all cases.
+The fixed pair policy is a caller obligation recorded for reproducibility, not proof that TAREL
+executed or audited matcher code.
 
 Promotion remains exploratory and requires the usual measured risk and versioned execution data.
 If TAREL reports `entity_resolution_supersede_required`, inspect the existing active candidate and

@@ -11,7 +11,15 @@ from tarel.discovery.contracts import (
     DiscoverySelfMatch,
     DiscoveryTransform,
 )
+from tarel.discovery.identity import (
+    EntityAliasGroup,
+    EntityGroupReflection,
+    IdentityInspection,
+    IdentityInventoryManifest,
+    IdentityInventoryPage,
+)
 from tarel.entity_resolution.contracts import (
+    EntityAliasMatch,
     EntityResolutionCandidate,
     EntityResolutionEvidence,
     EntityResolutionMatch,
@@ -38,6 +46,12 @@ __all__ = [
     "DiscoveryRun",
     "DiscoverySelfMatch",
     "DiscoveryTransform",
+    "EntityAliasGroup",
+    "EntityAliasMatch",
+    "EntityGroupReflection",
+    "IdentityInspection",
+    "IdentityInventoryManifest",
+    "IdentityInventoryPage",
     "EntityResolutionCandidate",
     "EntityResolutionEvidence",
     "EntityResolutionMatch",

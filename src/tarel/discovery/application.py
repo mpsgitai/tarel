@@ -18,6 +18,11 @@ from tarel.discovery.contracts import (
     allowed_discovery_actions,
     apply_discovery_action,
 )
+from tarel.discovery.identity import (
+    IdentityFailure,
+    IdentityInspection,
+    IdentityInventoryManifest,
+)
 from tarel.discovery.store import FileDiscoveryStore
 from tarel.entity_resolution.application import (
     import_entity_resolution_candidate_use_case,
@@ -81,6 +86,7 @@ class DiscoveryTask:
     field_hints: tuple[dict[str, object], ...] = ()
     probe_ladder: tuple[dict[str, str], ...] = ()
     raw_sample_access: str = "host_controlled"
+    identity_inspection: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -95,6 +101,7 @@ class DiscoveryTask:
             "goal": self.goal,
             "field_hints": list(self.field_hints),
             "kind": self.kind,
+            "identity_inspection": self.identity_inspection,
             "probe_ladder": list(self.probe_ladder),
             "raw_sample_access": self.raw_sample_access,
             "revision": self.revision,
@@ -144,9 +151,15 @@ def start_discovery_run_use_case(
     probe_budget: int = 40,
     candidate_budget: int = 20,
     advisor_provider: str | None = None,
+    identity_inspection: bool = False,
     run_id: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> DiscoveryChangeResult:
+    if identity_inspection and (kind != "entity_matching" or len(source_names) != 1):
+        raise DiscoveryFailure(
+            "invalid_discovery",
+            "Identity inspection requires entity matching and exactly one configured source.",
+        )
     graph = _graph_store(runtime).load(graph_name)
     _validate_sources(graph_name, source_names, runtime=runtime)
     prefix = kind.replace("_discovery", "").replace("_matching", "")
@@ -167,6 +180,11 @@ def start_discovery_run_use_case(
             "source_names": list(source_names),
             "status": "open",
             "steps": [],
+            **(
+                {"identity_inspection": IdentityInspection().to_dict()}
+                if identity_inspection
+                else {}
+            ),
         }
     )
     store = _discovery_store(runtime)
@@ -207,7 +225,14 @@ def next_discovery_task_use_case(
         run_id=run.id,
         revision=run.revision,
         kind=run.kind,
-        goal=run.question or _default_goal(run.kind),
+        goal=(
+            run.question
+            or (
+                "Find concrete same-entity technical keys within one graph object."
+                if run.identity_inspection is not None
+                else _default_goal(run.kind)
+            )
+        ),
         allowed_actions=allowed_discovery_actions(run),
         candidates=tuple(_candidate_summary(item) for item in run.candidates),
         probe_budget=run.probe_budget,
@@ -215,12 +240,15 @@ def next_discovery_task_use_case(
         candidate_budget=run.candidate_budget,
         candidates_used=len(run.candidates),
         field_hints=(
-            _entity_field_hints(graph)
+            _entity_field_hints(
+                graph, self_only=run.identity_inspection is not None
+            )
             if run.kind == "entity_matching"
             else ()
         ),
         probe_ladder=_probe_ladder(run),
         raw_sample_access=_raw_sample_access(run, runtime=runtime),
+        identity_inspection=_identity_inspection_summary(run),
     )
 
 
@@ -243,6 +271,11 @@ def submit_discovery_step_use_case(
     graph = _validate_current_graph(run, runtime=runtime)
     if action == "record_observation":
         _validate_observation_policy(run, runtime=runtime)
+    if action == "register_identity_inventory":
+        _validate_identity_inventory_policy(run, runtime=runtime)
+        _validate_identity_inventory_bindings(graph, run, payload)
+    if action == "record_entity_group":
+        _validate_entity_alias_policy(run, runtime=runtime)
     if action == "propose_candidate":
         program = payload.get("program")
         if not isinstance(program, dict):
@@ -299,6 +332,8 @@ def promote_discovery_candidates_use_case(
                 "invalid_discovery_promotion",
                 "Promote one entity-matching candidate at a time.",
             )
+        if run.identity_inspection is not None:
+            _validate_identity_promotion(run, selected[0])
         candidate = entity_candidate_from_discovery(
             run,
             selected[0],
@@ -378,6 +413,56 @@ def promote_discovery_candidates_use_case(
     )
 
 
+def _validate_identity_promotion(
+    run: DiscoveryRun, candidate: DiscoveryCandidate
+) -> None:
+    inspection = run.identity_inspection
+    manifest = inspection.manifest if inspection else None
+    group = inspection.group_for_candidate(candidate.id) if inspection else None
+    support = next(
+        (
+            item
+            for item in reversed(candidate.observations)
+            if item.phase == "support" and item.status == "succeeded"
+        ),
+        None,
+    )
+    challenge = next(
+        (
+            item
+            for item in reversed(candidate.observations)
+            if item.phase == "challenge" and item.status == "succeeded"
+        ),
+        None,
+    )
+    reflection = next(
+        (
+            item
+            for item in reversed(inspection.reflections if inspection else ())
+            if challenge is not None
+            and item.candidate_id == candidate.id
+            and item.observation_id == challenge.id
+        ),
+        None,
+    )
+    if (
+        manifest is None
+        or not inspection.coverage_complete
+        or group is None
+        or support is None
+        or challenge is None
+        or support.query_hash == challenge.query_hash
+        or reflection is None
+        or reflection.decision
+        not in {"accept_as_exploratory", "recommend_promotion"}
+    ):
+        raise DiscoveryFailure(
+            "incomplete_identity_validation",
+            "Identity promotion requires complete inventory coverage, one concrete key group, "
+            "distinct successful support and challenge probes, and an accepting reflection.",
+        )
+
+
 def advise_discovery_run_use_case(
     run_id: str,
     *,
@@ -402,6 +487,12 @@ def advise_discovery_run_use_case(
         raise DiscoveryFailure(
             "discovery_provider_not_enabled",
             "This discovery run was not started with a provider advisor.",
+        )
+    if run.identity_inspection is not None:
+        raise DiscoveryFailure(
+            "identity_provider_orchestrator_required",
+            "Identity inventory values stay ephemeral; a coding-agent or provider host must "
+            "inspect them and submit structured groups through the normal discovery actions.",
         )
     if "propose_candidate" not in allowed_discovery_actions(run):
         raise DiscoveryFailure(
@@ -585,6 +676,59 @@ def _validate_observation_policy(
             )
 
 
+def _validate_identity_inventory_policy(
+    run: DiscoveryRun, *, runtime: TarelRuntime | None
+) -> None:
+    source = _source_store(runtime).load(run.source_names[0])
+    if not source.allows_enrichment("entity_aliases"):
+        raise DiscoveryFailure(
+            "entity_aliases_not_allowed",
+            f"Source {source.name} does not permit protected identity inspection.",
+        )
+
+
+def _validate_entity_alias_policy(
+    run: DiscoveryRun, *, runtime: TarelRuntime | None
+) -> None:
+    source = _source_store(runtime).load(run.source_names[0])
+    if not source.allows_enrichment("entity_aliases"):
+        raise DiscoveryFailure(
+            "entity_aliases_not_allowed",
+            f"Source {source.name} does not permit durable entity alias keys.",
+        )
+
+
+def _validate_identity_inventory_bindings(
+    graph: GraphDocument,
+    run: DiscoveryRun,
+    payload: dict[str, Any],
+) -> None:
+    try:
+        manifest = IdentityInventoryManifest.from_dict(payload)
+    except IdentityFailure as exc:
+        raise DiscoveryFailure(exc.code, str(exc)) from exc
+    if manifest.source_name != run.source_names[0]:
+        raise DiscoveryFailure(
+            "discovery_source_graph_mismatch",
+            "Identity inventory source must match its discovery run.",
+        )
+    if manifest.graph_name != run.graph_name or manifest.graph_revision != run.graph_revision:
+        raise DiscoveryFailure(
+            "discovery_graph_revision_mismatch",
+            "Identity inventory must bind the discovery run graph and revision.",
+        )
+    try:
+        fields = tuple(resolve_field(graph, item) for item in manifest.projected_fields)
+    except RelationshipFailure as exc:
+        raise DiscoveryFailure("discovery_field_not_found", str(exc)) from exc
+    object_ids = {item.object_node.id for item in fields}
+    if len(object_ids) != 1 or fields[0].object_node.label != manifest.object_reference:
+        raise DiscoveryFailure(
+            "invalid_identity_inventory",
+            "Identity inventory key and label must belong to its object.",
+        )
+
+
 def _candidate_summary(candidate: DiscoveryCandidate) -> dict[str, object]:
     latest = candidate.observations[-1] if candidate.observations else None
     return {
@@ -599,8 +743,51 @@ def _candidate_summary(candidate: DiscoveryCandidate) -> dict[str, object]:
     }
 
 
+def _identity_inspection_summary(run: DiscoveryRun) -> dict[str, object] | None:
+    inspection = run.identity_inspection
+    if inspection is None:
+        return None
+    manifest = inspection.manifest
+    successful_indexes = {
+        item.index for item in inspection.pages if item.status == "succeeded"
+    }
+    return {
+        "alias_group_count": len(inspection.groups),
+        "coverage_complete": inspection.coverage_complete,
+        "covered_identities": inspection.covered_identities,
+        "failed_pages": [
+            {
+                "error_category": item.error_category,
+                "id": item.id,
+                "index": item.index,
+            }
+            for item in inspection.pages
+            if item.status == "failed"
+        ],
+        "identity_count": manifest.identity_count if manifest else None,
+        "inventory_hash": manifest.inventory_hash if manifest else None,
+        "label_field": manifest.label_field if manifest else None,
+        "next_page_indexes": (
+            [
+                index
+                for index in range(manifest.page_count)
+                if index not in successful_indexes
+            ]
+            if manifest
+            else []
+        ),
+        "object_reference": manifest.object_reference if manifest else None,
+        "page_count": manifest.page_count if manifest else None,
+        "phase": inspection.phase,
+        "record_key_field": manifest.record_key_field if manifest else None,
+        "reflection_count": len(inspection.reflections),
+    }
+
+
 def _entity_field_hints(
     graph: GraphDocument,
+    *,
+    self_only: bool = False,
 ) -> tuple[dict[str, object], ...]:
     nodes = graph.node_by_id()
     fields: list[tuple[GraphNode, GraphNode, set[str]]] = []
@@ -664,6 +851,8 @@ def _entity_field_hints(
             ),
         )
     )
+    if self_only:
+        return ordered_self[:8]
     return (*ordered_self[:4], *cross_hints[: 8 - min(4, len(ordered_self))])
 
 
@@ -681,6 +870,29 @@ def _probe_ladder(run: DiscoveryRun) -> tuple[dict[str, str], ...]:
             {
                 "code": "assess",
                 "purpose": "Select or reject only after a successful challenge.",
+            },
+        )
+    if run.identity_inspection is not None:
+        return (
+            {
+                "code": "identity_inventory",
+                "purpose": "Inspect the complete distinct key/label inventory ordered by label.",
+            },
+            {
+                "code": "propose_group",
+                "purpose": "Register only concrete same-entity key groups, not a global rule.",
+            },
+            {
+                "code": "support_probe",
+                "purpose": "Execute a bounded read-only SELECT supporting the suspected group.",
+            },
+            {
+                "code": "challenge_probe",
+                "purpose": "Use a different SELECT to seek contradictions and false merges.",
+            },
+            {
+                "code": "reflect",
+                "purpose": "Accept, revise, or reject the group with its confidence explicit.",
             },
         )
     return (
