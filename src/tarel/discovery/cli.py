@@ -44,6 +44,11 @@ def add_discovery_commands(
     start.add_argument("--probe-budget", type=int)
     start.add_argument("--candidate-budget", type=int)
     start.add_argument("--advisor-provider")
+    start.add_argument(
+        "--identity-inspection",
+        action="store_true",
+        help="Enable the protected, same-object key/label identity loop.",
+    )
     start.add_argument("--id", dest="run_id")
     _format(start)
 
@@ -136,10 +141,14 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
             probe_budget=args.probe_budget or preset_probe,
             candidate_budget=args.candidate_budget or preset_candidate,
             advisor_provider=args.advisor_provider,
+            identity_inspection=args.identity_inspection,
             run_id=args.run_id,
         )
         _render(
-            {"path": str(result.path), "run": result.run.to_dict()},
+            {
+                "path": str(result.path),
+                "run": result.run.to_dict(include_identity_values=False),
+            },
             output_format=args.output_format,
         )
         return 0
@@ -158,7 +167,10 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
             payload=_read_json(args.source),
         )
         _render(
-            {"path": str(result.path), "run": result.run.to_dict()},
+            {
+                "path": str(result.path),
+                "run": result.run.to_dict(include_identity_values=False),
+            },
             output_format=args.output_format,
         )
         return 0
@@ -175,7 +187,7 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
                 "path": str(result.path),
                 "proposed_count": result.proposed_count,
                 "provider": result.provider,
-                "run": result.run.to_dict(),
+                "run": result.run.to_dict(include_identity_values=False),
             },
             output_format=args.output_format,
         )
@@ -191,7 +203,7 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
             {
                 "edges": [edge.to_dict() for edge in result.edges],
                 "entity_candidates": [
-                    candidate.to_dict()
+                    candidate.to_dict(include_identity_values=False)
                     for candidate in result.entity_candidates
                 ],
                 "graph": result.graph.name,
@@ -203,14 +215,21 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
         return 0
     if args.discovery_command == "show":
         _render(
-            load_discovery_run_use_case(args.run_id).to_dict(),
+            load_discovery_run_use_case(args.run_id).to_dict(
+                include_identity_values=False
+            ),
             output_format=args.output_format,
         )
         return 0
     if args.discovery_command == "list":
         runs = list_discovery_runs_use_case(graph_name=args.graph, kind=args.kind)
         _render(
-            {"count": len(runs), "runs": [run.to_dict() for run in runs]},
+            {
+                "count": len(runs),
+                "runs": [
+                    run.to_dict(include_identity_values=False) for run in runs
+                ],
+            },
             output_format=args.output_format,
         )
         return 0

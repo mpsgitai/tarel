@@ -35,6 +35,13 @@ read-only checks; TAREL does not become a general SQL executor or make entity-re
 10. If equivalent Self-Entity evidence already exists, do not discard the new run or overwrite the
     old artifact. Inspect the predecessor, then use `discovery promote --supersedes ID` only when
     it is the active unreviewed form of the same typed program.
+11. When `next` reports an `identity_inspection`, follow its stricter same-object sequence. Build a
+    complete key/label inventory ordered by label, keep its values in host memory, register only
+    manifest/page hashes, and propose concrete `llm_assessed` key groups. Execute different
+    read-only support and challenge SELECTs before a structured reflection. Never place inventory
+    rows or SQL in a payload; durable group keys require the source's `entity_aliases` grant.
 
 Read [references/join-discovery.md](references/join-discovery.md) for join runs and
-[references/entity-matching.md](references/entity-matching.md) for entity runs.
+[references/entity-matching.md](references/entity-matching.md) for entity runs. Read
+[references/self-entity-discovery.md](references/self-entity-discovery.md) whenever
+`identity_inspection` is present.

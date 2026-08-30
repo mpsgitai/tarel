@@ -54,8 +54,12 @@ combination of `unicode_nfkc`, `trim`, `casefold`, `collapse_whitespace`, and
 not accepted. The operations are applied to both endpoints in their declared order; asymmetric
 parsing needs a future reviewed contract rather than an implicit convention.
 
-Raw samples, record values, original counterexamples, query text, secrets, and local paths are
-outside the artifact. Stored files use mode `0600` below `.tarel/entity-resolution/`.
+Raw samples, inventory rows, original counterexamples, query text, secrets, and local paths are
+outside the artifact. An identity-inspection promotion is the one bounded exception for record
+values: it may store one concrete same-object `identity_group` of technical keys when the source
+explicitly grants `entity_aliases`. Stored files use mode `0600` below
+`.tarel/entity-resolution/`; graph, browser, search, and context projections never contain those
+keys.
 
 The v0.2 program reuses the typed discovery vocabulary: normalized exact, normalized Levenshtein,
 or token-set comparison; one to three field pairs; allowlisted transforms; threshold; blocking
@@ -189,8 +193,10 @@ different rows, not a field with itself. Its additional `self_match` block remov
 The outer block is the retrieval- and GUI-friendly graph projection; the nested program is the
 exact discovery semantics. `distinct_unordered` means the caller must exclude equal record keys
 and count A/B only once. Successful support and challenge evidence must therefore use the `pairs`
-metric basis. TAREL validates the declaration and aggregates but does not receive technical keys,
-pair rows, assignments, or entity groups and does not execute the matcher.
+metric basis. Ordinary Self-Entity runs do not send technical keys, pair rows, assignments, or
+entity groups to TAREL. The optional identity-inspection path can persist a concrete protected key
+group after a complete key/label inventory and independent probes; it still does not execute the
+matcher.
 
 All record, comparison, and contradiction fields must resolve to `object_id`. The record key must
 be separate from every scoring or guard field. Equal endpoints without this typed Self-Entity block
@@ -204,6 +210,12 @@ tarel entity import --source sanitized-candidate.json --format json
 tarel entity find music \
   --source-field mb.ArtistCredit.Name \
   --target-field mb.Artist.Name \
+  --mode confirmed_then_candidates \
+  --format json
+
+tarel entity resolve music \
+  --object music.tracks \
+  --key TRACK-1020 \
   --mode confirmed_then_candidates \
   --format json
 
@@ -290,10 +302,18 @@ confirmed = tarel.entity_resolution.find(
     target="mb.Artist.Name",
     mode="confirmed_only",
 )
+
+aliases = tarel.entity_resolution.resolve(
+    "music",
+    object="music.tracks",
+    key="TRACK-1020",
+    mode="confirmed_then_candidates",
+)
 ```
 
 CLI and SDK call the same application use cases. The public SDK also exports the typed candidate,
-rule, evidence, provenance, match, `DiscoverySelfMatch`, and `SelfEntityMatch` values.
+rule, evidence, provenance, match, `DiscoverySelfMatch`, `SelfEntityMatch`,
+`IdentityInventoryManifest`, and `EntityAliasGroup` values.
 
 ## Retrieval policy
 
@@ -340,11 +360,15 @@ cannot consume them.
 
 The browser lists candidate evidence, quality rating, threshold, executor identity, blocking
 strategy, and quality warnings in each connected table inspector. A Self-Entity card additionally
-shows object, record key, comparison fields, contradiction guards, and pair policy. A
+shows object, record key, comparison fields, contradiction guards, pair policy, and protected group
+ID/member count when present. A
 disabled-by-default
 **Entity candidates** toggle renders unreviewed candidates as dashed violet edges and reviewed
 rules as solid violet edges. The projection includes aggregate evidence and provenance, never raw
-records.
+records or alias keys.
+
+See [Self-Entity discovery](self-entity-discovery.md) for the identity inventory, AVO probes,
+permissions, CLI actions, and direct alias lookup.
 
 TAREL still does not cluster records, execute matching, or inject entity hypotheses into ordinary
 context packets. V2 or another controlled caller owns runtime probing. DiscoveryRun observations

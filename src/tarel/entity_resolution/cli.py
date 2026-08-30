@@ -13,6 +13,7 @@ from tarel.entity_resolution.application import (
     import_entity_resolution_candidate_use_case,
     list_entity_resolution_candidates_use_case,
     load_entity_resolution_candidate_use_case,
+    resolve_entity_aliases_use_case,
 )
 from tarel.entity_resolution.contracts import (
     ENTITY_RESOLUTION_MODES,
@@ -68,6 +69,20 @@ def add_entity_resolution_commands(
     )
     _output_format(find)
 
+    resolve = commands.add_parser(
+        "resolve",
+        help="Resolve one record key through protected same-object alias groups.",
+    )
+    resolve.add_argument("graph")
+    resolve.add_argument("--object", required=True, dest="object_reference")
+    resolve.add_argument("--key", required=True)
+    resolve.add_argument(
+        "--mode",
+        choices=tuple(sorted(ENTITY_RESOLUTION_MODES)),
+        default="confirmed_then_candidates",
+    )
+    _output_format(resolve)
+
     review = commands.add_parser(
         "review",
         help="Record one explicit human approval or rejection.",
@@ -87,7 +102,7 @@ def dispatch_entity_resolution(args: argparse.Namespace) -> int | None:
         result = import_entity_resolution_candidate_use_case(candidate)
         _render(
             {
-                "candidate": result.candidate.to_dict(),
+                "candidate": result.candidate.to_dict(include_identity_values=False),
                 "changed": result.changed,
                 "path": str(result.path),
             },
@@ -101,7 +116,9 @@ def dispatch_entity_resolution(args: argparse.Namespace) -> int | None:
             candidates = tuple(item for item in candidates if item.state in states)
         _render(
             {
-                "candidates": [item.to_dict() for item in candidates],
+                "candidates": [
+                    item.to_dict(include_identity_values=False) for item in candidates
+                ],
                 "count": len(candidates),
             },
             output_format=args.output_format,
@@ -109,7 +126,10 @@ def dispatch_entity_resolution(args: argparse.Namespace) -> int | None:
         return 0
     if args.entity_command == "show":
         candidate = load_entity_resolution_candidate_use_case(args.candidate_id)
-        _render(candidate.to_dict(), output_format=args.output_format)
+        _render(
+            candidate.to_dict(include_identity_values=False),
+            output_format=args.output_format,
+        )
         return 0
     if args.entity_command == "find":
         matches = find_entity_resolution_candidates_use_case(
@@ -136,7 +156,27 @@ def dispatch_entity_resolution(args: argparse.Namespace) -> int | None:
             expected_revision=args.revision,
         )
         _render(
-            {"candidate": result.candidate.to_dict(), "path": str(result.path)},
+            {
+                "candidate": result.candidate.to_dict(include_identity_values=False),
+                "path": str(result.path),
+            },
+            output_format=args.output_format,
+        )
+        return 0
+    if args.entity_command == "resolve":
+        matches = resolve_entity_aliases_use_case(
+            args.graph,
+            object_reference=args.object_reference,
+            record_key=args.key,
+            mode=args.mode,
+        )
+        _render(
+            {
+                "aliases": [item.to_dict() for item in matches],
+                "count": len(matches),
+                "graph": args.graph,
+                "mode": args.mode,
+            },
             output_format=args.output_format,
         )
         return 0
@@ -177,6 +217,19 @@ def _output_format(parser: argparse.ArgumentParser) -> None:
 def _render(payload: dict[str, object], *, output_format: str) -> None:
     if output_format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    aliases = payload.get("aliases")
+    if isinstance(aliases, list):
+        print(f"Entity alias matches: {len(aliases)}")
+        for item in aliases:
+            if not isinstance(item, dict):
+                continue
+            group = item.get("group")
+            if isinstance(group, dict):
+                print(
+                    f"- {item.get('object')} [{item.get('usage')}]; "
+                    f"group={group.get('id')}; members={group.get('member_count')}"
+                )
         return
     matches = payload.get("matches")
     if isinstance(matches, list):

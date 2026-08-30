@@ -71,6 +71,7 @@ only-include = [
   "docs/context-contract.md",
   "docs/discovery-runs.md",
   "docs/entity-resolution-candidates.md",
+  "docs/self-entity-discovery.md",
   "docs/local-retrieval.md",
   "docs/retail-demo.md",
   "docs/runtime-lineage.md",

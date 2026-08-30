@@ -64,7 +64,9 @@ source = tarel.source.configure(
     config_reference="env:TAREL_WAREHOUSE_CONFIG",
     database="EnterpriseDW",
     namespace="mart",
-    enrichment_permissions=("aggregates", "small_domains", "raw_samples"),
+    enrichment_permissions=(
+        "aggregates", "small_domains", "raw_samples", "entity_aliases"
+    ),
 )
 
 status = tarel.source.check("warehouse-prod")
@@ -94,6 +96,12 @@ and ordinary free-text patterns are excluded, each digit segment needs a literal
 the target object or field, and only the strongest target per source segment survives. A successful
 enrichment may consequently return patterns but zero candidates. Drafts remain unusable by context
 expansion until a human validates them.
+
+`entity_aliases` is a separate complete-inventory and durable-key permission and requires
+`aggregates` for validation probes. It is used only by optional Self-Entity discovery: inventory
+rows stay ephemeral, while promoted key groups remain in the private entity sidecar. The bounded
+`raw_samples` grant remains unchanged. Direct SDK candidate objects and alias lookup are protected
+data surfaces; normal CLI listings and projections redact the keys.
 
 ## Ground a BI-agent turn
 
@@ -451,6 +459,18 @@ in the audit store but are never retrieved. See
 [Entity-resolution candidates](entity-resolution-candidates.md) for CLI commands, metric
 invariants, and the violet browser projection.
 
+Protected same-object aliases use the same retrieval policy through a key-oriented application
+path:
+
+```python
+aliases = tarel.entity_resolution.resolve(
+    "music",
+    object="music.tracks",
+    key="TRACK-1020",
+    mode="confirmed_then_candidates",
+)
+```
+
 ### Continue optional discovery runs
 
 `tarel.discovery` adds a resumable agent protocol without changing the existing relationship or
@@ -525,6 +545,11 @@ revised = tarel.discovery.promote(
     reason="Supersede the earlier unreviewed population evidence.",
 )
 ```
+
+For the reduced key/label AVO path, start with one source and `identity_inspection=True`. The host
+keeps the ordered inventory values in memory and submits its manifest/pages, concrete groups,
+hashed probe observations, and reflections through `tarel.discovery.submit`. See
+[Self-Entity discovery](self-entity-discovery.md) for the exact action sequence.
 
 The SDK and CLI share the same optimistic revision checks, candidate/step state machine, field
 binding, actor restrictions, and private atomic store. Provider advice can add hypotheses only.

@@ -72,6 +72,11 @@ def entity_candidate_from_discovery(
     quality = _quality(candidate, support=support, challenge=challenge)
     program = _program_with_field_ids(candidate.program, graph)
     self_match = _self_match(program, graph)
+    identity_group = (
+        run.identity_inspection.group_for_candidate(candidate.id)
+        if run.identity_inspection is not None
+        else None
+    )
     producer = next(
         (
             step.actor
@@ -96,11 +101,13 @@ def entity_candidate_from_discovery(
             observation_ids=tuple(item.id for item in candidate.observations),
             promotion_reason=reason,
             supersedes_candidate_id=supersedes_candidate_id,
+            source_names=run.source_names,
         ),
         program=program,
         execution=challenge.execution,
         quality=quality,
         self_match=self_match,
+        identity_group=identity_group,
         contract_version=ENTITY_RESOLUTION_CONTRACT_VERSION,
     )
     validate_entity_resolution_candidate(entity_candidate)

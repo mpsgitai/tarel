@@ -69,7 +69,10 @@ corrections are overlays that preserve the original snapshot. This experimental 
 documented in [Semantic-model imports](semantic-imports.md).
 
 Source enrichment is a separate, policy-gated observation path. Each logical source explicitly
-grants `aggregates`, `small_domains`, and/or `raw_samples`; an omitted grant denies that operation.
+grants `aggregates`, `small_domains`, `raw_samples`, and/or `entity_aliases`; an omitted grant
+denies that operation. `entity_aliases` requires `aggregates` and is limited to protected
+same-object inspection and key groups produced by optional Self-Entity discovery. It does not
+expand the bounded `raw_samples` permission.
 The batch compiler profiles every object in a bound graph and returns an ephemeral workfile. Raw
 samples remain process output. Repeated composite-key patterns may produce aggregate-only draft
 join candidates, but writing those candidates is explicit and never makes them reviewed truth.

@@ -225,7 +225,17 @@ class SourceTests(TestCase):
         enriched = create_source(
             "warehouse",
             connector="sqlserver",
-            enrichment_permissions=("raw_samples", "aggregates", "small_domains"),
+            enrichment_permissions=(
+                "raw_samples",
+                "aggregates",
+                "entity_aliases",
+                "small_domains",
+            ),
+        )
+        aliases_without_raw = create_source(
+            "aliases",
+            connector="sqlserver",
+            enrichment_permissions=("aggregates", "entity_aliases"),
         )
 
         self.assertFalse(baseline.allows_enrichment("aggregates"))
@@ -233,10 +243,13 @@ class SourceTests(TestCase):
         self.assertTrue(enriched.allows_enrichment("aggregates"))
         self.assertTrue(enriched.allows_enrichment("small_domains"))
         self.assertTrue(enriched.allows_enrichment("raw_samples"))
+        self.assertTrue(enriched.allows_enrichment("entity_aliases"))
+        self.assertTrue(aliases_without_raw.allows_enrichment("entity_aliases"))
+        self.assertFalse(aliases_without_raw.allows_enrichment("raw_samples"))
         self.assertNotEqual(baseline.revision, enriched.revision)
         self.assertEqual(
             enriched.to_dict()["enrichment_permissions"],
-            ["aggregates", "raw_samples", "small_domains"],
+            ["aggregates", "entity_aliases", "raw_samples", "small_domains"],
         )
         with self.assertRaises(SourceFailure) as missing_aggregate:
             create_source(
@@ -250,6 +263,13 @@ class SourceTests(TestCase):
                 connector="sqlserver",
                 enrichment_permissions=("unbounded_rows",),
             )
+        with self.assertRaises(SourceFailure) as missing_aggregates:
+            create_source(
+                "invalid",
+                connector="sqlserver",
+                enrichment_permissions=("entity_aliases",),
+            )
 
         self.assertEqual(missing_aggregate.exception.code, "invalid_enrichment_policy")
         self.assertEqual(unknown.exception.code, "invalid_enrichment_permission")
+        self.assertEqual(missing_aggregates.exception.code, "invalid_enrichment_policy")
