@@ -404,6 +404,67 @@ retrieval and the GUI expose only the latest active candidate. A reviewed candid
 silently superseded; new evidence does not revoke a human decision. A superseded predecessor is
 audit-only and cannot be reviewed after the fact.
 
+## Query-linked entity coverage
+
+Use `query_linked_slice` when the analytical question needs complete review of only the ranked
+components around its Top-N technical results. This is a coverage boundary, not a second matching
+algorithm and not a claim about the rest of the population:
+
+```bash
+tarel discovery start entities \
+  --graph music \
+  --scope-mode query_linked_slice \
+  --question "Which song entity has the highest revenue?" \
+  --id music-ranking-entities
+```
+
+The harness still executes every private query and model review. After the run is completed and
+any selected candidates are promoted, it records one create-only sidecar:
+
+```bash
+tarel discovery coverage music-ranking-entities \
+  --source query-linked-coverage.json \
+  --format json
+
+# Omit --source to read the same document through the CLI application path.
+tarel discovery coverage music-ranking-entities --format json
+```
+
+The document binds the completed run revision and graph revision. It contains the full-population,
+ranking-evidence, and slice-manifest SHA-256 values; measure reference, ascending/descending sort,
+Top-N; declared, completed, failed, and reviewed counts; component status; candidate and
+observation IDs; and bounded executor/model provenance. It accepts no SQL, keys, aliases, rows,
+mapping groups, paths, parameters, or free-form error messages. Files use mode `0600` beside the
+run as `.tarel/discovery/RUN/coverage.json`.
+
+Every stored component has one terminal status:
+
+- `no_match`;
+- `proposed_and_rejected`;
+- `promoted_exploratory`;
+- `promoted_confirmed`;
+- `failed`, with one sanitized error category.
+
+`completed_component_count` counts the first four statuses. `failed_component_count` counts only
+`failed`. TAREL recomputes `query_slice_coverage` as successful terminal components divided by
+`declared_component_count`; therefore it can equal `1.0` only when every declared component is
+present and none failed. Missing and failed components never become successful coverage.
+
+The four reported rates deliberately have different meanings:
+
+- `inventory_coverage`: harness-attested coverage of the population inventory;
+- `query_slice_coverage`: TAREL-validated successful coverage of declared ranking components;
+- `probe_coverage`: TAREL-validated successful referenced observations divided by all referenced
+  observations;
+- `mapped_record_coverage`: harness-attested global mapping coverage.
+
+TAREL never derives inventory or mapping coverage from successful candidate probes. The browser
+uses these exact labels, shows Top-N and measure, and keeps the current candidate usage separately
+as `exploratory_only` or `confirmed`. Its run-level projection is reference-free, so failed and
+`no_match` slices remain visible even when no candidate edge exists. Query-linked scope cannot be
+combined with the key-persisting `identity_inspection` path. Normal entity review and
+`confirmed_only` behavior are unchanged.
+
 ## Evidence and decision boundary
 
 Each observation is `support` or `challenge`, `succeeded` or `failed`, and contains only:

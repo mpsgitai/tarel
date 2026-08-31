@@ -104,6 +104,14 @@ class UIPresentationTests(TestCase):
             "Context documents",
             "fieldEvidence",
             "Imported source semantics",
+            "Query-linked Slice",
+            "queryLinkedCoverageCards",
+            "Components fully reviewed",
+            "Inventory coverage",
+            "Query-slice coverage",
+            "Probe coverage",
+            "Global mapping coverage",
+            "Candidate evidence coverage",
         ):
             self.assertIn(marker, application)
         self.assertIn(".field-card", styles)

@@ -55,3 +55,17 @@ Promotion remains exploratory and requires the usual measured risk and versioned
 If TAREL reports `entity_resolution_supersede_required`, inspect the existing active candidate and
 name it with `--supersedes` only when the typed program and blocking semantics are equivalent. The
 old artifact remains audit history; a reviewed candidate cannot be silently replaced.
+
+## Query-linked coverage
+
+When `discovery next` reports `scope_mode: query_linked_slice`, review every component declared by
+the caller's ranked Top-N slice. Keep population IDs, alias values, inventory rows, SQL, and mapping
+groups in host memory. After the run and promotions are complete, record only the strict coverage
+sidecar: manifest/evidence hashes, measure and sort, Top-N, terminal component statuses, counts,
+candidate/observation references, and executor/model provenance.
+
+Treat `inventory_coverage`, `query_slice_coverage`, `probe_coverage`, and
+`mapped_record_coverage` as different claims. A failed component is terminal for accounting but is
+not successfully covered. Never describe complete query-slice coverage as complete population
+mapping. Query-linked candidates remain `exploratory_only` until the ordinary human review path
+confirms them; use `confirmed_only` when exploratory rules are not permitted.

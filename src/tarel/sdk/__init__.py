@@ -11,6 +11,12 @@ from tarel.discovery.contracts import (
     DiscoverySelfMatch,
     DiscoveryTransform,
 )
+from tarel.discovery.coverage import (
+    QueryCoverageExecutor,
+    QueryCoverageModel,
+    QueryLinkedComponent,
+    QueryLinkedEntityCoverage,
+)
 from tarel.discovery.identity import (
     EntityAliasGroup,
     EntityGroupReflection,
@@ -46,6 +52,10 @@ __all__ = [
     "DiscoveryRun",
     "DiscoverySelfMatch",
     "DiscoveryTransform",
+    "QueryCoverageExecutor",
+    "QueryCoverageModel",
+    "QueryLinkedComponent",
+    "QueryLinkedEntityCoverage",
     "EntityAliasGroup",
     "EntityAliasMatch",
     "EntityGroupReflection",

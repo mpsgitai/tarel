@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from tarel.discovery.contracts import DiscoveryExecution, DiscoveryProgram
+from tarel.discovery.coverage import QueryLinkedEntityCoverage
 from tarel.discovery.identity import EntityAliasGroup, IdentityFailure
 
 ENTITY_RESOLUTION_CONTRACT_VERSION = "tarel.entity-resolution-candidate.v0.2"
@@ -583,6 +584,7 @@ class EntityResolutionMatch:
     candidate: EntityResolutionCandidate
     source_reference: str
     target_reference: str
+    query_linked_coverage: QueryLinkedEntityCoverage | None = None
 
     @property
     def usage(self) -> str:
@@ -593,6 +595,13 @@ class EntityResolutionMatch:
         return self.candidate.state != "reviewed"
 
     def to_dict(self) -> dict[str, object]:
+        coverage_summary = (
+            self.query_linked_coverage.to_summary_dict()
+            if self.query_linked_coverage is not None
+            else None
+        )
+        if coverage_summary is not None:
+            coverage_summary["candidate_usage"] = self.usage
         return {
             "candidate": self.candidate.to_dict(include_identity_values=False),
             "requires_runtime_validation": self.requires_runtime_validation,
@@ -600,6 +609,7 @@ class EntityResolutionMatch:
             "source": self.source_reference,
             "target": self.target_reference,
             "usage": self.usage,
+            "query_linked_coverage": coverage_summary,
             "warning": (
                 None
                 if self.candidate.state == "reviewed"

@@ -13,8 +13,10 @@ from tarel.discovery.application import (
     find_discovery_candidates_use_case,
     list_discovery_runs_use_case,
     load_discovery_run_use_case,
+    load_query_linked_coverage_use_case,
     next_discovery_task_use_case,
     promote_discovery_candidates_use_case,
+    record_query_linked_coverage_use_case,
     start_discovery_run_use_case,
     submit_discovery_step_use_case,
 )
@@ -48,6 +50,12 @@ def add_discovery_commands(
         "--identity-inspection",
         action="store_true",
         help="Enable the protected, same-object key/label identity loop.",
+    )
+    start.add_argument(
+        "--scope-mode",
+        choices=("global_population", "query_linked_slice"),
+        default="global_population",
+        help="Declare global or question-linked entity-discovery coverage.",
     )
     start.add_argument("--id", dest="run_id")
     _format(start)
@@ -110,6 +118,17 @@ def add_discovery_commands(
     find.add_argument("--limit", type=int, default=20)
     _format(find)
 
+    coverage = commands.add_parser(
+        "coverage",
+        help="Record or show one aggregate-only query-linked coverage document.",
+    )
+    coverage.add_argument("run_id")
+    coverage.add_argument(
+        "--source",
+        help="Coverage JSON path or '-' for stdin; omit to show the stored document.",
+    )
+    _format(coverage)
+
     agent = subcommands.add_parser("agent", help="Install optional coding-agent resources.")
     agent_commands = agent.add_subparsers(dest="agent_command")
     setup = agent_commands.add_parser("setup", help="Install the TAREL discovery skill.")
@@ -142,6 +161,7 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
             candidate_budget=args.candidate_budget or preset_candidate,
             advisor_provider=args.advisor_provider,
             identity_inspection=args.identity_inspection,
+            scope_mode=args.scope_mode,
             run_id=args.run_id,
         )
         _render(
@@ -246,6 +266,26 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
             output_format=args.output_format,
         )
         return 0
+    if args.discovery_command == "coverage":
+        if args.source:
+            result = record_query_linked_coverage_use_case(
+                args.run_id,
+                _read_json(args.source),
+            )
+            _render(
+                {
+                    "coverage": result.coverage.to_dict(),
+                    "created": result.created,
+                    "path": str(result.path),
+                },
+                output_format=args.output_format,
+            )
+        else:
+            _render(
+                {"coverage": load_query_linked_coverage_use_case(args.run_id).to_dict()},
+                output_format=args.output_format,
+            )
+        return 0
     return 0
 
 
@@ -327,6 +367,19 @@ def _render(payload: dict[str, object], *, output_format: str) -> None:
         return
     if "agent" in payload:
         print(f"Installed TAREL discovery skill for {payload['agent']}: {payload['path']}")
+        return
+    coverage = payload.get("coverage")
+    if isinstance(coverage, dict):
+        print(f"Query-linked coverage: {coverage.get('run_id')}")
+        print(
+            "Components fully reviewed: "
+            f"{coverage.get('completed_component_count')}/"
+            f"{coverage.get('declared_component_count')}"
+        )
+        print(f"Failed components: {coverage.get('failed_component_count')}")
+        print(f"Query-slice coverage: {float(coverage.get('query_slice_coverage', 0)):.1%}")
+        if payload.get("path"):
+            print(f"Path: {payload['path']}")
         return
     promoted = payload.get("edges")
     entity_candidates = payload.get("entity_candidates")

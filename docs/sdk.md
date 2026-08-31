@@ -551,6 +551,34 @@ keeps the ordered inventory values in memory and submits its manifest/pages, con
 hashed probe observations, and reflections through `tarel.discovery.submit`. See
 [Self-Entity discovery](self-entity-discovery.md) for the exact action sequence.
 
+For question-driven ranking work, keep keys and mappings entirely in the harness and declare the
+separate coverage scope:
+
+```python
+run = tarel.discovery.start(
+    "entity_matching",
+    graph="music",
+    question="Which song entity has the highest revenue?",
+    scope_mode="query_linked_slice",
+    run_id="music-ranking-entities",
+).run
+
+# Continue the ordinary candidate / observation / decision / promotion workflow.
+# Once it is complete, submit the strict aggregate-only dictionary documented in
+# discovery-runs.md. CLI and SDK call this same application use case.
+result = tarel.discovery.record_coverage(run.id, coverage_payload)
+stored = tarel.discovery.load_coverage(run.id)
+```
+
+The sidecar is linked into `entity_resolution.find(...)` matches only for its referenced promoted
+candidates; serialized matches and browser views receive only its bounded, reference-free summary.
+Use `discovery.load_coverage(...)` for the complete candidate/observation reference audit. The
+sidecar does not alter candidate review state: `confirmed_only` still excludes an unreviewed
+query-linked candidate. TAREL validates component counts, terminal status, candidate and observation
+bindings, executor identity, probe coverage, run/graph revisions, and the distinction between
+successful and failed components. Inventory and global mapping rates remain explicit harness
+attestations; they are never inferred from probes.
+
 The SDK and CLI share the same optimistic revision checks, candidate/step state machine, field
 binding, actor restrictions, and private atomic store. Provider advice can add hypotheses only.
 The host or coding agent executes read-only probes and submits counts, rates, limits, truncation,

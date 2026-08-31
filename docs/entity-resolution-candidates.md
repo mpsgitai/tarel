@@ -367,6 +367,14 @@ disabled-by-default
 rules as solid violet edges. The projection includes aggregate evidence and provenance, never raw
 records or alias keys.
 
+When the candidate is referenced by a query-linked coverage sidecar, the same card adds
+**Query-linked Slice**, Top-N and measure, successfully reviewed components versus declared
+components, failed components, and four separately named rates: inventory, query slice, probes,
+and global mapping. Candidate evidence coverage keeps its own label. The card never turns complete
+slice coverage into a population-coverage claim, and its `exploratory_only` or confirmed usage
+continues to come from the ordinary entity review state. A separate reference-free run summary
+keeps failed and `no_match` slices visible even when no entity-candidate edge was promoted.
+
 See [Self-Entity discovery](self-entity-discovery.md) for the identity inventory, AVO probes,
 permissions, CLI actions, and direct alias lookup.
 

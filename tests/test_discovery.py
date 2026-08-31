@@ -1035,6 +1035,198 @@ class DiscoveryTests(TestCase):
         self.assertEqual(completed.status, "completed")
         self.assertEqual(completed.candidates, ())
 
+    def test_query_linked_coverage_round_trips_through_cli_sdk_retrieval_and_gui(
+        self,
+    ) -> None:
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            sdk = _sdk(temporary_directory)
+            completed = _complete_selected_entity_run(
+                sdk,
+                run_id="query-linked-winner",
+                with_execution=True,
+                scope_mode="query_linked_slice",
+            )
+            promoted = sdk.discovery.promote(
+                completed.id,
+                candidates=("entity-fuzzy-v1",),
+                reason="The query-linked winner survived support and challenge probes.",
+            ).entity_candidates[0]
+            coverage_payload = _query_linked_coverage(completed, promoted.id)
+            wrong_probe = json.loads(json.dumps(coverage_payload))
+            wrong_probe["probe_coverage"] = 0.5
+            with self.assertRaises(DiscoveryFailure) as probe_claim:
+                sdk.discovery.record_coverage(completed.id, wrong_probe)
+            premature_confirmation = json.loads(json.dumps(coverage_payload))
+            premature_confirmation["components"][0]["status"] = "promoted_confirmed"
+            with self.assertRaises(DiscoveryFailure) as confirmation_claim:
+                sdk.discovery.record_coverage(completed.id, premature_confirmation)
+            source = project / "coverage.json"
+            source.write_text(json.dumps(coverage_payload), encoding="utf-8")
+            output = StringIO()
+            show_output = StringIO()
+            try:
+                os.chdir(project)
+                with redirect_stdout(output):
+                    record_exit = main(
+                        [
+                            "discovery",
+                            "coverage",
+                            completed.id,
+                            "--source",
+                            str(source),
+                            "--format",
+                            "json",
+                        ]
+                    )
+                with redirect_stdout(show_output):
+                    show_exit = main(
+                        [
+                            "discovery",
+                            "coverage",
+                            completed.id,
+                            "--format",
+                            "json",
+                        ]
+                    )
+            finally:
+                os.chdir(previous)
+            loaded = sdk.discovery.load_coverage(completed.id)
+            idempotent = sdk.discovery.record_coverage(completed.id, coverage_payload)
+            exploratory = sdk.entity_resolution.find("warehouse")
+            confirmed_before = sdk.entity_resolution.find(
+                "warehouse", mode="confirmed_only"
+            )
+            browser_payload = sdk.view.graph("warehouse")
+            edge = next(
+                item
+                for item in browser_payload["edges"]
+                if item["type"] == "entity_resolution_candidate"
+            )
+            coverage_summary = browser_payload["query_linked_coverages"][0]
+            stored = sdk.runtime.discovery_store().coverage_path(completed.id)
+            stored_text = stored.read_text(encoding="utf-8")
+            stored_mode = stored.stat().st_mode & 0o777
+            reviewed = sdk.entity_resolution.decide(
+                promoted.id,
+                decision="approve",
+                reason="The query-linked slice and candidate evidence were reviewed.",
+            ).candidate
+            confirmed_after = sdk.entity_resolution.find(
+                "warehouse", mode="confirmed_only"
+            )
+            confirmed_coverage_summary = sdk.view.graph("warehouse")[
+                "query_linked_coverages"
+            ][0]
+
+        self.assertEqual((record_exit, show_exit), (0, 0))
+        self.assertEqual(probe_claim.exception.code, "invalid_query_linked_coverage")
+        self.assertEqual(
+            confirmation_claim.exception.code, "invalid_query_linked_coverage"
+        )
+        self.assertEqual(json.loads(output.getvalue())["coverage"], loaded.to_dict())
+        self.assertEqual(json.loads(show_output.getvalue())["coverage"], loaded.to_dict())
+        self.assertFalse(idempotent.created)
+        self.assertEqual(loaded.completed_component_count, 1)
+        self.assertEqual(loaded.failed_component_count, 0)
+        self.assertEqual(loaded.query_slice_coverage, 1.0)
+        self.assertEqual(loaded.probe_coverage, 1.0)
+        self.assertTrue(loaded.all_components_terminal)
+        self.assertEqual(exploratory[0].usage, "exploratory_only")
+        self.assertEqual(exploratory[0].query_linked_coverage, loaded)
+        self.assertEqual(confirmed_before, ())
+        self.assertEqual(reviewed.state, "reviewed")
+        self.assertEqual(confirmed_after[0].usage, "confirmed")
+        self.assertEqual(
+            confirmed_after[0].query_linked_coverage.revision, loaded.revision
+        )
+        metadata = edge["metadata"]
+        self.assertEqual(metadata["discovery_scope_mode"], "query_linked_slice")
+        self.assertEqual(metadata["query_top_n"], 10)
+        self.assertEqual(metadata["query_measure"], "sales.revenue_usd")
+        self.assertEqual(metadata["completed_component_count"], 1)
+        self.assertEqual(metadata["declared_component_count"], 1)
+        self.assertEqual(metadata["failed_component_count"], 0)
+        self.assertEqual(coverage_summary["run_id"], completed.id)
+        self.assertEqual(coverage_summary["candidate_usage"], "exploratory_only")
+        self.assertEqual(confirmed_coverage_summary["candidate_usage"], "confirmed")
+        self.assertNotIn("components", coverage_summary)
+        self.assertNotIn("candidate_refs", coverage_summary)
+        self.assertNotIn("observation_refs", coverage_summary)
+        self.assertEqual(stored_mode, 0o600)
+        for forbidden in (
+            "member_keys",
+            "alias_values",
+            "inventory_rows",
+            "mapping_groups",
+            "sql_text",
+        ):
+            self.assertNotIn(forbidden, stored_text)
+
+    def test_query_linked_coverage_counts_failures_without_claiming_full_slice(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            sdk = _sdk(temporary_directory)
+            run = sdk.discovery.start(
+                "entity_matching",
+                graph="warehouse",
+                scope_mode="query_linked_slice",
+                run_id="query-linked-failed",
+            ).run
+            self.assertIn("complete_run", sdk.discovery.next(run.id).allowed_actions)
+            completed = sdk.discovery.submit(
+                run.id,
+                expected_revision=run.revision,
+                action="complete_run",
+                payload={"reason": "The only declared ranking component failed."},
+            ).run
+            payload = _failed_query_linked_coverage(completed)
+            false_full = dict(payload)
+            false_full["query_slice_coverage"] = 1.0
+            with self.assertRaises(DiscoveryFailure) as dishonest:
+                sdk.discovery.record_coverage(completed.id, false_full)
+            persisted = sdk.discovery.record_coverage(completed.id, payload)
+            browser_payload = sdk.view.graph("warehouse")
+            changed = dict(payload)
+            changed["mapped_record_coverage"] = 0.1
+            with self.assertRaises(DiscoveryFailure) as create_only:
+                sdk.discovery.record_coverage(completed.id, changed)
+            unsafe = dict(payload)
+            unsafe["sql_text"] = "select private_key from source"
+            with self.assertRaises(DiscoveryFailure) as raw_field:
+                sdk.discovery.record_coverage("query-linked-failed", unsafe)
+            with self.assertRaises(DiscoveryFailure) as mixed_mode:
+                sdk.discovery.start(
+                    "entity_matching",
+                    graph="warehouse",
+                    sources=("private-source",),
+                    identity_inspection=True,
+                    scope_mode="query_linked_slice",
+                    run_id="unsafe-query-linked",
+                )
+
+        self.assertEqual(dishonest.exception.code, "invalid_query_linked_coverage")
+        self.assertEqual(persisted.coverage.completed_component_count, 0)
+        self.assertEqual(persisted.coverage.failed_component_count, 1)
+        self.assertEqual(persisted.coverage.query_slice_coverage, 0.0)
+        self.assertTrue(persisted.coverage.all_components_terminal)
+        self.assertEqual(
+            browser_payload["query_linked_coverages"][0]["candidate_usage"],
+            "no_promoted_candidate",
+        )
+        self.assertEqual(
+            browser_payload["query_linked_coverages"][0]["failed_component_count"], 1
+        )
+        self.assertFalse(
+            any(
+                edge["type"] == "entity_resolution_candidate"
+                for edge in browser_payload["edges"]
+            )
+        )
+        self.assertEqual(create_only.exception.code, "query_linked_coverage_exists")
+        self.assertEqual(raw_field.exception.code, "invalid_query_linked_coverage")
+        self.assertEqual(mixed_mode.exception.code, "invalid_discovery")
+
     def test_promotion_is_fail_closed_and_atomic(self) -> None:
         with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
             sdk = _sdk(temporary_directory)
@@ -1452,6 +1644,7 @@ def _complete_selected_entity_run(
     *,
     run_id: str,
     with_execution: bool,
+    scope_mode: str = "global_population",
 ):
     proposal = _proposal(
         "entity-fuzzy-v1",
@@ -1474,6 +1667,7 @@ def _complete_selected_entity_run(
     current = sdk.discovery.start(
         "entity_matching",
         graph="warehouse",
+        scope_mode=scope_mode,
         run_id=run_id,
     ).run
     current = sdk.discovery.submit(
@@ -1509,6 +1703,101 @@ def _complete_selected_entity_run(
         action="complete_run",
         payload={"reason": "Selected fuzzy entity candidate is ready for review."},
     ).run
+
+
+def _query_linked_coverage(run, promoted_id: str) -> dict[str, object]:
+    component = {
+        "discovery_candidate_refs": ["entity-fuzzy-v1"],
+        "entity_candidate_refs": [promoted_id],
+        "error_category": None,
+        "executor": {
+            "artifact_hash": "b" * 64,
+            "id": "test.matcher",
+            "version": "v1",
+        },
+        "id": "rank-component-0",
+        "model": {"name": "provider/model-v1", "provider": "test-provider"},
+        "observation_refs": [
+            "entity-fuzzy-v1-challenge",
+            "entity-fuzzy-v1-support",
+        ],
+        "reviewed_identity_count": 5,
+        "status": "promoted_exploratory",
+    }
+    return {
+        "candidate_refs": ["entity-fuzzy-v1", promoted_id],
+        "completed_component_count": 1,
+        "components": [component],
+        "contract_version": "tarel.query-linked-entity-coverage.v0.1.experimental",
+        "declared_component_count": 1,
+        "failed_component_count": 0,
+        "graph": {"name": run.graph_name, "revision": run.graph_revision},
+        "inventory_coverage": 0.000259,
+        "mapped_record_coverage": 0.000259,
+        "measure": {
+            "reference": "sales.revenue_usd",
+            "sort_direction": "descending",
+        },
+        "observation_refs": [
+            "entity-fuzzy-v1-challenge",
+            "entity-fuzzy-v1-support",
+        ],
+        "population_manifest_hash": "c" * 64,
+        "probe_coverage": 1.0,
+        "query_slice_coverage": 1.0,
+        "ranking_evidence_hash": "d" * 64,
+        "reviewed_identity_count": 5,
+        "run_id": run.id,
+        "run_revision": run.revision,
+        "scope_mode": "query_linked_slice",
+        "slice_manifest_hash": "e" * 64,
+        "top_n": 10,
+    }
+
+
+def _failed_query_linked_coverage(run) -> dict[str, object]:
+    return {
+        "candidate_refs": [],
+        "completed_component_count": 0,
+        "components": [
+            {
+                "discovery_candidate_refs": [],
+                "entity_candidate_refs": [],
+                "error_category": "executor_timeout",
+                "executor": {
+                    "artifact_hash": "b" * 64,
+                    "id": "test.matcher",
+                    "version": "v1",
+                },
+                "id": "rank-component-0",
+                "model": None,
+                "observation_refs": [],
+                "reviewed_identity_count": 0,
+                "status": "failed",
+            }
+        ],
+        "contract_version": "tarel.query-linked-entity-coverage.v0.1.experimental",
+        "declared_component_count": 1,
+        "failed_component_count": 1,
+        "graph": {"name": run.graph_name, "revision": run.graph_revision},
+        "inventory_coverage": 0.0,
+        "mapped_record_coverage": 0.0,
+        "measure": {
+            "reference": "sales.revenue_usd",
+            "sort_direction": "descending",
+        },
+        "observation_refs": [],
+        "population_manifest_hash": "c" * 64,
+        "probe_coverage": 0.0,
+        "query_slice_coverage": 0.0,
+        "ranking_evidence_hash": "d" * 64,
+        "reviewed_identity_count": 0,
+        "run_id": run.id,
+        "run_revision": run.revision,
+        "scope_mode": "query_linked_slice",
+        "slice_manifest_hash": "e" * 64,
+        "top_n": 10,
+    }
 
 
 def _self_entity_proposal(candidate_id: str) -> dict[str, object]:
