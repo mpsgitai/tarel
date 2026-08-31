@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
+from tarel.discovery.coverage import DISCOVERY_SCOPE_MODES
 from tarel.discovery.identity import (
     IDENTITY_ACTIONS,
     EntityGroupReflection,
@@ -672,6 +673,7 @@ class DiscoveryRun:
     steps: tuple[DiscoveryStep, ...] = ()
     completion_reason: str | None = None
     identity_inspection: IdentityInspection | None = None
+    scope_mode: str | None = None
     contract_version: str = DISCOVERY_CONTRACT_VERSION
 
     @property
@@ -716,6 +718,8 @@ class DiscoveryRun:
             payload["identity_inspection"] = self.identity_inspection.to_dict(
                 include_values=include_identity_values
             )
+        if self.scope_mode is not None:
+            payload["scope_mode"] = self.scope_mode
         return payload
 
     @classmethod
@@ -739,7 +743,7 @@ class DiscoveryRun:
                 "steps",
             },
             "discovery run",
-            optional={"identity_inspection", "revision"},
+            optional={"identity_inspection", "revision", "scope_mode"},
         )
         if data.get("contract_version") != DISCOVERY_CONTRACT_VERSION:
             raise DiscoveryFailure(
@@ -800,6 +804,11 @@ class DiscoveryRun:
                 data.get("completion_reason"), "completion_reason"
             ),
             identity_inspection=identity_inspection,
+            scope_mode=(
+                _choice(data.get("scope_mode"), "scope_mode", DISCOVERY_SCOPE_MODES)
+                if data.get("scope_mode") is not None
+                else None
+            ),
         )
         validate_discovery_run(run)
         expected_revision = data.get("revision")
@@ -944,6 +953,14 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
         raise DiscoveryFailure(
             "invalid_discovery",
             "Identity inspection requires one entity-matching run bound to exactly one source.",
+        )
+    if run.scope_mode == "query_linked_slice" and (
+        run.kind != "entity_matching" or run.identity_inspection is not None
+    ):
+        raise DiscoveryFailure(
+            "invalid_discovery",
+            "Query-linked scope requires entity matching without key-persisting "
+            "identity inspection.",
         )
     if run.actor_mode == "agent_with_provider_advisor" and run.advisor_provider is None:
         raise DiscoveryFailure(
@@ -1096,7 +1113,10 @@ def allowed_discovery_actions(run: DiscoveryRun) -> tuple[str, ...]:
         if any(decision == "reject_group" for decision in decisions.values()):
             actions.append("reject_candidate")
     actions.append("pause_run")
-    if (inspection is None and run.candidates) or (
+    if (
+        inspection is None
+        and (run.candidates or run.scope_mode == "query_linked_slice")
+    ) or (
         inspection is not None
         and (
             not run.candidates

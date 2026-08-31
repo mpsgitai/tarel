@@ -81,19 +81,24 @@ from tarel.context_packets import ContextPacketDiff, ContextPacketImpact
 from tarel.discovery.application import (
     DiscoveryAdviceResult,
     DiscoveryChangeResult,
+    DiscoveryCoverageResult,
     DiscoveryMatch,
     DiscoveryPromotionResult,
     DiscoveryTask,
     advise_discovery_run_use_case,
     find_discovery_candidates_use_case,
     list_discovery_runs_use_case,
+    list_query_linked_coverages_use_case,
     load_discovery_run_use_case,
+    load_query_linked_coverage_use_case,
     next_discovery_task_use_case,
     promote_discovery_candidates_use_case,
+    record_query_linked_coverage_use_case,
     start_discovery_run_use_case,
     submit_discovery_step_use_case,
 )
 from tarel.discovery.contracts import DiscoveryRun
+from tarel.discovery.coverage import QueryLinkedEntityCoverage
 from tarel.entity_resolution.application import (
     EntityResolutionChangeResult,
     decide_entity_resolution_candidate_use_case,
@@ -1368,6 +1373,10 @@ class ViewAPI(_RuntimeAPI):
             mode="confirmed_then_candidates",
             runtime=self._runtime,
         )
+        query_linked_coverages = list_query_linked_coverages_use_case(
+            graph_name=name,
+            runtime=self._runtime,
+        )
         return browser_graph(
             graph,
             workspaces=workspaces,
@@ -1375,6 +1384,7 @@ class ViewAPI(_RuntimeAPI):
             lineage_documents=documents,
             semantic_imports=semantic_imports,
             entity_resolution_matches=entity_matches,
+            query_linked_coverages=query_linked_coverages,
         )
 
     def workspace(
@@ -1424,6 +1434,14 @@ class ViewAPI(_RuntimeAPI):
                 runtime=self._runtime,
             )
         )
+        query_linked_coverages = tuple(
+            coverage
+            for graph_name in scope.graph_names
+            for coverage in list_query_linked_coverages_use_case(
+                graph_name=graph_name,
+                runtime=self._runtime,
+            )
+        )
         return browser_workspace(
             graph_documents,
             scope,
@@ -1432,6 +1450,7 @@ class ViewAPI(_RuntimeAPI):
             lineage_documents=lineage_documents,
             semantic_imports=semantic_imports,
             entity_resolution_matches=entity_matches,
+            query_linked_coverages=query_linked_coverages,
         )
 
 
@@ -1807,6 +1826,7 @@ class DiscoveryAPI(_RuntimeAPI):
         candidate_budget: int = 20,
         advisor_provider: str | None = None,
         identity_inspection: bool = False,
+        scope_mode: str = "global_population",
         run_id: str | None = None,
     ) -> DiscoveryChangeResult:
         return start_discovery_run_use_case(
@@ -1818,6 +1838,7 @@ class DiscoveryAPI(_RuntimeAPI):
             candidate_budget=candidate_budget,
             advisor_provider=advisor_provider,
             identity_inspection=identity_inspection,
+            scope_mode=scope_mode,
             run_id=run_id,
             runtime=self._runtime,
         )
@@ -1908,6 +1929,21 @@ class DiscoveryAPI(_RuntimeAPI):
             limit=limit,
             runtime=self._runtime,
         )
+
+    def record_coverage(
+        self,
+        run_id: str,
+        coverage: dict[str, Any],
+    ) -> DiscoveryCoverageResult:
+        """Record one value-free query-linked coverage document."""
+        return record_query_linked_coverage_use_case(
+            run_id,
+            coverage,
+            runtime=self._runtime,
+        )
+
+    def load_coverage(self, run_id: str) -> QueryLinkedEntityCoverage:
+        return load_query_linked_coverage_use_case(run_id, runtime=self._runtime)
 
 
 class EntityResolutionAPI(_RuntimeAPI):

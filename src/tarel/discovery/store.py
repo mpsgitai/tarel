@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Protocol
 
 from tarel.discovery.contracts import DiscoveryFailure, DiscoveryRun, validate_discovery_run
+from tarel.discovery.coverage import (
+    QueryLinkedCoverageFailure,
+    QueryLinkedEntityCoverage,
+)
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
@@ -22,6 +26,12 @@ class DiscoveryStore(Protocol):
     def list(self) -> tuple[str, ...]: ...
 
     def exists(self, run_id: str) -> bool: ...
+
+    def save_coverage(self, coverage: QueryLinkedEntityCoverage) -> Path | str | None: ...
+
+    def load_coverage(self, run_id: str) -> QueryLinkedEntityCoverage: ...
+
+    def coverage_exists(self, run_id: str) -> bool: ...
 
 
 class FileDiscoveryStore:
@@ -90,3 +100,66 @@ class FileDiscoveryStore:
                 "Discovery IDs may contain letters, numbers, dots, underscores, and hyphens.",
             )
         return self.root / run_id / "run.json"
+
+    def save_coverage(self, coverage: QueryLinkedEntityCoverage) -> Path:
+        path = self.coverage_path(coverage.run_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            coverage.to_dict(), ensure_ascii=False, indent=2, sort_keys=True
+        )
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=".query-linked-coverage-",
+            suffix=".tmp",
+            text=True,
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.write("\n")
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+        except OSError as exc:
+            temporary.unlink(missing_ok=True)
+            raise DiscoveryFailure(
+                "discovery_save_failed",
+                f"Could not save query-linked coverage: {coverage.run_id}",
+            ) from exc
+        return path
+
+    def load_coverage(self, run_id: str) -> QueryLinkedEntityCoverage:
+        try:
+            payload = json.loads(self.coverage_path(run_id).read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise DiscoveryFailure(
+                "query_linked_coverage_not_found",
+                f"Query-linked coverage not found: {run_id}",
+            ) from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise DiscoveryFailure(
+                "invalid_query_linked_coverage",
+                f"Could not read query-linked coverage: {run_id}",
+            ) from exc
+        if not isinstance(payload, dict):
+            raise DiscoveryFailure(
+                "invalid_query_linked_coverage",
+                "Query-linked coverage root must be an object.",
+            )
+        try:
+            coverage = QueryLinkedEntityCoverage.from_dict(payload)
+        except QueryLinkedCoverageFailure as exc:
+            raise DiscoveryFailure(exc.code, str(exc)) from exc
+        if coverage.run_id != run_id:
+            raise DiscoveryFailure(
+                "invalid_query_linked_coverage",
+                "Stored coverage run ID does not match its directory.",
+            )
+        return coverage
+
+    def coverage_exists(self, run_id: str) -> bool:
+        return self.coverage_path(run_id).is_file()
+
+    def coverage_path(self, run_id: str) -> Path:
+        self.path(run_id)
+        return self.root / run_id / "coverage.json"

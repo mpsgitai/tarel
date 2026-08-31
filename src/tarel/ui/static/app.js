@@ -457,6 +457,7 @@ function renderInspector() {
       ${fact("State", annotation?.state || "missing")}${fact("Role", annotation?.role || "—")}${fact("Grain", item.grain || "—")}${fact("Confidence", annotation?.confidence == null ? "—" : `${Math.round(annotation.confidence * 100)}%`)}
       ${fact("Primary key", item.primary_key.join(", ") || "—")}${fact("Relationships", String(relationships.length))}${fact("Entity candidates", String(entityCandidates.length))}
     </div></section>
+    ${queryLinkedCoverageCards(state.data.query_linked_coverages || [])}
     ${entityResolutionCards(entityCandidates)}
     ${sourceSemanticCards(item.source_semantics || [], "Imported dataset semantics")}
     <section class="detail-section"><h3>Fields · ${item.fields.length}</h3><div class="field-list">${item.fields.map(fieldAnnotationCard).join("")}</div></section>
@@ -466,6 +467,15 @@ function renderInspector() {
     ${semanticImportDiagnostics()}
     ${annotation?.warnings?.length ? `<section class="detail-section"><h3>Warnings</h3><p class="description">${annotation.warnings.map(escapeHtml).join(" · ")}</p></section>` : ""}`;
   $$(".source-semantic-form").forEach(form => form.addEventListener("submit", saveSourceSemantic));
+}
+
+function queryLinkedCoverageCards(coverages) {
+  if (!coverages.length) return "";
+  return `<section class="detail-section"><h3>Query-linked entity coverage · ${coverages.length}</h3><p class="semantic-origin">Ranking-slice coverage is independent from inventory, probes, and global mapping.</p>${coverages.map(coverage => {
+    const measure = coverage.measure || {};
+    const failures = Number(coverage.failed_component_count || 0);
+    return `<article class="source-semantic-card"><header><span><strong>Query-linked Slice</strong><small>${escapeHtml(coverage.run_id)}</small></span><span class="source-state">${escapeHtml(coverage.candidate_usage)}</span></header><p class="field-detail"><strong>Ranking scope</strong><span>Top-${escapeHtml(String(coverage.top_n))} · ${escapeHtml(measure.reference || "—")} · ${escapeHtml(measure.sort_direction || "—")}</span></p><p class="field-detail"><strong>Components fully reviewed</strong><span>${escapeHtml(String(coverage.completed_component_count))}/${escapeHtml(String(coverage.declared_component_count))}</span></p><p class="field-detail${failures ? " warning" : ""}"><strong>Failed components</strong><span>${escapeHtml(String(failures))}</span></p><div class="fact-grid">${fact("Inventory coverage", coveragePercent(coverage.inventory_coverage))}${fact("Query-slice coverage", coveragePercent(coverage.query_slice_coverage))}${fact("Probe coverage", coveragePercent(coverage.probe_coverage))}${fact("Global mapping coverage", coveragePercent(coverage.mapped_record_coverage))}</div></article>`;
+  }).join("")}</section>`;
 }
 
 function entityResolutionCards(edges) {
@@ -485,8 +495,12 @@ function entityResolutionCards(edges) {
     const selfDetails = isSelfMatch
       ? `<p class="field-detail"><strong>Record key</strong><span>${escapeHtml(evidence.record_key_field || "—")}</span></p><p class="field-detail"><strong>Contradiction guards</strong><span>${escapeHtml((evidence.guard_fields || []).join(" + ") || "—")}</span></p><p class="field-detail"><strong>Pair policy</strong><span>${escapeHtml(evidence.pair_policy || "—")}</span></p>${aliasDetails}${evidence.supersedes_candidate_id ? `<p class="field-detail"><strong>Supersedes</strong><span>${escapeHtml(evidence.supersedes_candidate_id)}</span></p>` : ""}`
       : "";
-    return `<article class="source-semantic-card"><header><span><strong>${escapeHtml(heading)}</strong><small>${escapeHtml(fields)}</small></span><span class="source-state">${escapeHtml(evidence.state)}</span></header><div class="fact-grid">${fact("Evidence", evidence.evidence_level)}${fact("Evaluated", evidence.evaluated_count)}${fact("Coverage", `${Math.round(evidence.coverage * 100)}%`)}${fact("Collisions", `${Math.round(evidence.collision_rate * 100)}%`)}${fact("Quality", evidence.quality_rating || "legacy")}${fact("Score", `${Math.round((evidence.quality_score ?? evidence.confidence) * 100)}%`)}${fact("Threshold", threshold)}${fact("Human review", evidence.human_reviewed ? "Yes" : "No")}</div><p class="description mono">${escapeHtml(evidence.rule_kind)} · ${escapeHtml((evidence.operations || []).join(" → "))}</p>${selfDetails}<p class="field-detail"><strong>Executor</strong><span>${escapeHtml(executor)} · ${escapeHtml(evidence.blocking_strategy || "blocking not recorded")}</span></p>${(evidence.quality_warnings || []).length ? `<p class="field-detail warning"><strong>Quality warnings</strong><span>${escapeHtml(evidence.quality_warnings.join(" · "))}</span></p>` : ""}${evidence.requires_runtime_validation ? '<p class="field-detail warning"><strong>Usage</strong><span>Exploratory only · validate at runtime</span></p>' : ""}</article>`;
+    return `<article class="source-semantic-card"><header><span><strong>${escapeHtml(heading)}</strong><small>${escapeHtml(fields)}</small></span><span class="source-state">${escapeHtml(evidence.state)}</span></header><div class="fact-grid">${fact("Evidence", evidence.evidence_level)}${fact("Evaluated", evidence.evaluated_count)}${fact("Candidate evidence coverage", `${Math.round(evidence.coverage * 100)}%`)}${fact("Collisions", `${Math.round(evidence.collision_rate * 100)}%`)}${fact("Quality", evidence.quality_rating || "legacy")}${fact("Score", `${Math.round((evidence.quality_score ?? evidence.confidence) * 100)}%`)}${fact("Threshold", threshold)}${fact("Human review", evidence.human_reviewed ? "Yes" : "No")}</div><p class="description mono">${escapeHtml(evidence.rule_kind)} · ${escapeHtml((evidence.operations || []).join(" → "))}</p>${selfDetails}<p class="field-detail"><strong>Executor</strong><span>${escapeHtml(executor)} · ${escapeHtml(evidence.blocking_strategy || "blocking not recorded")}</span></p>${(evidence.quality_warnings || []).length ? `<p class="field-detail warning"><strong>Quality warnings</strong><span>${escapeHtml(evidence.quality_warnings.join(" · "))}</span></p>` : ""}${evidence.requires_runtime_validation ? '<p class="field-detail warning"><strong>Usage</strong><span>Exploratory only · validate at runtime</span></p>' : ""}</article>`;
   }).join("")}</section>`;
+}
+
+function coveragePercent(value) {
+  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : "—";
 }
 
 function fieldAnnotationCard(field) {

@@ -40,6 +40,10 @@ read-only checks; TAREL does not become a general SQL executor or make entity-re
     manifest/page hashes, and propose concrete `llm_assessed` key groups. Execute different
     read-only support and challenge SELECTs before a structured reflection. Never place inventory
     rows or SQL in a payload; durable group keys require the source's `entity_aliases` grant.
+12. When `next` reports `scope_mode: query_linked_slice`, keep private ranking components in the
+    host. Finish each declared component, then record the aggregate-only coverage sidecar after
+    completion and promotion. Keep inventory, slice, probe, and global mapping coverage distinct;
+    failed components are terminal but not successfully covered.
 
 Read [references/join-discovery.md](references/join-discovery.md) for join runs and
 [references/entity-matching.md](references/entity-matching.md) for entity runs. Read

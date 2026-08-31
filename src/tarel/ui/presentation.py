@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 
+from tarel.discovery.coverage import QueryLinkedEntityCoverage
 from tarel.entity_resolution.contracts import EntityResolutionMatch
 from tarel.entity_resolution.projection import project_entity_resolution_edges
 from tarel.focus.contracts import FocusDocument, FocusMember
@@ -33,6 +34,7 @@ def browser_graph(
     lineage_documents: Iterable[LineageDocument] = (),
     semantic_imports: Iterable[SemanticImportDocument] = (),
     entity_resolution_matches: Iterable[EntityResolutionMatch] = (),
+    query_linked_coverages: Iterable[QueryLinkedEntityCoverage] = (),
 ) -> dict[str, object]:
     return _browser_payload(
         (graph,),
@@ -42,6 +44,7 @@ def browser_graph(
         lineage_documents=tuple(lineage_documents),
         semantic_imports=tuple(semantic_imports),
         entity_resolution_matches=tuple(entity_resolution_matches),
+        query_linked_coverages=tuple(query_linked_coverages),
     )
 
 
@@ -54,6 +57,7 @@ def browser_workspace(
     lineage_documents: Iterable[LineageDocument] = (),
     semantic_imports: Iterable[SemanticImportDocument] = (),
     entity_resolution_matches: Iterable[EntityResolutionMatch] = (),
+    query_linked_coverages: Iterable[QueryLinkedEntityCoverage] = (),
 ) -> dict[str, object]:
     payload = _browser_payload(
         tuple(graphs),
@@ -62,6 +66,7 @@ def browser_workspace(
         lineage_documents=tuple(lineage_documents),
         semantic_imports=tuple(semantic_imports),
         entity_resolution_matches=tuple(entity_resolution_matches),
+        query_linked_coverages=tuple(query_linked_coverages),
         scope=scope,
     )
     objects = payload["objects"]
@@ -80,6 +85,7 @@ def _browser_payload(
     lineage_documents: tuple[LineageDocument, ...],
     semantic_imports: tuple[SemanticImportDocument, ...],
     entity_resolution_matches: tuple[EntityResolutionMatch, ...],
+    query_linked_coverages: tuple[QueryLinkedEntityCoverage, ...],
     lineage_names: tuple[str, ...] = (),
     scope: ResolvedScope | None = None,
 ) -> dict[str, object]:
@@ -192,6 +198,11 @@ def _browser_payload(
         "lineage_flows": browser_lineage_flows(documents, object_payloads),
         "lineages": list(selected_lineages),
         "objects": object_payloads,
+        "query_linked_coverages": [
+            _query_linked_coverage_summary(item, entity_resolution_matches)
+            for item in sorted(query_linked_coverages, key=lambda coverage: coverage.run_id)
+            if item.graph_name in graph_names
+        ],
         "review": _review_queue(object_payloads),
         "revision": revision,
         "revisions": revisions,
@@ -211,6 +222,23 @@ def _browser_payload(
             )
         ],
     }
+
+
+def _query_linked_coverage_summary(
+    coverage: QueryLinkedEntityCoverage,
+    matches: tuple[EntityResolutionMatch, ...],
+) -> dict[str, object]:
+    summary = coverage.to_summary_dict()
+    current_usages = {
+        match.usage
+        for match in matches
+        if match.candidate.id in coverage.candidate_refs
+    }
+    if "exploratory_only" in current_usages:
+        summary["candidate_usage"] = "exploratory_only"
+    elif "confirmed" in current_usages:
+        summary["candidate_usage"] = "confirmed"
+    return summary
 
 
 def browser_lineages(documents: Iterable[LineageDocument]) -> list[dict[str, object]]:

@@ -53,6 +53,7 @@ def project_entity_resolution_edges(
         execution = candidate.execution
         self_match = candidate.self_match
         identity_group = candidate.identity_group
+        query_coverage = match.query_linked_coverage
         self_object = nodes.get(self_match.object_id) if self_match else None
         record_key = (
             nodes.get(self_match.record_key_field_id) if self_match else None
@@ -75,59 +76,73 @@ def project_entity_resolution_edges(
             if self_match
             else []
         )
+        metadata = {
+            "candidate_id": candidate.id,
+            "entity_scope": "self_object" if self_match else "cross_object",
+            "collision_rate": evidence.collision_rate,
+            "confidence": evidence.confidence,
+            "counterexample_count": evidence.counterexample_count,
+            "coverage": evidence.coverage,
+            "evaluated_count": evidence.evaluated_count,
+            "evidence_level": evidence.level,
+            "human_reviewed": candidate.human_reviewed,
+            "operations": operations,
+            "producer": candidate.provenance.producer,
+            "requires_runtime_validation": match.requires_runtime_validation,
+            "rule_kind": rule_kind,
+            "threshold": threshold,
+            "blocking_fields": blocking_fields,
+            "contradiction_fields": contradiction_fields,
+            "quality_rating": quality.rating if quality else None,
+            "quality_score": quality.score if quality else evidence.confidence,
+            "quality_warnings": list(quality.warnings) if quality else [],
+            "executor_id": execution.executor_id if execution else None,
+            "executor_version": execution.executor_version if execution else None,
+            "blocking_strategy": execution.blocking_strategy if execution else None,
+            "run_id": candidate.provenance.run_id,
+            "self_object": self_object.label if self_object else None,
+            "record_key_field": record_key.label if record_key else None,
+            "comparison_fields": comparison_labels,
+            "guard_fields": contradiction_labels,
+            "pair_policy": self_match.pair_policy if self_match else None,
+            "identity_group_id": identity_group.id if identity_group else None,
+            "identity_member_count": (
+                len(identity_group.member_keys) if identity_group else None
+            ),
+            "identity_mapping_persisted": identity_group is not None,
+            "identity_group_confidence": (
+                identity_group.confidence if identity_group else None
+            ),
+            "supersedes_candidate_id": candidate.provenance.supersedes_candidate_id,
+            "source_field": source.label,
+            "state": candidate.state,
+            "target_field": target.label,
+            "usage": match.usage,
+        }
+        if query_coverage is not None:
+            metadata.update(
+                {
+                    "discovery_scope_mode": "query_linked_slice",
+                    "query_measure": query_coverage.measure_reference,
+                    "query_sort_direction": query_coverage.sort_direction,
+                    "query_top_n": query_coverage.top_n,
+                    "declared_component_count": query_coverage.declared_component_count,
+                    "completed_component_count": query_coverage.completed_component_count,
+                    "failed_component_count": query_coverage.failed_component_count,
+                    "reviewed_identity_count": query_coverage.reviewed_identity_count,
+                    "inventory_coverage": query_coverage.inventory_coverage,
+                    "query_slice_coverage": query_coverage.query_slice_coverage,
+                    "probe_coverage": query_coverage.probe_coverage,
+                    "mapped_record_coverage": query_coverage.mapped_record_coverage,
+                }
+            )
         edges.append(
             GraphEdge(
                 id=f"entity_resolution_candidate:{candidate.id}",
                 source_id=source.id,
                 target_id=target.id,
                 type="entity_resolution_candidate",
-                metadata={
-                    "candidate_id": candidate.id,
-                    "entity_scope": "self_object" if self_match else "cross_object",
-                    "collision_rate": evidence.collision_rate,
-                    "confidence": evidence.confidence,
-                    "counterexample_count": evidence.counterexample_count,
-                    "coverage": evidence.coverage,
-                    "evaluated_count": evidence.evaluated_count,
-                    "evidence_level": evidence.level,
-                    "human_reviewed": candidate.human_reviewed,
-                    "operations": operations,
-                    "producer": candidate.provenance.producer,
-                    "requires_runtime_validation": match.requires_runtime_validation,
-                    "rule_kind": rule_kind,
-                    "threshold": threshold,
-                    "blocking_fields": blocking_fields,
-                    "contradiction_fields": contradiction_fields,
-                    "quality_rating": quality.rating if quality else None,
-                    "quality_score": quality.score if quality else evidence.confidence,
-                    "quality_warnings": list(quality.warnings) if quality else [],
-                    "executor_id": execution.executor_id if execution else None,
-                    "executor_version": execution.executor_version if execution else None,
-                    "blocking_strategy": (
-                        execution.blocking_strategy if execution else None
-                    ),
-                    "run_id": candidate.provenance.run_id,
-                    "self_object": self_object.label if self_object else None,
-                    "record_key_field": record_key.label if record_key else None,
-                    "comparison_fields": comparison_labels,
-                    "guard_fields": contradiction_labels,
-                    "pair_policy": self_match.pair_policy if self_match else None,
-                    "identity_group_id": identity_group.id if identity_group else None,
-                    "identity_member_count": (
-                        len(identity_group.member_keys) if identity_group else None
-                    ),
-                    "identity_mapping_persisted": identity_group is not None,
-                    "identity_group_confidence": (
-                        identity_group.confidence if identity_group else None
-                    ),
-                    "supersedes_candidate_id": (
-                        candidate.provenance.supersedes_candidate_id
-                    ),
-                    "source_field": source.label,
-                    "state": candidate.state,
-                    "target_field": target.label,
-                    "usage": match.usage,
-                },
+                metadata=metadata,
             )
         )
     return tuple(edges)

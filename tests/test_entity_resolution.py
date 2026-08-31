@@ -190,6 +190,7 @@ class EntityResolutionTests(TestCase):
         self.assertEqual(projected["metadata"]["evidence_level"], "sample_tested")
         self.assertEqual(projected["metadata"]["usage"], "exploratory_only")
         self.assertTrue(projected["metadata"]["requires_runtime_validation"])
+        self.assertNotIn("discovery_scope_mode", projected["metadata"])
         self.assertEqual(len(payload["entity_resolution"]), 1)
 
         static = Path(__file__).parents[1] / "src/tarel/ui/static"

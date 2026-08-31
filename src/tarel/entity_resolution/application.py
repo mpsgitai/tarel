@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from tarel.discovery.contracts import DiscoveryFailure
+from tarel.discovery.store import FileDiscoveryStore
 from tarel.entity_resolution.contracts import (
     ENTITY_RESOLUTION_MODES,
     EntityAliasMatch,
@@ -152,7 +154,7 @@ def find_entity_resolution_candidates_for_graph_use_case(
             or _field_pair(item) not in reviewed_pairs
         ]
     return tuple(
-        _match(graph, item)
+        _match(graph, item, runtime=runtime)
         for item in sorted(candidates, key=lambda candidate: candidate.id)
     )
 
@@ -321,11 +323,24 @@ def _validate_candidate_binding(
 def _match(
     graph: GraphDocument,
     candidate: EntityResolutionCandidate,
+    *,
+    runtime: TarelRuntime | None,
 ) -> EntityResolutionMatch:
+    coverage = None
+    discovery_store = _discovery_store(runtime)
+    run_id = candidate.provenance.run_id
+    if discovery_store.coverage_exists(run_id):
+        try:
+            stored = discovery_store.load_coverage(run_id)
+        except DiscoveryFailure as exc:
+            raise EntityResolutionFailure(exc.code, str(exc)) from exc
+        if candidate.id in stored.candidate_refs:
+            coverage = stored
     return EntityResolutionMatch(
         candidate=candidate,
         source_reference=_field_reference(graph, candidate.source_field_id),
         target_reference=_field_reference(graph, candidate.target_field_id),
+        query_linked_coverage=coverage,
     )
 
 
@@ -467,6 +482,10 @@ def _graph_store(runtime: TarelRuntime | None) -> FileGraphStore:
 
 def _entity_store(runtime: TarelRuntime | None) -> FileEntityResolutionStore:
     return FileEntityResolutionStore() if runtime is None else runtime.entity_resolution_store()
+
+
+def _discovery_store(runtime: TarelRuntime | None) -> FileDiscoveryStore:
+    return FileDiscoveryStore() if runtime is None else runtime.discovery_store()
 
 
 def _source_store(runtime: TarelRuntime | None) -> FileSourceStore:

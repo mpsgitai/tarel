@@ -122,6 +122,9 @@ declares a separate technical record key and canonical unordered-pair semantics.
 `--identity-inspection` path sends a complete, label-sorted key/label inventory ephemerally through
 the caller, structures support/challenge/reflection probes, and persists concrete alias keys only
 when the source grants `entity_aliases`; aggregate permission is additionally required for probes.
+Question-driven runs can instead declare `scope_mode=query_linked_slice` and persist a value-free
+coverage sidecar over ranked components. Inventory, slice, probe, and global mapping coverage stay
+separate; complete slice coverage never implies complete population mapping.
 
 See [Optional discovery runs](docs/discovery-runs.md) for the complete CLI/SDK walkthrough and
 [Entity-resolution candidates](docs/entity-resolution-candidates.md) for retrieval, review, quality,
