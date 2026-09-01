@@ -33,12 +33,12 @@ def add_discovery_commands(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     discovery = subcommands.add_parser(
-        "discovery", help="Run optional, resumable join or entity discovery loops."
+        "discovery", help="Run optional, resumable join, entity, or mapping loops."
     )
     commands = discovery.add_subparsers(dest="discovery_command")
 
     start = commands.add_parser("start", help="Start one bounded discovery run.")
-    start.add_argument("kind", choices=("joins", "entities"))
+    start.add_argument("kind", choices=("joins", "entities", "mappings"))
     start.add_argument("--graph", required=True)
     start.add_argument("--source", action="append", dest="sources")
     start.add_argument("--question")
@@ -84,7 +84,7 @@ def add_discovery_commands(
 
     promote = commands.add_parser(
         "promote",
-        help="Promote selected joins or one entity match into the corresponding review store.",
+        help="Promote selected joins, an entity match, or a mapping into review.",
     )
     promote.add_argument("run_id")
     promote.add_argument(
@@ -104,7 +104,7 @@ def add_discovery_commands(
     list_command = commands.add_parser("list", help="List stored discovery runs.")
     list_command.add_argument("--graph")
     list_command.add_argument(
-        "--kind", choices=("join_discovery", "entity_matching")
+        "--kind", choices=("join_discovery", "entity_matching", "reference_mapping")
     )
     _format(list_command)
 
@@ -112,7 +112,9 @@ def add_discovery_commands(
         "find", help="Retrieve selected or explicitly exploratory discovery candidates."
     )
     find.add_argument("--graph")
-    find.add_argument("--kind", choices=("join_discovery", "entity_matching"))
+    find.add_argument(
+        "--kind", choices=("join_discovery", "entity_matching", "reference_mapping")
+    )
     find.add_argument("--include-exploratory", action="store_true")
     find.add_argument("--query")
     find.add_argument("--limit", type=int, default=20)
@@ -152,8 +154,13 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
         return None
     if args.discovery_command == "start":
         preset_probe, preset_candidate = _PRESETS[args.preset]
+        kind = {
+            "entities": "entity_matching",
+            "joins": "join_discovery",
+            "mappings": "reference_mapping",
+        }[args.kind]
         result = start_discovery_run_use_case(
-            "join_discovery" if args.kind == "joins" else "entity_matching",
+            kind,
             graph_name=args.graph,
             source_names=tuple(args.sources or ()),
             question=args.question,
@@ -228,6 +235,10 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
                 ],
                 "graph": result.graph.name,
                 "path": str(result.path),
+                "reference_mapping_candidates": [
+                    candidate.to_dict()
+                    for candidate in result.reference_mapping_candidates
+                ],
                 "run_id": result.run.id,
             },
             output_format=args.output_format,
@@ -292,12 +303,12 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
 def _read_json(path_value: str) -> dict[str, object]:
     try:
         raw = sys.stdin.read() if path_value == "-" else Path(path_value).read_text("utf-8")
-        payload = json.loads(raw)
+        payload = json.loads(raw, object_pairs_hook=_unique_object)
     except FileNotFoundError as exc:
         raise DiscoveryFailure(
             "discovery_source_not_found", f"Discovery action source not found: {path_value}"
         ) from exc
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise DiscoveryFailure(
             "invalid_discovery", "Could not read discovery action JSON."
         ) from exc
@@ -306,6 +317,15 @@ def _read_json(path_value: str) -> dict[str, object]:
             "invalid_discovery", "Discovery action JSON root must be an object."
         )
     return payload
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON field: {key}")
+        result[key] = value
+    return result
 
 
 def _format(parser: argparse.ArgumentParser) -> None:

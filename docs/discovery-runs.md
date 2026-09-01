@@ -1,21 +1,23 @@
 # Optional discovery runs
 
-Discovery runs are an experimental, opt-in protocol for long-running join discovery and entity
-matching. Existing graph discovery, relationship probes, annotations, entity candidates, lineage,
-retrieval, context, and UI behavior remain unchanged until a caller explicitly starts a run.
+Discovery runs are an experimental, opt-in protocol for long-running join discovery, entity
+matching, and physical-field reference mapping. Existing graph discovery, relationship probes,
+annotations, entity candidates, lineage, retrieval, context, and UI behavior remain unchanged
+until a caller explicitly starts a run.
 
 TAREL owns the bounded state machine and sanitized evidence artifact. A coding agent owns
 hypothesis choice and read-only execution through the tools authorized by its host. TAREL does not
 accept or persist free SQL, execute entity matching, or become a BI agent.
 
-The two modes share one application path but have deliberately different outputs:
+The three modes share one application path but have deliberately different outputs:
 
 | Mode | Question | Allowed comparison | Promotion target | Normal retrieval |
 | --- | --- | --- | --- | --- |
 | Join Discovery | Can these fields form a technical relationship? | exact or normalized exact | exact, untransformed candidates become draft graph relationships | only after separate relationship validation |
 | Entity Matching | Can records with imperfect labels denote the same entity? | normalized exact, Levenshtein, or token-set similarity | one candidate becomes a v0.2 entity-resolution artifact | exploratory until separate entity review |
+| Reference Mapping | Does a directed caller-owned correspondence connect these physical fields? | no executable comparison in TAREL | one candidate becomes a value-free reference-mapping artifact | confirmed when reviewed, otherwise explicitly exploratory |
 
-In both modes, starting, pausing, resuming, or completing a run changes no graph edge and approves
+In all modes, starting, pausing, resuming, or completing a run changes no graph edge and approves
 nothing. The coding agent may combine its own reasoning with metadata-only provider proposals, but
 only the coding agent or host can execute authorized probes and submit their aggregate results.
 
@@ -33,8 +35,9 @@ tarel discovery start joins \
 tarel discovery next join-abc123 --format json
 ```
 
-`joins` creates a `join_discovery` run; `entities` creates an `entity_matching` run. `quick`,
-`balanced`, and `deep` choose candidate and probe budgets that can be overridden explicitly. A run
+`joins` creates a `join_discovery` run, `entities` creates an `entity_matching` run, and `mappings`
+creates a `reference_mapping` run. `quick`, `balanced`, and `deep` choose candidate and probe
+budgets that can be overridden explicitly. A run
 is bound to the exact graph revision and, when supplied, existing logical sources that already map
 to the graph. A later graph revision fails visibly rather than reusing stale evidence.
 
@@ -58,6 +61,7 @@ Matching, not permission to compare a row with itself.
 Stale writers receive `stale_discovery_run`. Valid actions are:
 
 - `propose_candidate`;
+- `register_mapping_manifest` for reference mappings;
 - `record_observation`;
 - `select_candidate` or `reject_candidate` after a challenge;
 - `pause_run`, `resume_run`, or `complete_run`.
@@ -84,6 +88,12 @@ A program binds one to three source/target field pairs from the current graph. I
 - entity-only contradiction-guard field indexes.
 - optional `self_match` metadata with a separate record-key field and fixed
   `distinct_unordered` pair policy.
+
+Reference Mapping deliberately uses a smaller dedicated program: one directed physical source
+field, one physical target field, and one of `one_to_one`, `one_to_many`, `many_to_one`, or
+`many_to_many`. It contains no values, transforms, matcher, SQL, or code. The caller registers the
+SHA-256 and count of its private mapping manifest before submitting aggregate observations. See
+[Reference mappings](reference-mappings.md) for the complete lifecycle.
 
 Join programs accept only exact or normalized-exact equality. Typo-tolerant comparison is always
 entity matching and can never silently become a graph join. `fixed_segment` is the only parameterized

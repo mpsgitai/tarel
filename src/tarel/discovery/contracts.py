@@ -22,7 +22,15 @@ from tarel.discovery.identity import (
 )
 
 DISCOVERY_CONTRACT_VERSION = "tarel.discovery-run.v0.1.experimental"
-DISCOVERY_KINDS = frozenset({"entity_matching", "join_discovery"})
+DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION = (
+    "tarel.discovery-run.v0.2.experimental"
+)
+DISCOVERY_CONTRACT_VERSIONS = frozenset(
+    {DISCOVERY_CONTRACT_VERSION, DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION}
+)
+DISCOVERY_KINDS = frozenset(
+    {"entity_matching", "join_discovery", "reference_mapping"}
+)
 DISCOVERY_STATUSES = frozenset({"completed", "open", "paused"})
 DISCOVERY_ACTORS = frozenset({"coding_agent", "human", "provider"})
 DISCOVERY_ACTIONS = frozenset(
@@ -30,6 +38,7 @@ DISCOVERY_ACTIONS = frozenset(
         "complete_run",
         "pause_run",
         "propose_candidate",
+        "register_mapping_manifest",
         "record_observation",
         "reject_candidate",
         "resume_run",
@@ -75,6 +84,9 @@ DISCOVERY_BLOCKING_STRATEGIES = frozenset(
     }
 )
 DISCOVERY_SELF_PAIR_POLICIES = frozenset({"distinct_unordered"})
+REFERENCE_MAPPING_CARDINALITIES = frozenset(
+    {"many_to_many", "many_to_one", "one_to_many", "one_to_one"}
+)
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -237,6 +249,96 @@ class DiscoveryProgram:
         )
         validate_discovery_program(program)
         return program
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceMappingProgram:
+    """A directed physical-field mapping hypothesis."""
+
+    source_field: str
+    target_field: str
+    cardinality: str
+    kind: str = "reference_mapping"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "cardinality": self.cardinality,
+            "kind": self.kind,
+            "source_field": self.source_field,
+            "target_field": self.target_field,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ReferenceMappingProgram:
+        _fields(
+            data,
+            {
+                "cardinality",
+                "kind",
+                "source_field",
+                "target_field",
+            },
+            "reference-mapping program",
+        )
+        program = cls(
+            source_field=_text(data.get("source_field"), "source_field"),
+            target_field=_text(data.get("target_field"), "target_field"),
+            cardinality=_choice(
+                data.get("cardinality"),
+                "reference-mapping cardinality",
+                REFERENCE_MAPPING_CARDINALITIES,
+            ),
+            kind=_choice(
+                data.get("kind"),
+                "discovery kind",
+                frozenset({"reference_mapping"}),
+            ),
+        )
+        if program.source_field == program.target_field:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference mappings require different directed source and target fields.",
+            )
+        return program
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceMappingManifest:
+    """Value-free identity and size of a caller-owned mapping artifact."""
+
+    mapping_manifest_hash: str
+    mapping_count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mapping_count": self.mapping_count,
+            "mapping_manifest_hash": self.mapping_manifest_hash,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ReferenceMappingManifest:
+        _fields(
+            data,
+            {"mapping_count", "mapping_manifest_hash"},
+            "reference-mapping manifest",
+        )
+        return cls(
+            mapping_manifest_hash=_sha256(
+                data.get("mapping_manifest_hash"), "mapping_manifest_hash"
+            ),
+            mapping_count=_bounded_integer(
+                data.get("mapping_count"), "mapping_count", 1, 1_000_000_000
+            ),
+        )
+
+
+DiscoveryProgramType = DiscoveryProgram | ReferenceMappingProgram
+
+
+def discovery_program_from_dict(data: dict[str, Any]) -> DiscoveryProgramType:
+    if data.get("kind") == "reference_mapping":
+        return ReferenceMappingProgram.from_dict(data)
+    return DiscoveryProgram.from_dict(data)
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,13 +618,14 @@ class DiscoveryCandidate:
     generation: int
     parent_ids: tuple[str, ...]
     variation_operator: str
-    program: DiscoveryProgram
+    program: DiscoveryProgramType
     state: str = "proposed"
     observations: tuple[DiscoveryObservation, ...] = ()
     assessment_reason: str | None = None
+    mapping_manifest: ReferenceMappingManifest | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "assessment_reason": self.assessment_reason,
             "generation": self.generation,
             "id": self.id,
@@ -533,6 +636,9 @@ class DiscoveryCandidate:
             "state": self.state,
             "variation_operator": self.variation_operator,
         }
+        if self.mapping_manifest is not None:
+            payload["mapping_manifest"] = self.mapping_manifest.to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DiscoveryCandidate:
@@ -550,6 +656,7 @@ class DiscoveryCandidate:
                 "variation_operator",
             },
             "discovery candidate",
+            optional={"mapping_manifest"},
         )
         observations = data.get("observations")
         if not isinstance(observations, list) or any(
@@ -557,6 +664,13 @@ class DiscoveryCandidate:
         ):
             raise DiscoveryFailure(
                 "invalid_discovery", "candidate observations must be an array of objects."
+            )
+        mapping_manifest_value = data.get("mapping_manifest")
+        if mapping_manifest_value is not None and not isinstance(
+            mapping_manifest_value, dict
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery", "mapping_manifest must be an object or null."
             )
         candidate = cls(
             id=_identifier(data.get("id"), "candidate id"),
@@ -566,7 +680,14 @@ class DiscoveryCandidate:
             variation_operator=_identifier(
                 data.get("variation_operator"), "variation_operator"
             ),
-            program=DiscoveryProgram.from_dict(_object(data.get("program"), "program")),
+            program=discovery_program_from_dict(
+                _object(data.get("program"), "program")
+            ),
+            mapping_manifest=(
+                ReferenceMappingManifest.from_dict(mapping_manifest_value)
+                if isinstance(mapping_manifest_value, dict)
+                else None
+            ),
             state=_choice(
                 data.get("state"), "candidate state", DISCOVERY_CANDIDATE_STATES
             ),
@@ -578,6 +699,20 @@ class DiscoveryCandidate:
         if candidate.kind != candidate.program.kind:
             raise DiscoveryFailure(
                 "invalid_discovery", "Candidate and program discovery kinds must match."
+            )
+        if candidate.kind != "reference_mapping" and "mapping_manifest" in data:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Only reference-mapping candidates accept a mapping manifest.",
+            )
+        if (
+            candidate.kind == "reference_mapping"
+            and candidate.observations
+            and candidate.mapping_manifest is None
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping observations require a registered mapping manifest.",
             )
         if len(candidate.parent_ids) > _MAX_PARENTS or len(candidate.parent_ids) != len(
             set(candidate.parent_ids)
@@ -745,7 +880,8 @@ class DiscoveryRun:
             "discovery run",
             optional={"identity_inspection", "revision", "scope_mode"},
         )
-        if data.get("contract_version") != DISCOVERY_CONTRACT_VERSION:
+        contract_version = data.get("contract_version")
+        if contract_version not in DISCOVERY_CONTRACT_VERSIONS:
             raise DiscoveryFailure(
                 "unsupported_discovery", "Unsupported TAREL discovery-run contract."
             )
@@ -809,6 +945,7 @@ class DiscoveryRun:
                 if data.get("scope_mode") is not None
                 else None
             ),
+            contract_version=str(contract_version),
         )
         validate_discovery_run(run)
         expected_revision = data.get("revision")
@@ -820,6 +957,11 @@ class DiscoveryRun:
 
 
 def validate_discovery_program(program: DiscoveryProgram) -> None:
+    if program.kind == "reference_mapping":
+        raise DiscoveryFailure(
+            "invalid_discovery",
+            "Reference mappings require the dedicated reference-mapping program.",
+        )
     if not 1 <= len(program.source_fields) <= _MAX_FIELDS:
         raise DiscoveryFailure(
             "invalid_discovery", "Discovery programs require between one and three fields."
@@ -941,9 +1083,25 @@ def validate_discovery_program(program: DiscoveryProgram) -> None:
 
 
 def validate_discovery_run(run: DiscoveryRun) -> None:
-    if run.contract_version != DISCOVERY_CONTRACT_VERSION:
+    if run.contract_version not in DISCOVERY_CONTRACT_VERSIONS:
         raise DiscoveryFailure(
             "unsupported_discovery", "Unsupported TAREL discovery-run contract."
+        )
+    if (
+        run.contract_version == DISCOVERY_CONTRACT_VERSION
+        and run.kind == "reference_mapping"
+    ):
+        raise DiscoveryFailure(
+            "unsupported_discovery",
+            "Reference mapping requires the v0.2 discovery-run contract.",
+        )
+    if (
+        run.contract_version == DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION
+        and run.kind != "reference_mapping"
+    ):
+        raise DiscoveryFailure(
+            "unsupported_discovery",
+            "The v0.2 discovery-run contract is reserved for reference mapping.",
         )
     _identifier(run.id, "run id")
     _sha256(run.graph_revision, "graph revision")
@@ -1046,6 +1204,14 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
                     "Terminal identity candidates require a matching group reflection.",
                 )
     for step in run.steps:
+        if (
+            step.action == "register_mapping_manifest"
+            and run.kind != "reference_mapping"
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Only reference-mapping runs accept mapping-manifest steps.",
+            )
         if step.candidate_id is not None and step.candidate_id not in candidate_by_id:
             raise DiscoveryFailure(
                 "invalid_discovery", "Discovery step references an unknown candidate."
@@ -1054,6 +1220,8 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
             raise DiscoveryFailure(
                 "invalid_discovery", "Discovery step references an unknown observation."
             )
+    if run.kind == "reference_mapping":
+        _validate_reference_mapping_run_steps(run)
     if run.status == "completed" and not run.completion_reason:
         raise DiscoveryFailure(
             "invalid_discovery", "Completed runs require a completion reason."
@@ -1062,6 +1230,99 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
         raise DiscoveryFailure(
             "invalid_discovery", "Only completed runs accept a completion reason."
         )
+
+
+def _validate_reference_mapping_run_steps(run: DiscoveryRun) -> None:
+    for step in run.steps:
+        if step.actor == "provider" and step.action != "propose_candidate":
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Providers may only propose reference-mapping hypotheses.",
+            )
+        if step.action in IDENTITY_ACTIONS:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping runs cannot contain entity-inspection actions.",
+            )
+    for candidate in run.candidates:
+        proposals = [
+            step
+            for step in run.steps
+            if step.action == "propose_candidate" and step.candidate_id == candidate.id
+        ]
+        if len(proposals) != 1:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Each reference-mapping candidate requires one proposal step.",
+            )
+        registrations = [
+            step
+            for step in run.steps
+            if step.action == "register_mapping_manifest"
+            and step.candidate_id == candidate.id
+        ]
+        expected_registration_count = 1 if candidate.mapping_manifest is not None else 0
+        if len(registrations) != expected_registration_count:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping manifest state requires one matching registration step.",
+            )
+        if registrations and proposals[0].sequence >= registrations[0].sequence:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping manifest registration must follow its proposal.",
+            )
+        observation_steps = [
+            step
+            for step in run.steps
+            if step.action == "record_observation" and step.candidate_id == candidate.id
+        ]
+        expected_observations = {item.id for item in candidate.observations}
+        observed_references = [step.observation_id for step in observation_steps]
+        if (
+            len(observed_references) != len(set(observed_references))
+            or set(observed_references) != expected_observations
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping evidence requires one matching non-provider step per probe.",
+            )
+        if registrations and observation_steps and registrations[0].sequence >= min(
+            step.sequence for step in observation_steps
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping evidence must follow manifest registration.",
+            )
+        assessments = [
+            step
+            for step in run.steps
+            if step.action in {"reject_candidate", "select_candidate"}
+            and step.candidate_id == candidate.id
+        ]
+        expected_action = {
+            "rejected": "reject_candidate",
+            "selected": "select_candidate",
+        }.get(candidate.state)
+        if expected_action is None and assessments:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Only terminal reference-mapping candidates accept an assessment step.",
+            )
+        if expected_action is not None and (
+            len(assessments) != 1 or assessments[0].action != expected_action
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Terminal reference-mapping state requires one matching assessment step.",
+            )
+        if assessments and observation_steps and assessments[0].sequence <= max(
+            step.sequence for step in observation_steps
+        ):
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping assessment must follow its evidence.",
+            )
 
 
 def allowed_discovery_actions(run: DiscoveryRun) -> tuple[str, ...]:
@@ -1080,7 +1341,16 @@ def allowed_discovery_actions(run: DiscoveryRun) -> tuple[str, ...]:
         actions.append("propose_candidate")
     active = [item for item in run.candidates if item.state not in {"selected", "rejected"}]
     if inspection is None:
-        if active and run.probes_used < run.probe_budget:
+        if run.kind == "reference_mapping" and any(
+            item.mapping_manifest is None for item in active
+        ):
+            actions.append("register_mapping_manifest")
+        observable = [
+            item
+            for item in active
+            if run.kind != "reference_mapping" or item.mapping_manifest is not None
+        ]
+        if observable and run.probes_used < run.probe_budget:
             actions.append("record_observation")
         if any(item.state == "challenged" for item in active):
             actions.extend(("select_candidate", "reject_candidate"))
@@ -1154,6 +1424,9 @@ def apply_discovery_action(
         return _apply_identity_action(run, action=action, actor=actor, payload=payload)
     if action == "propose_candidate":
         updated, candidate_id = _propose_candidate(run, payload)
+        return _append_step(updated, actor, action, candidate_id=candidate_id)
+    if action == "register_mapping_manifest":
+        updated, candidate_id = _register_mapping_manifest(run, payload)
         return _append_step(updated, actor, action, candidate_id=candidate_id)
     if action == "record_observation":
         updated, candidate_id, observation_id = _record_observation(run, payload)
@@ -1279,7 +1552,9 @@ def _propose_candidate(
         variation_operator=_identifier(
             payload.get("variation_operator"), "variation_operator"
         ),
-        program=DiscoveryProgram.from_dict(_object(payload.get("program"), "program")),
+        program=discovery_program_from_dict(
+            _object(payload.get("program"), "program")
+        ),
     )
     if candidate.program.kind != run.kind:
         raise DiscoveryFailure(
@@ -1288,6 +1563,36 @@ def _propose_candidate(
     if run.identity_inspection is not None:
         _validate_identity_candidate(run, candidate)
     return replace(run, candidates=(*run.candidates, candidate)), candidate.id
+
+
+def _register_mapping_manifest(
+    run: DiscoveryRun, payload: dict[str, Any]
+) -> tuple[DiscoveryRun, str]:
+    _fields(
+        payload,
+        {"candidate_id", "mapping_count", "mapping_manifest_hash"},
+        "register_mapping_manifest payload",
+    )
+    candidate_id = _identifier(payload.get("candidate_id"), "candidate_id")
+    candidate = _candidate(run, candidate_id)
+    if candidate.kind != "reference_mapping":
+        raise DiscoveryFailure(
+            "discovery_action_not_allowed",
+            "Mapping manifests belong only to reference-mapping candidates.",
+        )
+    if candidate.state != "proposed" or candidate.mapping_manifest is not None:
+        raise DiscoveryFailure(
+            "discovery_action_not_allowed",
+            "A mapping manifest can be registered once before observations begin.",
+        )
+    manifest = ReferenceMappingManifest.from_dict(
+        {
+            "mapping_count": payload.get("mapping_count"),
+            "mapping_manifest_hash": payload.get("mapping_manifest_hash"),
+        }
+    )
+    changed = replace(candidate, mapping_manifest=manifest)
+    return _replace_candidate(run, changed), candidate_id
 
 
 def _record_observation(
@@ -1303,6 +1608,11 @@ def _record_observation(
         raise DiscoveryFailure(
             "discovery_action_not_allowed", "Terminal candidates cannot receive observations."
         )
+    if candidate.kind == "reference_mapping" and candidate.mapping_manifest is None:
+        raise DiscoveryFailure(
+            "mapping_manifest_required",
+            "Register the value-free mapping manifest before executing probes.",
+        )
     if (
         run.identity_inspection is not None
         and run.identity_inspection.group_for_candidate(candidate_id) is None
@@ -1312,7 +1622,8 @@ def _record_observation(
             "Register the concrete entity alias group before executing probes.",
         )
     if (
-        candidate.program.self_match is not None
+        isinstance(candidate.program, DiscoveryProgram)
+        and candidate.program.self_match is not None
         and observation.status == "succeeded"
         and observation.metrics is not None
         and observation.metrics.basis != "pairs"
@@ -1393,6 +1704,11 @@ def _validate_identity_candidate(
             "LLM-assessed groups require a complete identity inventory.",
         )
     program = candidate.program
+    if not isinstance(program, DiscoveryProgram):
+        raise DiscoveryFailure(
+            "invalid_identity_candidate",
+            "Identity inspection requires an entity-matching program.",
+        )
     if program.comparison != "llm_assessed" or program.self_match is None:
         raise DiscoveryFailure(
             "invalid_identity_candidate",

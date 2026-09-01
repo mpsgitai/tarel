@@ -12,12 +12,15 @@ from typing import Any
 
 from tarel.discovery.contracts import (
     DISCOVERY_CONTRACT_VERSION,
+    DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION,
     DiscoveryCandidate,
     DiscoveryFailure,
     DiscoveryProgram,
     DiscoveryRun,
+    ReferenceMappingProgram,
     allowed_discovery_actions,
     apply_discovery_action,
+    discovery_program_from_dict,
 )
 from tarel.discovery.coverage import (
     DISCOVERY_SCOPE_MODES,
@@ -44,6 +47,14 @@ from tarel.graph.revision import graph_revision
 from tarel.graph.store import FileGraphStore
 from tarel.providers.contracts import Message, ProviderFailure, StructuredRequest
 from tarel.providers.host import load_provider
+from tarel.reference_mapping.application import (
+    import_reference_mapping_candidate_use_case,
+    reference_mapping_candidate_from_discovery,
+)
+from tarel.reference_mapping.contracts import (
+    ReferenceMappingCandidate,
+    ReferenceMappingFailure,
+)
 from tarel.relationships.core import (
     RelationshipFailure,
     add_manual_relationship_fields,
@@ -83,6 +94,7 @@ class DiscoveryPromotionResult:
     edges: tuple[GraphEdge, ...]
     path: Path
     entity_candidates: tuple[EntityResolutionCandidate, ...] = ()
+    reference_mapping_candidates: tuple[ReferenceMappingCandidate, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,11 +151,10 @@ class DiscoveryMatch:
         return "exploratory_selected" if self.candidate.state == "selected" else "exploratory_only"
 
     def to_dict(self) -> dict[str, object]:
-        subject = (
-            "entity-matching rule"
-            if self.candidate.kind == "entity_matching"
-            else "relationship"
-        )
+        subject = {
+            "entity_matching": "entity-matching rule",
+            "reference_mapping": "reference mapping",
+        }.get(self.candidate.kind, "relationship")
         return {
             "candidate": self.candidate.to_dict(),
             "graph": self.graph_name,
@@ -200,7 +211,11 @@ def start_discovery_run_use_case(
             "candidate_budget": candidate_budget,
             "candidates": [],
             "completion_reason": None,
-            "contract_version": DISCOVERY_CONTRACT_VERSION,
+            "contract_version": (
+                DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION
+                if kind == "reference_mapping"
+                else DISCOVERY_CONTRACT_VERSION
+            ),
             "graph": {"name": graph.name, "revision": graph_revision(graph)},
             "id": generated_id,
             "kind": kind,
@@ -476,6 +491,34 @@ def promote_discovery_candidates_use_case(
             path=imported.path,
         )
 
+    if run.kind == "reference_mapping":
+        if len(selected) != 1:
+            raise DiscoveryFailure(
+                "invalid_discovery_promotion",
+                "Promote one reference-mapping candidate at a time.",
+            )
+        if supersedes_candidate_id is not None:
+            raise DiscoveryFailure(
+                "invalid_discovery_promotion",
+                "Reference-mapping promotion does not accept entity supersede semantics.",
+            )
+        mapping_candidate = reference_mapping_candidate_from_discovery(
+            run, selected[0], graph, reason=reason
+        )
+        try:
+            imported_mapping = import_reference_mapping_candidate_use_case(
+                mapping_candidate, runtime=runtime
+            )
+        except ReferenceMappingFailure as exc:
+            raise DiscoveryFailure("discovery_promotion_failed", str(exc)) from exc
+        return DiscoveryPromotionResult(
+            run=run,
+            graph=graph,
+            edges=(),
+            path=imported_mapping.path,
+            reference_mapping_candidates=(imported_mapping.candidate,),
+        )
+
     if supersedes_candidate_id is not None:
         raise DiscoveryFailure(
             "invalid_discovery_promotion",
@@ -486,6 +529,11 @@ def promote_discovery_candidates_use_case(
     promoted: list[GraphEdge] = []
     try:
         for candidate in selected:
+            if not isinstance(candidate.program, DiscoveryProgram):
+                raise DiscoveryFailure(
+                    "invalid_discovery_promotion",
+                    "Join promotion requires a join-discovery program.",
+                )
             if candidate.program.comparison != "exact" or any(
                 candidate.program.source_transforms
                 + candidate.program.target_transforms
@@ -618,7 +666,7 @@ def advise_discovery_run_use_case(
         StructuredRequest(
             messages=_advice_messages(run, graph, requested),
             schema_name="TarelDiscoveryAdvice",
-            schema=_advice_schema(requested),
+            schema=_advice_schema(run.kind, requested),
             model=model,
             temperature=0.0,
             max_output_tokens=4_000,
@@ -709,22 +757,24 @@ def find_discovery_candidates_use_case(
 
 
 def _validate_program_bindings(graph: GraphDocument, program: dict[str, Any]) -> None:
-    typed = DiscoveryProgram.from_dict(program)
-    field_values: list[object] = []
-    for key in ("source_fields", "target_fields"):
-        value = program.get(key)
-        if not isinstance(value, list):
-            raise DiscoveryFailure("invalid_discovery", f"{key} must be an array.")
-        field_values.extend(value)
-    for reference in field_values:
-        if not isinstance(reference, str):
-            raise DiscoveryFailure(
-                "invalid_discovery", "Discovery field references must be strings."
-            )
+    typed = discovery_program_from_dict(program)
+    if isinstance(typed, ReferenceMappingProgram):
+        field_references = (typed.source_field, typed.target_field)
+    else:
+        field_references = (*typed.source_fields, *typed.target_fields)
+    resolved_fields = []
+    for reference in field_references:
         try:
-            resolve_field(graph, reference)
+            resolved_fields.append(resolve_field(graph, reference))
         except RelationshipFailure as exc:
             raise DiscoveryFailure("discovery_field_not_found", str(exc)) from exc
+    if isinstance(typed, ReferenceMappingProgram):
+        if resolved_fields[0].field_node.id == resolved_fields[1].field_node.id:
+            raise DiscoveryFailure(
+                "invalid_discovery",
+                "Reference-mapping endpoints must resolve to different physical fields.",
+            )
+        return
     if typed.self_match is None:
         return
     try:
@@ -842,7 +892,7 @@ def _validate_identity_inventory_bindings(
 
 def _candidate_summary(candidate: DiscoveryCandidate) -> dict[str, object]:
     latest = candidate.observations[-1] if candidate.observations else None
-    return {
+    summary: dict[str, object] = {
         "generation": candidate.generation,
         "id": candidate.id,
         "latest_observation": latest.to_dict() if latest else None,
@@ -852,6 +902,9 @@ def _candidate_summary(candidate: DiscoveryCandidate) -> dict[str, object]:
         "state": candidate.state,
         "variation_operator": candidate.variation_operator,
     }
+    if candidate.mapping_manifest is not None:
+        summary["mapping_manifest"] = candidate.mapping_manifest.to_dict()
+    return summary
 
 
 def _identity_inspection_summary(run: DiscoveryRun) -> dict[str, object] | None:
@@ -968,6 +1021,25 @@ def _entity_field_hints(
 
 
 def _probe_ladder(run: DiscoveryRun) -> tuple[dict[str, str], ...]:
+    if run.kind == "reference_mapping":
+        return (
+            {
+                "code": "register_mapping_manifest",
+                "purpose": "Bind the caller-owned mapping by SHA-256 and count, without values.",
+            },
+            {
+                "code": "support_probe",
+                "purpose": "Measure mapping coverage and cardinality risk with aggregates only.",
+            },
+            {
+                "code": "challenge_probe",
+                "purpose": "Use an independent probe to seek collisions and counterexamples.",
+            },
+            {
+                "code": "assess",
+                "purpose": "Select or reject only after the independent challenge.",
+            },
+        )
     if run.kind == "join_discovery":
         return (
             {
@@ -1035,6 +1107,8 @@ def _raw_sample_access(
     *,
     runtime: TarelRuntime | None,
 ) -> str:
+    if run.kind == "reference_mapping":
+        return "not_used"
     if not run.source_names:
         return "host_controlled"
     store = _source_store(runtime)
@@ -1068,6 +1142,34 @@ def _label_tokens(label: str) -> tuple[str, ...]:
 def _retrieval_document(match: DiscoveryMatch) -> RetrievalDocument:
     candidate = match.candidate
     program = candidate.program
+    if isinstance(program, ReferenceMappingProgram):
+        evidence = [
+            (
+                f"{observation.phase} {observation.status} {observation.evidence_level} "
+                f"coverage {observation.metrics.coverage if observation.metrics else 'unknown'} "
+                f"confidence {observation.metrics.confidence if observation.metrics else 'unknown'}"
+            )
+            for observation in candidate.observations
+        ]
+        text = "\n".join(
+            (
+                f"Discovery kind: {candidate.kind}",
+                f"Question: {match.question or ''}",
+                f"State: {candidate.state}",
+                f"Variation: {candidate.variation_operator}",
+                f"Direction: {program.source_field} -> {program.target_field}",
+                f"Cardinality: {program.cardinality}",
+                *evidence,
+            )
+        )
+        return RetrievalDocument(
+            id=f"{match.run_id}:{candidate.id}",
+            object_id=match.run_id,
+            field_id=None,
+            namespace=match.graph_name,
+            label=candidate.id,
+            text=text,
+        )
     transforms = [
         transform.kind
         for field_transforms in (*program.source_transforms, *program.target_transforms)
@@ -1134,6 +1236,13 @@ def _advice_messages(
         "proposal_count": count,
         "question": run.question,
     }
+    mapping_instruction = (
+        " Reference mappings are directed: choose source_field, target_field, and an explicit "
+        "cardinality. Do not claim or invent a mapping manifest; the harness registers its "
+        "hash and count separately."
+        if run.kind == "reference_mapping"
+        else ""
+    )
     return (
         Message(
             role="system",
@@ -1143,6 +1252,7 @@ def _advice_messages(
                 "rows, credentials, reasoning transcripts, or claims of executed evidence. "
                 "Use only supplied field references and supported program operations. Equal "
                 "field pairs require explicit self_match metadata with a separate record key."
+                + mapping_instruction
             ),
         ),
         Message(
@@ -1152,7 +1262,27 @@ def _advice_messages(
     )
 
 
-def _advice_schema(count: int) -> dict[str, object]:
+def _advice_schema(kind: str, count: int) -> dict[str, object]:
+    if kind == "reference_mapping":
+        program: dict[str, object] = {
+            "additionalProperties": False,
+            "properties": {
+                "cardinality": {
+                    "enum": [
+                        "many_to_many",
+                        "many_to_one",
+                        "one_to_many",
+                        "one_to_one",
+                    ]
+                },
+                "kind": {"enum": ["reference_mapping"]},
+                "source_field": {"type": "string"},
+                "target_field": {"type": "string"},
+            },
+            "required": ["cardinality", "kind", "source_field", "target_field"],
+            "type": "object",
+        }
+        return _proposal_advice_schema(program, count)
     transform = {
         "additionalProperties": False,
         "properties": {
@@ -1229,6 +1359,12 @@ def _advice_schema(count: int) -> dict[str, object]:
         ],
         "type": "object",
     }
+    return _proposal_advice_schema(program, count)
+
+
+def _proposal_advice_schema(
+    program: dict[str, object], count: int
+) -> dict[str, object]:
     return {
         "additionalProperties": False,
         "properties": {
@@ -1257,6 +1393,8 @@ def _advice_schema(count: int) -> dict[str, object]:
 
 
 def _default_goal(kind: str) -> str:
+    if kind == "reference_mapping":
+        return "Discover directed, evidence-backed reference mappings in the current graph."
     if kind == "join_discovery":
         return "Discover bounded, evidence-backed join candidates in the current graph."
     return "Discover bounded, evidence-backed entity-matching candidates in the current graph."

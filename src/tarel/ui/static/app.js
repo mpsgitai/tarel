@@ -68,6 +68,7 @@ function renderAll() {
   $("#mode").textContent = data.editable ? "Edit enabled" : "Read only";
   $("#mode").className = `mode-badge${data.editable ? " edit" : ""}`;
   $("#review-badge").textContent = String(data.review.filter(item => ["draft", "review_required", "deferred"].includes(item.state)).length);
+  renderLogicalTopologyNotices();
   renderObjectList();
   renderFocuses();
   renderScopeFilters();
@@ -78,6 +79,15 @@ function renderAll() {
   renderManualLineage();
 }
 
+function renderLogicalTopologyNotices() {
+  const notices = state.data.logical_topology_notices || [];
+  const container = $("#logical-topology-notices");
+  container.hidden = notices.length === 0;
+  container.innerHTML = notices.map(item =>
+    `<p><strong>Logical topology not shown</strong><span>${escapeHtml(item.graph)} · ${escapeHtml(item.message)}</span></p>`
+  ).join("");
+}
+
 function renderObjectList() {
   const needle = $("#object-search").value.trim().toLowerCase();
   const objects = visibleObjects().filter(item =>
@@ -86,16 +96,18 @@ function renderObjectList() {
   );
   $("#object-list").innerHTML = objects.map(item => {
     const memberships = focusMembership(item.id);
+    const logical = item.type === "derived_relation";
+    const objectState = item.state || item.annotation?.state || "missing";
     return `
-    <button class="object-row${item.id === state.selectedId ? " is-active" : ""}" data-object="${escapeAttr(item.id)}" draggable="true">
-      <span class="kind-icon">${item.type === "view" ? "V" : "T"}</span>
+    <button class="object-row${item.id === state.selectedId ? " is-active" : ""}" data-object="${escapeAttr(item.id)}" draggable="${logical ? "false" : "true"}">
+      <span class="kind-icon">${logical ? "D" : item.type === "view" ? "V" : "T"}</span>
       <span class="object-copy"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.graph)} · ${escapeHtml(item.namespace)} · ${item.fields.length} fields${memberships.length ? ` · ${memberships.length} focus${memberships.length === 1 ? "" : "es"}` : ""}</small></span>
-      <i class="state-dot ${escapeAttr(item.annotation?.state || "missing")}" title="${escapeAttr(item.annotation?.state || "missing")}"></i>
+      <i class="state-dot ${escapeAttr(objectState)}" title="${escapeAttr(objectState)}"></i>
     </button>`;
   }).join("") || '<div class="empty-state"><p>No matching objects.</p></div>';
   $$(".object-row").forEach(row => {
     row.addEventListener("click", () => selectObject(row.dataset.object));
-    row.addEventListener("dragstart", event => event.dataTransfer.setData("text/tarel-object", row.dataset.object));
+    if (row.draggable) row.addEventListener("dragstart", event => event.dataTransfer.setData("text/tarel-object", row.dataset.object));
   });
 }
 
@@ -215,7 +227,7 @@ function visibleObjects() {
     ? new Set(state.focusSelection.object_ids)
     : null;
   return state.data.objects.filter(item =>
-    (!focusObjects || focusObjects.has(item.id)) &&
+    (!focusObjects || focusObjects.has(item.id) || focusObjects.has(item.logical_topology?.source)) &&
     (!item.system || state.scopeFilters.systems.has(item.system)) &&
     (!item.area_ref || state.scopeFilters.areas.has(item.area_ref)) &&
     state.scopeFilters.graphs.has(item.graph) &&
@@ -241,7 +253,7 @@ function renderGraph() {
     const lane = lanes.indexOf(laneName);
     const index = counts.get(laneName) || 0;
     counts.set(laneName, index + 1);
-    return {data: {id: item.id, label: item.name, type: item.type, state: item.annotation?.state || "missing", namespace: item.namespace, graph: item.graph, parent: state.canvasMode === "space" ? spaceGroupIds(item).schema : undefined}, position: {x: lane * 300 + (index % 2) * 130, y: Math.floor(index / 2) * 82}};
+    return {data: {id: item.id, label: item.name, type: item.type, state: item.state || item.annotation?.state || "missing", namespace: item.namespace, graph: item.graph, parent: state.canvasMode === "space" ? spaceGroupIds(item).schema : undefined}, position: {x: lane * 300 + (index % 2) * 130, y: Math.floor(index / 2) * 82}};
   });
   if (state.canvasMode === "space") {
     elements.unshift(...spaceGroupElements(objects));
@@ -261,6 +273,7 @@ function renderGraph() {
     style: [
       {selector: "node", style: {"background-color": "#181818", "border-color": "#5f5f68", "border-width": 1, "color": "#f4f4f5", "font-family": "Inter, sans-serif", "font-size": 11, "label": "data(label)", "shape": "round-rectangle", "text-max-width": 104, "text-wrap": "ellipsis", "text-valign": "center", "width": 112, "height": 42}},
       {selector: 'node[type = "view"]', style: {"border-color": "#22d3ee"}},
+      {selector: 'node[type = "derived_relation"]', style: {"background-color": "#10202a", "border-color": "#2dd4bf", "border-style": "dashed", "shape": "round-tag"}},
       {selector: 'node[type = "asset"]', style: {"background-color": "#10202a", "border-color": "#22d3ee", "shape": "diamond"}},
       {selector: 'node[type = "procedure"], node[type = "query"], node[type = "script"]', style: {"background-color": "#4a2d73", "border-color": "#d8b4fe", "color": "#faf5ff", "shape": "hexagon"}},
       {selector: 'node[type = "group-system"]', style: {"background-opacity": .05, "border-color": "#6366f1", "border-style": "solid", "border-width": 2, "label": "data(label)", "text-valign": "top", "text-halign": "center", "padding": 34, "shape": "round-rectangle", "font-size": 12}},
@@ -273,6 +286,9 @@ function renderGraph() {
       {selector: 'edge[type = "relationship_candidate"]', style: {"line-style": "dashed", "line-color": "#f59e0b", "target-arrow-color": "#f59e0b"}},
       {selector: 'edge[type = "entity_resolution_candidate"]', style: {"line-style": "dashed", "line-color": "#a855f7", "target-arrow-color": "#a855f7", "width": 2}},
       {selector: 'edge[type = "entity_resolution_candidate"][state = "reviewed"]', style: {"line-style": "solid", "line-color": "#c084fc", "target-arrow-color": "#c084fc", "width": 2.5}},
+      {selector: 'edge[type = "derives"]', style: {"line-style": "dotted", "line-color": "#22d3ee", "target-arrow-color": "#22d3ee", "width": 2}},
+      {selector: 'edge[type = "reference_mapping"]', style: {"line-style": "dashed", "line-color": "#14b8a6", "target-arrow-color": "#14b8a6", "width": 2}},
+      {selector: 'edge[type = "reference_mapping"][state = "reviewed"]', style: {"line-style": "solid", "line-color": "#2dd4bf", "target-arrow-color": "#2dd4bf", "width": 2.5}},
       {selector: 'edge[type = "lineage"]', style: {"line-color": "#818cf8", "target-arrow-color": "#a5b4fc", "width": 2.5, "opacity": .95}},
       {selector: 'edge[type = "process"]', style: {"line-style": "dashed", "line-color": "#22d3ee", "target-arrow-color": "#22d3ee"}},
       {selector: ".hidden", style: {"display": "none"}},
@@ -281,7 +297,7 @@ function renderGraph() {
       {selector: ".trace-focus", style: {"opacity": 1, "border-color": "#10b981", "border-width": 3}},
     ],
   });
-  state.cy.on("tap", 'node[type = "table"], node[type = "view"]', event => selectObject(event.target.id()));
+  state.cy.on("tap", 'node[type = "table"], node[type = "view"], node[type = "derived_relation"]', event => selectObject(event.target.id()));
   state.cy.on("tap", 'node[type = "asset"], node[type = "procedure"], node[type = "query"], node[type = "script"]', event => {
     const reference = event.target.data("reference");
     if (!reference) return;
@@ -443,10 +459,15 @@ function selectedObject() { return state.data.objects.find(item => item.id === s
 function renderInspector() {
   const item = selectedObject();
   if (!item) return;
-  const annotation = item.annotation;
   const connectedEdges = state.data.edges.filter(edge => edge.source === item.id || edge.target === item.id);
+  if (item.type === "derived_relation") {
+    renderDerivedRelationInspector(item, connectedEdges);
+    return;
+  }
+  const annotation = item.annotation;
   const entityCandidates = connectedEdges.filter(edge => edge.type === "entity_resolution_candidate");
-  const relationships = connectedEdges.filter(edge => edge.type !== "entity_resolution_candidate");
+  const mappingEdges = connectedEdges.filter(edge => edge.type === "reference_mapping");
+  const relationships = connectedEdges.filter(edge => !["derives", "entity_resolution_candidate", "reference_mapping"].includes(edge.type));
   const fieldSemantics = item.fields.flatMap(field => (field.source_semantics || []).map(entry => ({...entry, field_label: field.label})));
   const relationshipSemantics = relationships.flatMap(edge => edge.source_semantics || []);
   $("#inspector").innerHTML = `
@@ -459,6 +480,7 @@ function renderInspector() {
     </div></section>
     ${queryLinkedCoverageCards(state.data.query_linked_coverages || [])}
     ${entityResolutionCards(entityCandidates)}
+    ${referenceMappingCards(mappingEdges)}
     ${sourceSemanticCards(item.source_semantics || [], "Imported dataset semantics")}
     <section class="detail-section"><h3>Fields · ${item.fields.length}</h3><div class="field-list">${item.fields.map(fieldAnnotationCard).join("")}</div></section>
     ${sourceSemanticCards(fieldSemantics, "Imported field semantics")}
@@ -467,6 +489,51 @@ function renderInspector() {
     ${semanticImportDiagnostics()}
     ${annotation?.warnings?.length ? `<section class="detail-section"><h3>Warnings</h3><p class="description">${annotation.warnings.map(escapeHtml).join(" · ")}</p></section>` : ""}`;
   $$(".source-semantic-form").forEach(form => form.addEventListener("submit", saveSourceSemantic));
+}
+
+function renderDerivedRelationInspector(item, connectedEdges) {
+  const logical = item.logical_topology || {};
+  const source = state.data.objects.find(candidate => candidate.id === logical.source);
+  const evidence = logical.evidence || [];
+  const derives = connectedEdges.filter(edge => edge.type === "derives");
+  $("#inspector").innerHTML = `
+    <div class="inspector-head logical-inspector-head"><p class="eyebrow">Logical object · ${escapeHtml(item.namespace)}</p><h2>${escapeHtml(item.name)}</h2><p class="mono">Derived from ${escapeHtml(source?.label || logical.source_object || "unknown source")}</p></div>
+    <section class="detail-section"><div class="fact-grid">
+      ${fact("State", stateLabel(logical.state || item.state))}${fact("Usage", logical.usage || item.usage || "exploratory_only")}${fact("Grain", (logical.grain_fields || item.primary_key || []).join(" + ") || "—")}${fact("Output fields", String(item.fields.length))}
+      ${fact("Steps", String((logical.step_kinds || []).length))}${fact("Evidence runs", String(evidence.length))}${fact("Plan revision", shortRevision(logical.plan_revision))}${fact("Topology revision", shortRevision(logical.document_revision))}
+    </div></section>
+    ${logical.requires_runtime_validation ? '<p class="logical-warning">Exploratory only · validate this derivation at runtime before analytical use.</p>' : ""}
+    <section class="detail-section logical-operation"><h3>Logical operation</h3><p class="semantic-origin">Read-only typed topology; executable code and extraction pointers are intentionally not exposed here.</p><div class="logical-step-chain">${(logical.step_kinds || []).map((kind, index) => `<span><small>${index + 1}</small>${escapeHtml(kind)}</span>`).join('<i aria-hidden="true">→</i>') || "<em>No steps recorded</em>"}</div></section>
+    <section class="detail-section"><h3>Output schema · ${item.fields.length}</h3><div class="logical-field-list">${item.fields.map(logicalOutputFieldCard).join("")}</div></section>
+    ${derivationEvidenceCards(evidence)}
+    ${referenceMappingCards(connectedEdges.filter(edge => edge.type === "reference_mapping"))}
+    <section class="detail-section"><p class="semantic-origin">${derives.length} source-to-derived topology edge${derives.length === 1 ? "" : "s"} projected without changing the physical graph.</p></section>`;
+}
+
+function logicalOutputFieldCard(field) {
+  return `<article class="logical-field-card"><span><strong>${escapeHtml(field.label)}</strong><small class="mono">${escapeHtml(field.data_type || "—")}</small></span><span><small>${escapeHtml(field.kind)}</small>${field.is_nullable ? "nullable" : "required"}</span></article>`;
+}
+
+function derivationEvidenceCards(evidence) {
+  if (!evidence.length) return "";
+  return `<section class="detail-section"><h3>Derivation evidence · ${evidence.length}</h3><div class="logical-evidence-list">${evidence.map(item => `<article class="source-semantic-card logical-evidence-card"><header><span><strong>${escapeHtml(item.id)}</strong><small>${escapeHtml(item.level)}</small></span><span class="source-state">${item.truncated ? "bounded" : "complete"}</span></header><div class="fact-grid">${fact("Input rows", String(item.input_count))}${fact("Output rows", String(item.output_count))}${fact("Errors", String(item.error_count))}${fact("Executor", `${item.executor?.name || "—"}@${item.executor?.version || "—"}`)}</div></article>`).join("")}</div></section>`;
+}
+
+function referenceMappingCards(edges) {
+  if (!edges.length) return "";
+  return `<section class="detail-section"><h3>Reference mappings · ${edges.length}</h3><p class="semantic-origin">Directed correspondences with aggregate evidence only; mapping values remain private.</p>${edges.map(edge => {
+    const mapping = edge.metadata || {};
+    const otherId = edge.source === state.selectedId ? edge.target : edge.source;
+    const other = state.data.objects.find(candidate => candidate.id === otherId);
+    const support = mapping.support || {};
+    const challenge = mapping.challenge || {};
+    const executor = support.executor || challenge.executor;
+    return `<article class="source-semantic-card reference-mapping-card"><header><span><strong>${escapeHtml(other?.name || mapping.target_object || mapping.source_object || "Reference mapping")}</strong><small>${escapeHtml(mapping.source_object)}.${escapeHtml(mapping.source_field)} → ${escapeHtml(mapping.target_object)}.${escapeHtml(mapping.target_field)}</small></span><span class="source-state">${escapeHtml(mapping.usage || mapping.state)}</span></header><div class="fact-grid">${fact("State", stateLabel(mapping.state))}${fact("Cardinality", mapping.cardinality || "—")}${fact("Mapped references", String(mapping.mapping_count ?? "—"))}${fact("Support coverage", coveragePercent(support.coverage))}${fact("Challenge coverage", coveragePercent(challenge.coverage))}${fact("Counterexamples", String(challenge.counterexample_count ?? "—"))}${fact("Collision rate", coveragePercent(support.collision_rate))}${fact("Revision", shortRevision(mapping.revision))}</div>${executor ? `<p class="field-detail"><strong>Executor</strong><span>${escapeHtml(executor.id || "—")}@${escapeHtml(executor.version || "—")}</span></p>` : ""}${mapping.review ? `<p class="field-detail"><strong>Human review</strong><span>${escapeHtml(mapping.review.decision)} · ${escapeHtml(mapping.review.source)}</span></p>` : ""}${mapping.requires_runtime_validation ? '<p class="field-detail warning"><strong>Usage</strong><span>Exploratory only · validate at runtime</span></p>' : ""}</article>`;
+  }).join("")}</section>`;
+}
+
+function shortRevision(value) {
+  return value ? String(value).slice(0, 10) : "—";
 }
 
 function queryLinkedCoverageCards(coverages) {
@@ -856,11 +923,14 @@ function showTraceOnCanvas() {
 
 function openZoneDialog() {
   if (!state.data.editable) return toast("Restart with --edit to create zones.");
-  const selected = selectedObject(); $("#zone-selection").textContent = selected ? `Initial member: ${selected.label}` : "Select an object first."; $("#zone-dialog").showModal();
+  const selected = selectedObject();
+  if (selected?.type === "derived_relation") return toast("Logical objects are read-only projections and cannot be zone members.");
+  $("#zone-selection").textContent = selected ? `Initial member: ${selected.label}` : "Select an object first."; $("#zone-dialog").showModal();
 }
 
 async function createZone(event) {
   event.preventDefault(); const selected = selectedObject(); if (!selected) return toast("Select an object first.");
+  if (selected.type === "derived_relation") return toast("Logical objects are read-only projections and cannot be zone members.");
   const values = Object.fromEntries(new FormData(event.currentTarget));
   try { await api("/api/zone/save", {...values, members: [{graph: selected.graph, object_id: selected.object_id}]}); $("#zone-dialog").close(); toast(`Zone ${values.zone} created.`); await load(); } catch (error) { toast(error.message); }
 }

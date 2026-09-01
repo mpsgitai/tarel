@@ -11,9 +11,14 @@ from tarel.entity_resolution.contracts import EntityResolutionMatch
 from tarel.entity_resolution.projection import project_entity_resolution_edges
 from tarel.focus.contracts import FocusDocument, FocusMember
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphNode
-from tarel.graph.revision import graph_revision
+from tarel.graph.revision import graph_revision, physical_graph_revision
 from tarel.lineage.contracts import LineageDocument
 from tarel.lineage.revision import lineage_revision
+from tarel.reference_mapping.contracts import (
+    ReferenceMappingEvidence,
+    ReferenceMappingFailure,
+    ReferenceMappingMatch,
+)
 from tarel.semantics.contracts import SemanticImportDocument
 from tarel.semantics.projection import (
     semantic_edge_bindings,
@@ -21,6 +26,8 @@ from tarel.semantics.projection import (
     semantic_model_catalog,
     semantic_node_bindings,
 )
+from tarel.topology.application import validate_logical_topology_against_graph
+from tarel.topology.contracts import DerivationEvidence, LogicalTopologyDocument
 from tarel.workspaces.contracts import WorkspaceDocument
 from tarel.workspaces.scope import ResolvedScope
 
@@ -35,6 +42,9 @@ def browser_graph(
     semantic_imports: Iterable[SemanticImportDocument] = (),
     entity_resolution_matches: Iterable[EntityResolutionMatch] = (),
     query_linked_coverages: Iterable[QueryLinkedEntityCoverage] = (),
+    logical_topologies: Iterable[LogicalTopologyDocument] = (),
+    logical_topology_stale_graphs: Iterable[str] = (),
+    reference_mapping_matches: Iterable[ReferenceMappingMatch] = (),
 ) -> dict[str, object]:
     return _browser_payload(
         (graph,),
@@ -45,6 +55,9 @@ def browser_graph(
         semantic_imports=tuple(semantic_imports),
         entity_resolution_matches=tuple(entity_resolution_matches),
         query_linked_coverages=tuple(query_linked_coverages),
+        logical_topologies=tuple(logical_topologies),
+        logical_topology_stale_graphs=tuple(logical_topology_stale_graphs),
+        reference_mapping_matches=tuple(reference_mapping_matches),
     )
 
 
@@ -58,6 +71,9 @@ def browser_workspace(
     semantic_imports: Iterable[SemanticImportDocument] = (),
     entity_resolution_matches: Iterable[EntityResolutionMatch] = (),
     query_linked_coverages: Iterable[QueryLinkedEntityCoverage] = (),
+    logical_topologies: Iterable[LogicalTopologyDocument] = (),
+    logical_topology_stale_graphs: Iterable[str] = (),
+    reference_mapping_matches: Iterable[ReferenceMappingMatch] = (),
 ) -> dict[str, object]:
     payload = _browser_payload(
         tuple(graphs),
@@ -67,6 +83,9 @@ def browser_workspace(
         semantic_imports=tuple(semantic_imports),
         entity_resolution_matches=tuple(entity_resolution_matches),
         query_linked_coverages=tuple(query_linked_coverages),
+        logical_topologies=tuple(logical_topologies),
+        logical_topology_stale_graphs=tuple(logical_topology_stale_graphs),
+        reference_mapping_matches=tuple(reference_mapping_matches),
         scope=scope,
     )
     objects = payload["objects"]
@@ -86,6 +105,9 @@ def _browser_payload(
     semantic_imports: tuple[SemanticImportDocument, ...],
     entity_resolution_matches: tuple[EntityResolutionMatch, ...],
     query_linked_coverages: tuple[QueryLinkedEntityCoverage, ...],
+    logical_topologies: tuple[LogicalTopologyDocument, ...],
+    logical_topology_stale_graphs: tuple[str, ...],
+    reference_mapping_matches: tuple[ReferenceMappingMatch, ...],
     lineage_names: tuple[str, ...] = (),
     scope: ResolvedScope | None = None,
 ) -> dict[str, object]:
@@ -102,6 +124,16 @@ def _browser_payload(
     imports = tuple(
         item for item in semantic_imports if item.graph_name in graph_names
     )
+    topology_by_graph: dict[str, LogicalTopologyDocument] = {}
+    for document in logical_topologies:
+        if document.graph_name not in graph_names:
+            continue
+        if document.graph_name in topology_by_graph:
+            raise ValueError(
+                "Browser projection received multiple logical topologies for "
+                f"{document.graph_name}."
+            )
+        topology_by_graph[document.graph_name] = document
     node_semantics = semantic_node_bindings(imports)
     edge_semantics = semantic_edge_bindings(imports)
     for graph in sorted(graphs, key=lambda item: item.name):
@@ -119,7 +151,7 @@ def _browser_payload(
                 parent = str(node.metadata.get("object_id") or "")
                 if parent in fields_by_object:
                     fields_by_object[parent].append(node)
-        object_payloads.extend(
+        physical_payloads = [
             _object_payload(
                 node,
                 fields_by_object[node.id],
@@ -128,7 +160,8 @@ def _browser_payload(
                 scope_object=selected.get((graph.name, node.id)) if selected else None,
             )
             for node in sorted(objects, key=lambda item: (item.label.casefold(), item.id))
-        )
+        ]
+        object_payloads.extend(physical_payloads)
         edge_payloads.extend(
             payload
             for edge in sorted(graph.edges, key=lambda item: item.id)
@@ -141,6 +174,28 @@ def _browser_payload(
                     source_semantics=edge_semantics.get((graph.name, edge.id), ()),
                 )
             ) is not None
+        )
+        topology = topology_by_graph.get(graph.name)
+        if topology is not None:
+            validate_logical_topology_against_graph(topology, graph)
+            logical_objects, derivation_edges = _logical_topology_payloads(
+                graph,
+                topology,
+                physical_payloads,
+            )
+            object_payloads.extend(logical_objects)
+            edge_payloads.extend(derivation_edges)
+        graph_mapping_matches = tuple(
+            match
+            for match in reference_mapping_matches
+            if match.candidate.graph_name == graph.name
+        )
+        edge_payloads.extend(
+            _reference_mapping_edge_payloads(
+                graph,
+                graph_mapping_matches,
+                visible_object_ids=object_ids,
+            )
         )
         graph_entity_matches = tuple(
             item
@@ -197,6 +252,17 @@ def _browser_payload(
         "lineage_documents": browser_lineages(documents),
         "lineage_flows": browser_lineage_flows(documents, object_payloads),
         "lineages": list(selected_lineages),
+        "logical_topology_notices": [
+            {
+                "code": "logical_topology_graph_revision_mismatch",
+                "graph": graph_name,
+                "message": (
+                    "The physical graph changed; its stale logical-topology sidecar "
+                    "was not projected."
+                ),
+            }
+            for graph_name in sorted(set(logical_topology_stale_graphs) & graph_names)
+        ],
         "objects": object_payloads,
         "query_linked_coverages": [
             _query_linked_coverage_summary(item, entity_resolution_matches)
@@ -599,6 +665,256 @@ def _field_payload(
     }
 
 
+def _logical_topology_payloads(
+    graph: GraphDocument,
+    document: LogicalTopologyDocument,
+    physical_objects: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    nodes = graph.node_by_id()
+    physical_by_id = {
+        str(item["object_id"]): item
+        for item in physical_objects
+        if item.get("type") in {"table", "view"}
+    }
+    objects: list[dict[str, object]] = []
+    edges: list[dict[str, object]] = []
+    for relation in sorted(document.derived_relations, key=lambda item: (item.name, item.id)):
+        source = nodes.get(relation.source.id)
+        source_payload = physical_by_id.get(relation.source.id)
+        if source is None or source_payload is None:
+            continue
+        field_names = {field.id: field.name for field in relation.output_schema}
+        grain_names = tuple(
+            field_names[field_id]
+            for field_id in relation.grain.field_ids
+            if field_id in field_names
+        )
+        object_id = f"logical_relation:{relation.id}"
+        ui_id = _ui_id(graph.name, object_id)
+        usage = _reviewed_usage(relation.state)
+        review = (
+            {
+                "decision": relation.review.decision,
+                "source": relation.review.source,
+            }
+            if relation.review is not None
+            else None
+        )
+        logical = {
+            "document_revision": document.revision,
+            "evidence": [
+                _derivation_evidence_summary(item)
+                for item in sorted(relation.evidence, key=lambda item: item.id)
+            ],
+            "grain_fields": list(grain_names),
+            "plan_revision": relation.plan_revision,
+            "requires_runtime_validation": relation.state == "candidate",
+            "review": review,
+            "source": str(source_payload["id"]),
+            "source_object": source.label,
+            "state": relation.state,
+            "step_kinds": [step.kind for step in relation.steps],
+            "usage": usage,
+            "usable": relation.state == "reviewed",
+        }
+        namespace = source_payload.get("namespace")
+        label = f"{namespace}.{relation.name}" if namespace else relation.name
+        objects.append(
+            {
+                "annotation": None,
+                "annotation_context_documents": [],
+                "area": source_payload.get("area"),
+                "area_ref": source_payload.get("area_ref"),
+                "catalog": graph.catalog,
+                "fields": [
+                    {
+                        "annotation": None,
+                        "annotation_context_documents": [],
+                        "data_type": field.data_type,
+                        "id": _ui_id(
+                            graph.name,
+                            f"logical_relation:{relation.id}:field:{field.id}",
+                        ),
+                        "is_nullable": field.nullable,
+                        "kind": field.kind,
+                        "label": field.name,
+                        "position": position,
+                        "review": None,
+                        "semantic_type": None,
+                        "source_semantics": [],
+                    }
+                    for position, field in enumerate(relation.output_schema, start=1)
+                ],
+                "grain": " + ".join(grain_names),
+                "graph": graph.name,
+                "id": ui_id,
+                "label": label,
+                "logical_topology": logical,
+                "name": relation.name,
+                "namespace": namespace,
+                "object_id": object_id,
+                "primary_key": list(grain_names),
+                "reference": f"{graph.catalog}.{label}",
+                "review": review,
+                "schema_ref": source_payload.get("schema_ref"),
+                "state": relation.state,
+                "system": source_payload.get("system"),
+                "technical_description": None,
+                "type": "derived_relation",
+                "usage": usage,
+                "zones": list(source_payload.get("zones") or ()),
+            }
+        )
+        edges.append(
+            {
+                "graph": graph.name,
+                "id": _ui_id(graph.name, f"derives:{relation.id}"),
+                "metadata": {
+                    "plan_revision": relation.plan_revision,
+                    "state": relation.state,
+                    "step_kinds": [step.kind for step in relation.steps],
+                    "usage": usage,
+                },
+                "source": str(source_payload["id"]),
+                "target": ui_id,
+                "type": "derives",
+            }
+        )
+    return objects, edges
+
+
+def _derivation_evidence_summary(evidence: DerivationEvidence) -> dict[str, object]:
+    return {
+        "error_count": evidence.error_count,
+        "executor": {
+            "name": evidence.executor.name,
+            "version": evidence.executor.version,
+        },
+        "id": evidence.id,
+        "input_count": evidence.input_count,
+        "level": evidence.level,
+        "output_count": evidence.output_count,
+        "truncated": evidence.truncated,
+    }
+
+
+def _reference_mapping_edge_payloads(
+    graph: GraphDocument,
+    matches: tuple[ReferenceMappingMatch, ...],
+    *,
+    visible_object_ids: set[str],
+) -> list[dict[str, object]]:
+    nodes = graph.node_by_id()
+    revision = physical_graph_revision(graph)
+    payloads: list[dict[str, object]] = []
+    for match in sorted(matches, key=lambda item: item.candidate.id):
+        candidate = match.candidate
+        if candidate.graph_revision != revision:
+            raise ReferenceMappingFailure(
+                "reference_mapping_graph_revision_mismatch",
+                "The reference-mapping candidate does not match the projected graph revision.",
+            )
+        source_field = nodes.get(candidate.source_field_id)
+        target_field = nodes.get(candidate.target_field_id)
+        if (
+            source_field is None
+            or source_field.type != "field"
+            or target_field is None
+            or target_field.type != "field"
+        ):
+            raise ReferenceMappingFailure(
+                "reference_mapping_field_not_found",
+                "A reference-mapping endpoint is not a current graph field.",
+            )
+        source_object_id = str(source_field.metadata.get("object_id") or "")
+        target_object_id = str(target_field.metadata.get("object_id") or "")
+        source_object = nodes.get(source_object_id)
+        target_object = nodes.get(target_object_id)
+        if (
+            source_object is None
+            or source_object.type not in {"table", "view"}
+            or target_object is None
+            or target_object.type not in {"table", "view"}
+        ):
+            raise ReferenceMappingFailure(
+                "reference_mapping_field_not_found",
+                "A reference-mapping field has no current graph object.",
+            )
+        if (
+            source_object_id not in visible_object_ids
+            or target_object_id not in visible_object_ids
+        ):
+            continue
+        review = (
+            {
+                "decision": candidate.review.decision,
+                "source": candidate.review.source,
+            }
+            if candidate.review is not None
+            else None
+        )
+        payloads.append(
+            {
+                "graph": graph.name,
+                "id": _ui_id(graph.name, f"reference_mapping:{candidate.id}"),
+                "metadata": {
+                    "candidate_id": candidate.id,
+                    "cardinality": candidate.cardinality,
+                    "challenge": _reference_mapping_evidence_summary(
+                        candidate.challenge_evidence
+                    ),
+                    "direction": "source_to_target",
+                    "mapping_count": candidate.mapping_count,
+                    "requires_runtime_validation": match.requires_runtime_validation,
+                    "review": review,
+                    "revision": candidate.revision,
+                    "source_field": source_field.label,
+                    "source_object": source_object.label,
+                    "state": candidate.state,
+                    "support": _reference_mapping_evidence_summary(
+                        candidate.support_evidence
+                    ),
+                    "target_field": target_field.label,
+                    "target_object": target_object.label,
+                    "usage": match.usage,
+                    "usable": candidate.state == "reviewed",
+                },
+                "source": _ui_id(graph.name, source_object_id),
+                "target": _ui_id(graph.name, target_object_id),
+                "type": "reference_mapping",
+            }
+        )
+    return payloads
+
+
+def _reference_mapping_evidence_summary(
+    evidence: ReferenceMappingEvidence,
+) -> dict[str, object]:
+    metrics = evidence.metrics
+    return {
+        "collision_count": metrics.collision_count,
+        "collision_rate": metrics.collision_rate,
+        "confidence": metrics.confidence,
+        "counterexample_count": metrics.counterexample_count,
+        "evaluated_count": metrics.evaluated_count,
+        "executor": {
+            "id": evidence.execution.executor_id,
+            "version": evidence.execution.executor_version,
+        },
+        "level": evidence.level,
+        "matched_count": metrics.matched_count,
+        "coverage": metrics.coverage,
+    }
+
+
+def _reviewed_usage(state: str) -> str:
+    if state == "reviewed":
+        return "confirmed"
+    if state == "rejected":
+        return "rejected"
+    return "exploratory_only"
+
+
 def _edge_payload(
     edge: GraphEdge,
     nodes: dict[str, GraphNode],
@@ -677,6 +993,8 @@ def _review_queue(objects: list[dict[str, object]]) -> list[dict[str, object]]:
             "validated": 4, "rejected": 5}
     records = []
     for item in objects:
+        if item.get("type") not in {"table", "view"}:
+            continue
         annotation = item["annotation"]
         state = str(annotation["state"]) if isinstance(annotation, dict) else "missing"
         records.append({
