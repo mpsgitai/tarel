@@ -51,6 +51,10 @@ from tarel.lineage.application import (
 )
 from tarel.lineage.contracts import LineageDocument, LineageFailure
 from tarel.lineage.revision import lineage_revision
+from tarel.reference_mapping.application import (
+    find_reference_mapping_candidates_for_graph_use_case,
+)
+from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
 from tarel.semantics.application import (
     edit_semantic_source_use_case,
@@ -58,6 +62,8 @@ from tarel.semantics.application import (
     load_semantic_import_use_case,
 )
 from tarel.semantics.contracts import SemanticFailure
+from tarel.topology.application import project_logical_topologies_for_graphs_use_case
+from tarel.topology.contracts import LogicalTopologyFailure
 from tarel.ui.presentation import (
     browser_focus_catalog,
     browser_focus_selection,
@@ -110,6 +116,9 @@ class TarelUIBackend:
             workspace = load_workspace_use_case(self.config.workspace)
             scope = self._scope()
             graphs = tuple(load_graph_use_case(name) for name in scope.graph_names)
+            logical_topology_projection = project_logical_topologies_for_graphs_use_case(
+                graphs
+            )
             semantic_imports = tuple(
                 item
                 for graph in graphs
@@ -134,10 +143,23 @@ class TarelUIBackend:
                         graph_name=graph.name
                     )
                 ),
+                logical_topologies=logical_topology_projection.documents,
+                logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
+                reference_mapping_matches=tuple(
+                    match
+                    for graph in graphs
+                    for match in find_reference_mapping_candidates_for_graph_use_case(
+                        graph,
+                        mode="confirmed_then_candidates",
+                    )
+                ),
             )
         else:
             graph = load_graph_use_case(self._single_graph())
             graphs = (graph,)
+            logical_topology_projection = project_logical_topologies_for_graphs_use_case(
+                graphs
+            )
             workspaces = tuple(
                 load_workspace_use_case(name) for name in list_workspaces_use_case()
             )
@@ -152,6 +174,12 @@ class TarelUIBackend:
                 ),
                 query_linked_coverages=list_query_linked_coverages_use_case(
                     graph_name=graph.name
+                ),
+                logical_topologies=logical_topology_projection.documents,
+                logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
+                reference_mapping_matches=find_reference_mapping_candidates_for_graph_use_case(
+                    graph,
+                    mode="confirmed_then_candidates",
                 ),
             )
         focus_documents = self._focus_documents()
@@ -732,6 +760,8 @@ def _ui_failure(exc: Exception) -> UIFailure:
             GraphFailure,
             KnowledgeFailure,
             LineageFailure,
+            LogicalTopologyFailure,
+            ReferenceMappingFailure,
             RelationshipFailure,
             SemanticFailure,
             WorkspaceFailure,
@@ -744,6 +774,12 @@ def _ui_failure(exc: Exception) -> UIFailure:
             "stale_lineage",
             "stale_semantic_import",
             "stale_workspace",
+            "stale_logical_topology",
+            "stale_reference_mapping_candidate",
+            "logical_topology_graph_revision_mismatch",
+            "logical_topology_graph_rebase_forbidden",
+            "reference_mapping_graph_revision_mismatch",
+            "reference_mapping_review_conflict",
         } else 400
         if code.endswith("_not_found"):
             status = 404

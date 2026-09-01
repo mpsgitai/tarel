@@ -165,6 +165,19 @@ from tarel.lineage.runtime import (
 from tarel.lineage.status import LineageStatus
 from tarel.lineage.tasks import LineageTask
 from tarel.lineage.traversal import LineageReference, UpstreamTrace
+from tarel.reference_mapping.application import (
+    ReferenceMappingChangeResult,
+    decide_reference_mapping_candidate_use_case,
+    find_reference_mapping_candidates_for_graph_use_case,
+    find_reference_mapping_candidates_use_case,
+    import_reference_mapping_candidate_use_case,
+    list_reference_mapping_candidates_use_case,
+    load_reference_mapping_candidate_use_case,
+)
+from tarel.reference_mapping.contracts import (
+    ReferenceMappingCandidate,
+    ReferenceMappingMatch,
+)
 from tarel.retrieval.contracts import IndexBuildResult
 from tarel.retrieval.local import DEFAULT_MODEL_NAME, ModelDownloadResult
 from tarel.runtime import TarelRuntime
@@ -192,6 +205,15 @@ from tarel.sources.application import (
     refresh_source_graph_use_case,
 )
 from tarel.sources.contracts import SourceProfile
+from tarel.topology.application import (
+    decide_derived_relation_use_case,
+    list_logical_topologies_use_case,
+    load_logical_topology_use_case,
+    new_logical_topology_document,
+    project_logical_topologies_for_graphs_use_case,
+    save_logical_topology_use_case,
+)
+from tarel.topology.contracts import DerivedRelation, LogicalTopologyDocument
 from tarel.ui.presentation import browser_graph, browser_workspace
 from tarel.workspaces.contracts import (
     WorkspaceDocument,
@@ -217,11 +239,13 @@ class Tarel:
         "knowledge",
         "lineage",
         "model",
+        "reference_mapping",
         "relationship",
         "runtime",
         "search",
         "semantic",
         "source",
+        "topology",
         "view",
         "workspace",
     )
@@ -236,6 +260,8 @@ class Tarel:
         self.context = ContextAPI(self.runtime)
         self.discovery = DiscoveryAPI(self.runtime)
         self.entity_resolution = EntityResolutionAPI(self.runtime)
+        self.reference_mapping = ReferenceMappingAPI(self.runtime)
+        self.topology = TopologyAPI(self.runtime)
         self.grounding = GroundingAPI(self.runtime)
         self.lineage = LineageAPI(self.runtime)
         self.focus = FocusAPI(self.runtime)
@@ -298,6 +324,56 @@ class GraphAPI(_RuntimeAPI):
             name,
             config_path=_optional_path(config),
             namespace=namespace,
+            runtime=self._runtime,
+        )
+
+
+class TopologyAPI(_RuntimeAPI):
+    """Persist typed logical relations without executing their plans."""
+
+    def document(
+        self,
+        graph: str,
+        derived_relations: tuple[DerivedRelation, ...],
+    ) -> LogicalTopologyDocument:
+        return new_logical_topology_document(
+            load_graph_use_case(graph, runtime=self._runtime),
+            derived_relations,
+        )
+
+    def import_document(
+        self,
+        document: LogicalTopologyDocument,
+        *,
+        expected_revision: str | None = None,
+    ) -> LogicalTopologyDocument:
+        return save_logical_topology_use_case(
+            document,
+            expected_revision=expected_revision,
+            runtime=self._runtime,
+        )
+
+    def load(self, graph: str) -> LogicalTopologyDocument:
+        return load_logical_topology_use_case(graph, runtime=self._runtime)
+
+    def list(self) -> tuple[LogicalTopologyDocument, ...]:
+        return list_logical_topologies_use_case(runtime=self._runtime)
+
+    def review(
+        self,
+        graph: str,
+        relation_id: str,
+        *,
+        decision: str,
+        reason: str,
+        expected_revision: str,
+    ) -> LogicalTopologyDocument:
+        return decide_derived_relation_use_case(
+            graph,
+            relation_id,
+            decision=decision,
+            reason=reason,
+            expected_revision=expected_revision,
             runtime=self._runtime,
         )
 
@@ -1377,6 +1453,15 @@ class ViewAPI(_RuntimeAPI):
             graph_name=name,
             runtime=self._runtime,
         )
+        logical_topology_projection = project_logical_topologies_for_graphs_use_case(
+            (graph,),
+            runtime=self._runtime,
+        )
+        reference_mapping_matches = find_reference_mapping_candidates_for_graph_use_case(
+            graph,
+            mode="confirmed_then_candidates",
+            runtime=self._runtime,
+        )
         return browser_graph(
             graph,
             workspaces=workspaces,
@@ -1385,6 +1470,9 @@ class ViewAPI(_RuntimeAPI):
             semantic_imports=semantic_imports,
             entity_resolution_matches=entity_matches,
             query_linked_coverages=query_linked_coverages,
+            logical_topologies=logical_topology_projection.documents,
+            logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
+            reference_mapping_matches=reference_mapping_matches,
         )
 
     def workspace(
@@ -1442,6 +1530,19 @@ class ViewAPI(_RuntimeAPI):
                 runtime=self._runtime,
             )
         )
+        logical_topology_projection = project_logical_topologies_for_graphs_use_case(
+            graph_documents,
+            runtime=self._runtime,
+        )
+        reference_mapping_matches = tuple(
+            match
+            for graph in graph_documents
+            for match in find_reference_mapping_candidates_for_graph_use_case(
+                graph,
+                mode="confirmed_then_candidates",
+                runtime=self._runtime,
+            )
+        )
         return browser_workspace(
             graph_documents,
             scope,
@@ -1451,6 +1552,9 @@ class ViewAPI(_RuntimeAPI):
             semantic_imports=semantic_imports,
             entity_resolution_matches=entity_matches,
             query_linked_coverages=query_linked_coverages,
+            logical_topologies=logical_topology_projection.documents,
+            logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
+            reference_mapping_matches=reference_mapping_matches,
         )
 
 
@@ -1944,6 +2048,67 @@ class DiscoveryAPI(_RuntimeAPI):
 
     def load_coverage(self, run_id: str) -> QueryLinkedEntityCoverage:
         return load_query_linked_coverage_use_case(run_id, runtime=self._runtime)
+
+
+class ReferenceMappingAPI(_RuntimeAPI):
+    """Import, retrieve, and review directed physical-field mappings."""
+
+    def import_candidate(
+        self,
+        candidate: ReferenceMappingCandidate,
+    ) -> ReferenceMappingChangeResult:
+        return import_reference_mapping_candidate_use_case(
+            candidate,
+            runtime=self._runtime,
+        )
+
+    def load(self, candidate_id: str) -> ReferenceMappingCandidate:
+        return load_reference_mapping_candidate_use_case(
+            candidate_id,
+            runtime=self._runtime,
+        )
+
+    def list(
+        self,
+        *,
+        graph: str | None = None,
+    ) -> tuple[ReferenceMappingCandidate, ...]:
+        return list_reference_mapping_candidates_use_case(
+            graph_name=graph,
+            runtime=self._runtime,
+        )
+
+    def find(
+        self,
+        graph: str,
+        *,
+        source: str | None = None,
+        target: str | None = None,
+        mode: str = "confirmed_then_candidates",
+    ) -> tuple[ReferenceMappingMatch, ...]:
+        return find_reference_mapping_candidates_use_case(
+            graph,
+            source=source,
+            target=target,
+            mode=mode,
+            runtime=self._runtime,
+        )
+
+    def decide(
+        self,
+        candidate_id: str,
+        *,
+        decision: str,
+        reason: str,
+        expected_revision: str,
+    ) -> ReferenceMappingChangeResult:
+        return decide_reference_mapping_candidate_use_case(
+            candidate_id,
+            decision=decision,
+            reason=reason,
+            expected_revision=expected_revision,
+            runtime=self._runtime,
+        )
 
 
 class EntityResolutionAPI(_RuntimeAPI):

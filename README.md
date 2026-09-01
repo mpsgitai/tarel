@@ -57,15 +57,21 @@ knowledge, review schema drift, and move from a report or measure back through E
 
 - **Discovers topology** — catalogs, schemas, tables, views, fields, types, keys, and declared
   relationships become a deterministic graph.
+- **Describes typed logical relations** — an experimental graph-bound sidecar records reviewed
+  `extract`/`explode` plans, passthrough fields, output schema, grain, and bounded evidence without
+  storing executable code or source rows. See [Logical topology](docs/logical-topology.md).
 - **Builds reviewed semantics** — models or coding agents propose descriptions, roles, grain,
   synonyms, field semantics, and possible joins; people validate, edit, defer, or reject them.
 - **Offers entity hypotheses** — graph-bound normalization candidates remain separate from joins,
   expose aggregate coverage, collisions, confidence, and review state, and can be probed by agents
   before human approval without being presented as facts. Optional Self-Entity inspection can
   additionally retain explicitly authorized same-object key groups in a protected sidecar.
-- **Structures optional discovery loops** — coding agents can evolve bounded join or entity-match
-  programs through resumable support/challenge runs while TAREL validates budgets, revisions,
-  aggregate evidence, and exploratory status without storing SQL or rows.
+- **Tracks reference mappings** — an optional discovery run relates two physical fields through a
+  caller-owned, value-free mapping manifest, independent support/challenge evidence, and explicit
+  review. See [Reference mappings](docs/reference-mappings.md).
+- **Structures optional discovery loops** — coding agents can evolve bounded join, entity-match,
+  or reference-mapping programs through resumable support/challenge runs while TAREL validates
+  budgets, revisions, aggregate evidence, and exploratory status without storing SQL or rows.
 - **Imports external semantics** — experimental Apache Ossie, SML, and Cube YAML readers preserve,
   diagnose, and bind supported constructs to stable graph IDs while keeping them separate from
   reviewed TAREL annotations.

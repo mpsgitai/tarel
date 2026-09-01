@@ -73,6 +73,8 @@ only-include = [
   "docs/entity-resolution-candidates.md",
   "docs/self-entity-discovery.md",
   "docs/local-retrieval.md",
+  "docs/logical-topology.md",
+  "docs/reference-mappings.md",
   "docs/retail-demo.md",
   "docs/runtime-lineage.md",
   "docs/sdk.md",

@@ -109,6 +109,11 @@ from tarel.lineage.cli import add_lineage_commands, dispatch_lineage
 from tarel.lineage.contracts import LineageFailure
 from tarel.providers.config import BUILTIN_PROVIDER_ADAPTERS
 from tarel.providers.contracts import ProviderCheck, ProviderFailure
+from tarel.reference_mapping.cli import (
+    add_reference_mapping_commands,
+    dispatch_reference_mapping,
+)
+from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
 from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.local import DEFAULT_MODEL_NAME
@@ -129,6 +134,8 @@ from tarel.sources.application import (
     refresh_source_graph_use_case,
 )
 from tarel.sources.contracts import SourceFailure, SourceProfile
+from tarel.topology.cli import add_topology_commands, dispatch_topology
+from tarel.topology.contracts import LogicalTopologyFailure
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 from tarel.workspaces.core import ResolvedZone
 from tarel.workspaces.scope import ResolvedScope
@@ -735,6 +742,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_semantic_commands(subcommands)
     add_entity_resolution_commands(subcommands)
     add_discovery_commands(subcommands)
+    add_topology_commands(subcommands)
+    add_reference_mapping_commands(subcommands)
 
     focus = subcommands.add_parser(
         "focus",
@@ -1129,6 +1138,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         discovery_result = dispatch_discovery(args)
         if discovery_result is not None:
             return discovery_result
+
+        topology_result = dispatch_topology(args)
+        if topology_result is not None:
+            return topology_result
+
+        reference_mapping_result = dispatch_reference_mapping(args)
+        if reference_mapping_result is not None:
+            return reference_mapping_result
 
         if args.command == "focus" and args.focus_command == "build":
             result = build_focus_use_case(
@@ -2245,7 +2262,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         GraphFailure,
         KnowledgeFailure,
         LineageFailure,
+        LogicalTopologyFailure,
         ProviderFailure,
+        ReferenceMappingFailure,
         RelationshipFailure,
         RetrievalFailure,
         SearchFailure,

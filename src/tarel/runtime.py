@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tarel.discovery.store import FileDiscoveryStore
 from tarel.entity_resolution.store import FileEntityResolutionStore
@@ -19,6 +20,10 @@ from tarel.retrieval.index import FileRetrievalIndex
 from tarel.semantics.store import FileSemanticImportStore
 from tarel.sources.store import FileSourceStore
 from tarel.workspaces.store import FileWorkspaceStore
+
+if TYPE_CHECKING:
+    from tarel.reference_mapping.store import FileReferenceMappingStore
+    from tarel.topology.store import FileLogicalTopologyStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,3 +77,13 @@ class TarelRuntime:
 
     def discovery_store(self) -> FileDiscoveryStore:
         return FileDiscoveryStore(self.root / "discovery")
+
+    def logical_topology_store(self) -> FileLogicalTopologyStore:
+        from tarel.topology.store import FileLogicalTopologyStore
+
+        return FileLogicalTopologyStore(self.root / "logical-topology")
+
+    def reference_mapping_store(self) -> FileReferenceMappingStore:
+        from tarel.reference_mapping.store import FileReferenceMappingStore
+
+        return FileReferenceMappingStore(self.root / "reference-mappings")

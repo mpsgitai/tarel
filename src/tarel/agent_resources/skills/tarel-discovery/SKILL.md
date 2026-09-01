@@ -1,6 +1,6 @@
 ---
 name: tarel-discovery
-description: Continue optional TAREL join-discovery or entity-matching runs through bounded, resumable evidence loops. Use when a user asks to start, continue, inspect, or assess a TAREL discovery run; do not use for ordinary graph, annotation, lineage, or retrieval work.
+description: Continue optional TAREL join-discovery, entity-matching, or reference-mapping runs through bounded, resumable evidence loops. Use when a user asks to start, continue, inspect, or assess a TAREL discovery run; do not use for ordinary graph, annotation, lineage, or retrieval work.
 ---
 
 # TAREL Discovery
@@ -44,8 +44,14 @@ read-only checks; TAREL does not become a general SQL executor or make entity-re
     host. Finish each declared component, then record the aggregate-only coverage sidecar after
     completion and promotion. Keep inventory, slice, probe, and global mapping coverage distinct;
     failed components are terminal but not successfully covered.
+13. For `reference_mapping`, propose only a direction and cardinality between two physical fields.
+    The host owns the mapping values. Register only its deterministic manifest hash and count,
+    then submit independent aggregate support and challenge observations. A provider may propose
+    endpoints but may not register a manifest, report evidence, or select the candidate. Promotion
+    creates a separate mapping candidate and never changes the physical graph.
 
 Read [references/join-discovery.md](references/join-discovery.md) for join runs and
 [references/entity-matching.md](references/entity-matching.md) for entity runs. Read
 [references/self-entity-discovery.md](references/self-entity-discovery.md) whenever
-`identity_inspection` is present.
+`identity_inspection` is present. Read
+[references/reference-mapping.md](references/reference-mapping.md) for mapping runs.

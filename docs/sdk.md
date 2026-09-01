@@ -471,6 +471,36 @@ aliases = tarel.entity_resolution.resolve(
 )
 ```
 
+### Retrieve physical-field reference mappings
+
+Reference Mapping uses the same revisioned discovery API but promotes into its own value-free
+review store rather than changing the graph. The private mapping values remain caller-owned:
+
+```python
+started = tarel.discovery.start(
+    "reference_mapping",
+    graph="warehouse",
+    question="How do country codes map to regions?",
+)
+
+# Continue with tarel.discovery.submit(): propose_candidate,
+# register_mapping_manifest, independent support/challenge observations,
+# select_candidate, and complete_run; then promote one candidate.
+
+matches = tarel.reference_mapping.find(
+    "warehouse",
+    source="main.countries.country_code",
+    target="main.regions.region_name",
+    mode="confirmed_then_candidates",
+)
+for match in matches:
+    print(match.usage, match.requires_runtime_validation)
+```
+
+`confirmed_only` excludes unreviewed mappings; the default labels them `exploratory_only` when no
+reviewed mapping exists for the directed pair. See [Reference mappings](reference-mappings.md) for
+the CLI flow, strict payload shapes, privacy boundary, and GUI projection.
+
 ### Continue optional discovery runs
 
 `tarel.discovery` adds a resumable agent protocol without changing the existing relationship or
