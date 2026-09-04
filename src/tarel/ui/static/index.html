@@ -16,42 +16,57 @@
           <span><strong>TAREL</strong><small>Topology · Annotation · Retrieval · Evidence · Lineage</small></span>
         </div>
         <nav class="view-tabs" aria-label="Views">
-          <button class="tab is-active" data-view="graph">Graph &amp; Lineage</button>
-          <button class="tab" data-view="review">Annotation Review <span id="review-badge">0</span></button>
+          <button class="tab is-active" data-view="graph">Explore</button>
+          <button class="tab" data-view="review">Review <span id="review-badge">…</span></button>
+          <button id="open-context" class="context-launch" aria-haspopup="dialog"><span class="context-label-full">Agent context</span><span class="context-label-short">Context</span></button>
         </nav>
         <div class="session-meta"><span id="graph-name">Loading…</span><span id="revision" class="mono"></span><span id="mode" class="mode-badge"></span></div>
       </header>
 
       <main id="workspace">
         <section id="graph-view" class="view is-active">
-          <aside class="sidebar">
-            <div class="pane-heading"><p class="eyebrow">Estate explorer</p><h1>Objects</h1></div>
-            <label class="search"><span>⌕</span><input id="object-search" type="search" placeholder="Find table or view" autocomplete="off" /></label>
+          <aside id="object-sidebar" class="sidebar">
+            <div class="pane-heading"><div><p class="eyebrow">Estate explorer</p><h1>Objects</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button></div>
+            <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Search names, fields, meaning…" autocomplete="off" /></label>
+            <div id="project-search-status" class="project-search-status" role="status" aria-live="polite" hidden></div>
             <div class="filter-row"><button class="chip is-active" data-kind="all">All</button><button class="chip" data-kind="table">Tables</button><button class="chip" data-kind="view">Views</button></div>
-            <label class="family-mode"><span>Object families</span><select id="family-mode"><option value="">Off · physical objects</option><option value="confirmed_only">Reviewed families</option><option value="include_candidates">Include exploratory families</option></select></label>
-            <div id="family-notices" class="topology-notices" role="status" hidden></div>
-            <details id="focus-panel" class="focus-panel" open>
-              <summary><span>Report / cube focuses</span><small id="focus-count"></small></summary>
+            <details id="scope-panel" class="scope-panel"><summary><span>Source filters</span><small id="scope-count"></small></summary><div id="scope-filters"></div></details>
+            <details id="focus-panel" class="focus-panel" hidden>
+              <summary><span>Report / cube filter</span><small id="focus-count"></small></summary>
               <div class="focus-tools">
-                <label class="focus-search"><span>⌕</span><input id="focus-search" type="search" placeholder="Find saved focus" autocomplete="off" /></label>
+                <label class="focus-search"><span>⌕</span><input id="focus-search" type="search" placeholder="Find a saved report path" autocomplete="off" /></label>
                 <label class="compact-check"><input id="focus-selected-only" type="checkbox" /><span>Selected only</span></label>
               </div>
               <nav id="focus-list" class="focus-list" aria-label="Saved report and cube focuses"></nav>
               <div class="focus-actions"><button id="clear-focuses" class="quiet-button">Clear</button><button id="apply-focuses" class="primary-button">Apply selection</button></div>
               <div id="focus-summary" class="focus-summary"></div>
             </details>
-            <details class="scope-panel" open><summary><span>Visible scope</span><small id="scope-count"></small></summary><div id="scope-filters"></div></details>
+            <div id="active-scope" class="active-scope" hidden></div>
+            <div id="family-notices" class="topology-notices" role="status" hidden></div>
             <div id="logical-topology-notices" class="topology-notices" role="status" hidden></div>
             <div id="object-list" class="object-list" aria-label="Graph objects"></div>
-            <div class="zone-heading"><div><p class="eyebrow">Business context</p><h2>Zones</h2></div><button id="new-zone" class="icon-button" title="Create zone">＋</button></div>
-            <p class="zone-help">Drag an object from above onto a zone.</p>
+            <details id="zones-panel" class="scope-panel zones-panel"><summary><span>Business zones</span><small id="zone-count"></small></summary>
+            <div class="zone-heading"><button id="new-zone" class="quiet-button" title="Create zone">＋ Create zone</button></div>
+            <p class="zone-help">Group related objects without changing their source.</p>
             <div id="zone-list" class="zone-list"></div>
+            </details>
           </aside>
 
           <section class="canvas-pane">
             <div class="canvas-toolbar">
-              <div><strong id="canvas-title">Schema topology</strong><span id="canvas-subtitle"></span></div>
-              <div class="toolbar-actions"><div class="canvas-mode" role="group" aria-label="Canvas mode"><button class="chip is-active" data-canvas-mode="space">Space</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div><label class="compact-check"><input id="toggle-entity-resolution" type="checkbox" /><span>Entity candidates</span></label><button id="add-lineage" class="quiet-button">＋ Job / hop</button><button id="show-all" class="quiet-button">Show all</button><button id="fit-graph" class="quiet-button">Fit focus</button><button id="trace-selected" class="primary-button">Trace upstream</button></div>
+              <div class="canvas-heading"><strong id="canvas-title">Schema topology</strong><span id="canvas-subtitle"></span></div>
+              <div class="toolbar-actions">
+                <button id="open-objects" class="quiet-button mobile-only" aria-controls="object-sidebar" aria-expanded="false">Objects</button>
+                <div class="canvas-mode" role="group" aria-label="Canvas mode"><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
+                <button id="show-all" class="quiet-button">All objects</button><button id="fit-graph" class="quiet-button" title="Show the selected object and its immediate neighbours">Neighbours</button>
+                <details id="view-options" class="view-options"><summary class="quiet-button">View</summary><div class="view-options-menu">
+                  <label class="family-mode"><span>Object families</span><select id="family-mode"><option value="">Physical objects</option><option value="confirmed_only">Reviewed families</option><option value="include_candidates">Include exploratory families</option></select></label>
+                  <label class="compact-check"><input id="toggle-derived-relations" type="checkbox" /><span>Derived relations · may include exploratory metadata</span></label>
+                  <label id="entity-layer-option" class="compact-check" hidden><input id="toggle-entity-resolution" type="checkbox" /><span>Show loaded identity / mapping hints</span></label>
+                  <button id="add-lineage" class="quiet-button">＋ Manual job / hop</button>
+                </div></details>
+                <button id="trace-selected" class="quiet-button">Trace</button><button id="open-inspector" class="quiet-button" aria-controls="inspector" aria-expanded="true">Details</button>
+              </div>
             </div>
             <div id="graph-canvas" role="application" aria-label="Interactive schema graph"></div>
             <section id="lineage-drawer" class="lineage-drawer" hidden>
@@ -68,9 +83,10 @@
         </section>
 
         <section id="review-view" class="view review-layout">
-          <aside class="review-queue-pane">
-            <div class="pane-heading"><p class="eyebrow">Human in the loop</p><h1>Table descriptions</h1></div>
-            <p class="guidance">Review table-level meaning first. Field annotations stay visible without slowing down the queue.</p>
+          <div class="review-tools"><button id="open-review-queue" class="quiet-button mobile-only" aria-controls="review-queue" aria-expanded="false">Review queue</button><span>Read the proposal and its evidence before deciding.</span><button id="open-evidence" class="quiet-button" aria-controls="review-evidence" aria-expanded="false">Evidence</button></div>
+          <aside id="review-queue" class="review-queue-pane">
+            <div class="pane-heading"><div><p class="eyebrow">Human in the loop</p><h1>Annotations</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="review-queue" aria-label="Close review queue">×</button></div>
+            <p class="guidance">Table and field proposals in this workspace / report scope. Graph display filters do not hide pending work.</p>
             <div class="filter-row"><button class="review-filter chip is-active" data-review-filter="pending">To review</button><button class="review-filter chip" data-review-filter="all">All</button></div>
             <div id="review-progress" class="progress-copy"></div><div class="progress-track"><span id="review-progress-bar"></span></div>
             <nav id="review-list" class="review-list" aria-label="Annotation review queue"></nav>
@@ -135,9 +151,29 @@
       </div>
     </dialog>
 
+    <dialog id="context-dialog" aria-labelledby="context-title">
+      <div class="context-dialog-body">
+        <div class="drawer-heading"><div><p class="eyebrow">Shared CLI / SDK compiler</p><h2 id="context-title">Agent context</h2></div><button id="close-context" type="button" class="icon-button" aria-label="Close agent context">×</button></div>
+        <p class="context-intro">Compile a bounded metadata packet for an agent. No data queries or LLM calls.</p>
+        <div class="query-scope-note"><strong id="context-project">Loading project scope…</strong><p>Project scope: graph display filters, selected objects and report filters do not limit this packet.</p><button id="reload-context-scope" type="button" class="quiet-button">Reload project scope</button></div>
+        <form id="context-form" class="editor-form">
+          <label><span>Question or topic</span><textarea id="context-query" name="query" rows="2" maxlength="2000" required placeholder="Which tables and fields describe sales by month?"></textarea></label>
+          <details class="context-options"><summary>Policies &amp; limits <small id="context-policy-summary">Reviewed annotations · logical hints off</small></summary><div class="context-options-body">
+            <label class="checkbox"><input id="context-reviewed" name="reviewed_annotations_only" type="checkbox" checked /><span>Only reviewed annotations. Physical tables remain discoverable.</span></label>
+            <label><span>Additional logical hints</span><select id="context-logical-hints" name="logical_hints"><option value="">Off</option><option value="confirmed_only">Reviewed logical hints</option><option value="include_candidates">Include exploratory logical hints</option></select></label>
+            <p class="semantic-origin">Logical hints are not executable joins or expanded family members. Entity-resolution candidates are not included by this option.</p>
+            <div class="field-grid"><label><span>Maximum objects</span><input id="context-max-objects" name="max_objects" type="number" value="10" min="1" max="50" required /></label><label><span>Maximum packet characters</span><input id="context-max-characters" name="max_characters" type="number" value="24000" min="1000" max="100000" step="1000" required /></label></div>
+          </div></details>
+          <div class="context-build-actions"><button id="build-context" class="primary-button" disabled>Build project context</button><span id="context-request-status" role="status" aria-live="polite">Load the project scope to start.</span></div>
+        </form>
+        <section id="context-result" hidden></section>
+      </div>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="/cytoscape.min.js"></script>
     <script src="/logical_metadata.js"></script>
+    <script src="/optional_details.js"></script>
+    <script src="/query_tools.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

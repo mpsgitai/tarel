@@ -1,21 +1,46 @@
 /* Optional inspector details. Metadata is rendered as text, never executable HTML. */
 let logicalMetadataRequest = 0;
 
-function mountLogicalMetadata(object) {
-  const section = document.createElement("section");
-  section.className = "detail-section";
+function mountLogicalMetadata(object, target = document.querySelector("#inspector"), onStatus = () => {}) {
+  const section = document.createElement("details");
+  section.className = "optional-details logical-metadata-details";
+  const summary = document.createElement("summary");
+  const title = document.createElement("span");
+  title.textContent = "Additional logical metadata";
+  const status = document.createElement("small");
+  status.textContent = "Not loaded";
+  summary.append(title, status);
+  const body = document.createElement("div");
+  body.className = "optional-body";
   const button = document.createElement("button");
   button.className = "quiet-button";
   button.textContent = "Load logical metadata";
   const container = document.createElement("div");
   container.id = "logical-metadata";
-  button.addEventListener("click", async () => {
+  let loaded = false;
+  let loading = false;
+  const load = async () => {
+    if (loading) return;
+    loading = true;
     button.disabled = true;
-    await loadLogicalMetadata(object);
-    if (button.isConnected) button.disabled = false;
-  });
-  section.append(button, container);
-  document.querySelector("#inspector .inspector-head")?.after(section);
+    status.textContent = "Loading…";
+    const payload = await loadLogicalMetadata(object);
+    loading = false;
+    loaded = Boolean(payload);
+    const items = payload ? [...(payload.concepts || []), ...(payload.logical_joins || []), ...(payload.object_bindings || [])] : [];
+    const uncertain = items.some(item => item.usage === "exploratory_only");
+    status.textContent = !payload ? "Load failed" : payload.omissions?.length ? `${items.length} shown · omissions` : uncertain ? `${items.length} · exploratory` : `${items.length} in scope`;
+    status.className = !payload || uncertain || payload.omissions?.length ? "caution" : "";
+    onStatus({failed: !payload, caution: !payload || uncertain || Boolean(payload.omissions?.length)});
+    button.hidden = loaded;
+    button.disabled = false;
+    if (!payload) button.textContent = "Retry loading metadata";
+  };
+  button.addEventListener("click", load);
+  section.addEventListener("toggle", () => { if (section.open && !loaded) load(); });
+  body.append(button, container);
+  section.append(summary, body);
+  target?.append(section);
 }
 
 function renderLogicalMetadata(container, payload) {
@@ -33,7 +58,10 @@ function renderLogicalMetadata(container, payload) {
     ["Logical joins", payload.logical_joins || [], "logical_joins"],
     ["Object bindings", payload.object_bindings || [], "object_bindings"],
   ];
+  let count = 0;
   for (const [title, records, key] of groups) {
+    if (!records.length && !payload.more_available?.[key]) continue;
+    count += records.length;
     const section = document.createElement("section");
     section.className = "detail-section";
     section.append(text("h4", `${title} · ${records.length}`));
@@ -63,10 +91,10 @@ function renderLogicalMetadata(container, payload) {
       article.append(text("p", `Revision: ${(item.revision || item.artifact?.revision || "").slice(0, 12)}`, "semantic-origin"));
       section.append(article);
     }
-    if (!records.length) section.append(text("p", "No current, in-scope metadata.", "semantic-origin"));
     if (payload.more_available?.[key]) section.append(text("p", "More metadata is available through CLI/SDK.", "semantic-origin"));
     fragment.append(section);
   }
+  if (!count && !(payload.omissions || []).length) fragment.append(text("p", "No current additional metadata in this scope.", "semantic-origin"));
   for (const omission of payload.omissions || []) {
     fragment.append(text("p", `${omission.kind}: ${omission.count} omitted · ${omission.code}`, "logical-warning"));
   }
@@ -84,7 +112,7 @@ async function loadLogicalMetadata(object) {
       object_ids: [object.object_id],
       mode: "include_candidates",
       focuses: state.focusSelection?.focuses || [],
-      scope_revision: state.data.object_families?.scope_revision,
+      scope_revision: state.data.scope_revision || state.data.object_families?.scope_revision,
     });
     if (request === logicalMetadataRequest && container.isConnected && state.selectedId === object.id) {
       renderLogicalMetadata(container, payload);
