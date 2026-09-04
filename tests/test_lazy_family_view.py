@@ -39,11 +39,22 @@ class LazyFamilyViewTests(TestCase):
         self.sdk.runtime.object_family_store().save(self.family)
 
     def test_lazy_payload_preserves_existing_projection_and_full_source_identity(self) -> None:
+        """Only review counts are deferred; lazy loading must not claim an empty queue."""
         payload = self.sdk.view.graph("estate", family_mode="confirmed_only")
         storage = payload.pop("storage")
         expected = browser_graph(
             self.graph, family_mode="confirmed_only", object_families=(self.family,)
         )
+        self.assertEqual(payload.pop("review_summary"), {
+            "known": False, "total_objects": 8, "review_objects": None,
+            "pending_tables": None, "pending_fields": None,
+            "missing_tables": None, "missing_fields": None,
+        })
+        self.assertEqual(expected.pop("review_summary"), {
+            "known": True, "total_objects": 8, "review_objects": 0,
+            "pending_tables": 0, "pending_fields": 0,
+            "missing_tables": 8, "missing_fields": 40,
+        })
         self.assertEqual(payload, expected)
         self.assertTrue(storage["full_document_read"])
         self.assertEqual(payload["revision"], graph_revision(self.graph))

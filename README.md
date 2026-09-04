@@ -148,6 +148,9 @@ and the optional violet graph projection. The focused
 
 ## Human in the loop
 
+The browser keeps exploration and review prominent, with optional metadata available on demand.
+See [Focused browser workflows](docs/browser-workflows.md) for scope, review and layout behavior.
+
 Generated semantics are proposals, not truth. The local browser guides reviewers through table
 meaning first while keeping field-level suggestions, evidence, provider provenance, warnings, and
 confidence available.

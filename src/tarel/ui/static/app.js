@@ -19,6 +19,10 @@ const state = {
   familyMode: undefined,
   familyPages: new Map(),
   viewRequest: 0,
+  reviewData: null,
+  reviewRequest: 0,
+  reviewLoading: false,
+  reviewError: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -47,6 +51,10 @@ async function load(familyMode = state.familyMode, focusNames = undefined) {
   const nextMode = data.object_families?.mode || null;
   if (nextMode !== state.familyMode || focusNames !== undefined) state.scopeFilters = null;
   state.data = data;
+  state.reviewData = null;
+  state.reviewLoading = false;
+  state.reviewError = null;
+  state.reviewRequest += 1;
   state.familyMode = nextMode;
   state.familyPages.clear();
   if (!data.objects.some(item => item.id === state.selectedId)) state.selectedId = null;
@@ -67,6 +75,7 @@ async function load(familyMode = state.familyMode, focusNames = undefined) {
   renderAll();
   $$('[data-canvas-mode]').forEach(button => button.classList.toggle("is-active", button.dataset.canvasMode === state.canvasMode));
   if (params.get("view") === "review") switchView("review");
+  else if ($("#review-view").classList.contains("is-active")) await loadReview();
   if (params.get("trace")) {
     await trace(params.get("trace"));
     if (state.canvasMode === "lineage" && state.trace) showTraceOnCanvas();
@@ -81,7 +90,15 @@ function renderAll() {
   $("#revision").title = `Graph revision ${data.revision}`;
   $("#mode").textContent = data.editable ? "Edit enabled" : "Read only";
   $("#mode").className = `mode-badge${data.editable ? " edit" : ""}`;
-  $("#review-badge").textContent = String(data.review.filter(item => ["draft", "review_required", "deferred"].includes(item.state)).length);
+  renderReviewBadge();
+  for (const selector of ["#add-lineage", "#add-lineage-drawer", "#new-zone"]) {
+    $(selector).disabled = !data.editable || (selector === "#new-zone" && Boolean(state.familyMode));
+    $(selector).title = !data.editable ? "Read-only session. Restart tarel ui with --edit to change metadata." : selector === "#new-zone" && state.familyMode ? "Switch to physical objects before editing zones." : "";
+  }
+  const hasLineage = Boolean(data.lineages.length);
+  $('[data-canvas-mode="lineage"]').disabled = !hasLineage;
+  $('[data-canvas-mode="lineage"]').title = hasLineage ? "Show selected lineage documents" : "No lineage documents loaded. Add --lineage when starting the UI.";
+  $("#entity-layer-option").hidden = !data.edges.some(edge => edge.type === "entity_resolution_candidate");
   renderLogicalTopologyNotices();
   renderFamilyNotices();
   renderObjectList();
@@ -108,7 +125,7 @@ function renderFamilyNotices() {
   const container = $("#family-notices");
   container.hidden = !summary;
   if (!summary) return;
-  container.innerHTML = `<p><strong>${summary.collapsed_member_count} physical members collapsed</strong><span>${escapeHtml(summary.notice)}</span></p>${summary.stale_graphs.map(graph => `<p><strong>Stale family omitted</strong><span>${escapeHtml(graph)} · Physical objects remain visible.</span></p>`).join("")}`;
+  container.innerHTML = `<p><strong>${summary.collapsed_member_count} physical members grouped</strong><span>${state.familyMode === "include_candidates" ? "Includes exploratory families · inspect before use." : "Family membership is not proof of a family-wide join."}</span></p>${summary.stale_graphs.map(graph => `<p><strong>Stale family omitted</strong><span>${escapeHtml(graph)} · Physical objects remain visible.</span></p>`).join("")}`;
 }
 
 function renderObjectList() {
@@ -137,6 +154,7 @@ function renderObjectList() {
 
 function renderFocuses() {
   const catalog = state.data.focuses || [];
+  $("#focus-panel").hidden = !catalog.length;
   const needle = $("#focus-search").value.trim().toLowerCase();
   const visible = catalog.filter(item =>
     (!state.focusSelectedOnly || state.focusNames.has(item.name)) &&
@@ -156,7 +174,7 @@ function renderFocuses() {
   $("#focus-count").textContent = `${state.focusNames.size}/${catalog.length}`;
   const selection = state.focusSelection;
   $("#focus-summary").innerHTML = selection?.focuses.length ? `
-    <strong>${selection.focuses.length} active focus${selection.focuses.length === 1 ? "" : "es"}</strong>
+    <strong>${selection.focuses.length} active report filter${selection.focuses.length === 1 ? "" : "s"}</strong>
     <span>${selection.object_ids.length} graph objects · ${selection.members.length} assets · ${selection.origins.length} origins</span>
     ${selection.warnings.length ? `<small title="${escapeAttr(selection.warnings.join(" · "))}">⚠ ${selection.warnings.length} lineage warning${selection.warnings.length === 1 ? "" : "s"}</small>` : ""}` :
     '<span>Full workspace visible. Select one or more report paths to narrow the estate.</span>';
@@ -172,6 +190,10 @@ async function applyFocuses() {
       return;
     }
     state.focusSelection = await api("/api/focus/select", {focuses: [...state.focusNames].sort()});
+    state.reviewData = null;
+    state.reviewLoading = false;
+    state.data.review_summary = {known: false};
+    state.reviewRequest += 1;
     state.trace = null;
     state.traceOnCanvas = false;
     const visible = visibleObjects();
@@ -197,6 +219,10 @@ async function clearFocuses() {
   }
   state.focusNames.clear();
   state.focusSelection = null;
+  state.reviewData = null;
+  state.reviewLoading = false;
+  state.data.review_summary = {known: false};
+  state.reviewRequest += 1;
   state.trace = null;
   state.traceOnCanvas = false;
   state.selectedId = mostConnectedObject();
@@ -245,6 +271,11 @@ function renderScopeFilters() {
     applyVisualScope();
   }));
   $("#scope-count").textContent = `${visibleObjects().length}/${state.data.objects.length}`;
+  const narrowed = visibleObjects().length !== state.data.objects.length;
+  $("#scope-panel").hidden = !narrowed && !Object.values(state.scopeFacets).some(values => values.length > 1);
+  const reports = state.focusSelection?.focuses || [];
+  $("#active-scope").hidden = !narrowed && !reports.length;
+  $("#active-scope").textContent = reports.length ? `Report filter: ${reports.join(", ")}` : `${visibleObjects().length} of ${state.data.objects.length} objects in view`;
 }
 
 function applyVisualScope() {
@@ -291,7 +322,7 @@ function renderGraph() {
     const lane = lanes.indexOf(laneName);
     const index = counts.get(laneName) || 0;
     counts.set(laneName, index + 1);
-    return {data: {id: item.id, label: item.name, type: item.type, state: item.state || item.annotation?.state || "missing", namespace: item.namespace, graph: item.graph, parent: state.canvasMode === "space" ? spaceGroupIds(item).schema : undefined}, position: {x: lane * 300 + (index % 2) * 130, y: Math.floor(index / 2) * 82}};
+    return {data: {id: item.id, label: item.name, type: item.type, state: item.state || item.annotation?.state || "missing", namespace: item.namespace, graph: item.graph, parent: state.canvasMode === "space" && showSpaceGroups(objects) ? spaceGroupIds(item).schema : undefined}, position: {x: lane * 300 + (index % 2) * 130, y: Math.floor(index / 2) * 82}};
   });
   if (state.canvasMode === "space") {
     elements.unshift(...spaceGroupElements(objects));
@@ -350,7 +381,7 @@ function renderGraph() {
   if (state.traceOnCanvas && state.trace) setTimeout(focusTrace, 0);
   const focusCount = state.focusSelection?.focuses.length || 0;
   $("#canvas-title").textContent = focusCount
-    ? `Focus · ${focusCount} report${focusCount === 1 ? "" : "s"}`
+    ? `Report filter · ${focusCount} report${focusCount === 1 ? "" : "s"}`
     : state.canvasMode === "space" ? "Information space" : "Data & process lineage";
   $("#canvas-subtitle").textContent = state.canvasMode === "space"
     ? `${objects.length} objects · ${data.edges.filter(edge => objectIds.has(edge.source) && objectIds.has(edge.target)).length} relationships · ${lanes.length} schema spaces`
@@ -386,6 +417,7 @@ function spaceGroupIds(item) {
 }
 
 function spaceGroupElements(objects) {
+  if (!showSpaceGroups(objects)) return [];
   const groups = new Map();
   for (const item of objects) {
     const ids = spaceGroupIds(item);
@@ -394,6 +426,10 @@ function spaceGroupElements(objects) {
     groups.set(ids.schema, {data: {id: ids.schema, label: `${item.graph} · ${item.namespace}`, type: "group-schema", parent: ids.area}});
   }
   return [...groups.values()];
+}
+
+function showSpaceGroups(objects) {
+  return new Set(objects.map(item => `${item.system || ""}::${item.area || ""}::${item.graph}::${item.namespace}`)).size > 1;
 }
 
 function lineageElements(visibleObjectIds) {
@@ -471,6 +507,8 @@ function selectObject(id) {
   state.selectedId = id;
   renderObjectList();
   renderInspector();
+  setPanel("objects", false);
+  setPanel("inspector", true);
   if (state.cy) { state.cy.nodes().unselect(); state.cy.$id(id).select(); focusSelected(); }
 }
 
@@ -492,16 +530,18 @@ function focusSelected() {
     sweep: 2 * Math.PI,
   }).run();
   state.cy.fit(focus, 115);
-  $("#canvas-title").textContent = `Focus · ${selectedObject()?.name || "object"}`;
+  $("#canvas-title").textContent = `Neighbours · ${selectedObject()?.name || "object"}`;
+  $("#canvas-subtitle").textContent = `${focus.nodes().length} objects · ${focus.edges().length} relationships · All objects restores the view`;
 }
 
 function selectedObject() { return state.data.objects.find(item => item.id === state.selectedId); }
 
 function renderInspector() {
   const item = selectedObject();
-  $("#trace-selected").disabled = !item?.reference;
+  $("#trace-selected").disabled = !item?.reference || !state.data.lineages.length;
+  $("#trace-selected").title = state.data.lineages.length ? "Trace the selected object's upstream lineage" : "No lineage documents loaded. Add --lineage when starting the UI.";
   if (!item) {
-    $("#inspector").innerHTML = '<div class="empty-state"><h2>Select an object</h2></div>';
+    $("#inspector").innerHTML = `${inspectorHeading("Object details", "Nothing selected")}<div class="empty-state"><h2>Select an object</h2><p>Choose a table from the list or graph.</p></div>`;
     return;
   }
   const connectedEdges = state.data.edges.filter(edge => edge.source === item.id || edge.target === item.id);
@@ -519,26 +559,49 @@ function renderInspector() {
   const relationships = connectedEdges.filter(edge => !["derives", "entity_resolution_candidate", "reference_mapping"].includes(edge.type));
   const fieldSemantics = item.fields.flatMap(field => (field.source_semantics || []).map(entry => ({...entry, field_label: field.label})));
   const relationshipSemantics = relationships.flatMap(edge => edge.source_semantics || []);
+  const coverages = (state.data.query_linked_coverages || []).filter(coverage => coverage.graph === item.graph);
+  const coverageTrust = coverages.some(coverage => coverage.failed_component_count) ? "Failed components · graph scope" : coverages.some(coverage => coverage.candidate_usage === "exploratory_only") ? "Exploratory · graph scope" : "Run-level · not table coverage";
   $("#inspector").innerHTML = `
-    <div class="inspector-head"><p class="eyebrow">${escapeHtml(item.type)} · ${escapeHtml(item.namespace)}</p><h2>${escapeHtml(item.name)}</h2><p class="mono">${escapeHtml(item.label)}</p></div>
-    ${semanticImportStrip()}
+    ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label)}
     <section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation?.description || "No TAREL annotation yet.")}</p><small class="semantic-origin">Editable in Review · stored on the TAREL graph</small></section>
     <section class="detail-section"><div class="fact-grid">
-      ${fact("State", annotation?.state || "missing")}${fact("Role", annotation?.role || "—")}${fact("Grain", item.grain || "—")}${fact("Confidence", annotation?.confidence == null ? "—" : `${Math.round(annotation.confidence * 100)}%`)}
-      ${fact("Primary key", item.primary_key.join(", ") || "—")}${fact("Relationships", String(relationships.length))}${fact("Entity candidates", String(entityCandidates.length))}
+      ${fact("State", stateLabel(annotation?.state || "missing"))}${fact("Role", annotation?.role || "—")}${fact("Grain", item.grain || "—")}${fact("Primary key", item.primary_key.join(", ") || "—")}
     </div></section>
-    ${queryLinkedCoverageCards(state.data.query_linked_coverages || [])}
-    ${entityResolutionCards(entityCandidates)}
-    ${referenceMappingCards(mappingEdges)}
-    ${sourceSemanticCards(item.source_semantics || [], "Imported dataset semantics")}
+    ${annotation?.warnings?.length ? `<section class="detail-section"><h3>Warnings</h3><p class="logical-warning">${annotation.warnings.map(escapeHtml).join(" · ")}</p></section>` : ""}
     <section class="detail-section"><h3>Fields · ${item.fields.length}</h3><div class="field-list">${item.fields.map(fieldAnnotationCard).join("")}</div></section>
-    ${sourceSemanticCards(fieldSemantics, "Imported field semantics")}
-    ${sourceSemanticCards(relationshipSemantics, "Imported relationship semantics")}
-    ${sourceSemanticCards(semanticCatalogEntries(), "Model-wide & unbound source semantics")}
-    ${semanticImportDiagnostics()}
-    ${annotation?.warnings?.length ? `<section class="detail-section"><h3>Warnings</h3><p class="description">${annotation.warnings.map(escapeHtml).join(" · ")}</p></section>` : ""}`;
+    ${relationshipList(relationships)}
+    ${optionalDetails("Identity hints", entityCandidates.length, entityResolutionCards(entityCandidates), candidateTrust(entityCandidates))}
+    ${optionalDetails("Reference mappings", mappingEdges.length, referenceMappingCards(mappingEdges), candidateTrust(mappingEdges))}
+    ${optionalDetails("Query-linked coverage", coverages.length, queryLinkedCoverageCards(coverages), coverageTrust)}
+    ${optionalDetails("Imported object semantics", (item.source_semantics || []).length + fieldSemantics.length + relationshipSemantics.length, sourceSemanticCards(item.source_semantics || [], "Imported dataset semantics") + sourceSemanticCards(fieldSemantics, "Imported field semantics") + sourceSemanticCards(relationshipSemantics, "Imported relationship semantics"))}
+    ${optionalDetails("Source model imports · graph scope", (state.data.semantic_imports || []).length, semanticImportStrip() + sourceSemanticCards(semanticCatalogEntries(), "Model-wide & unbound source semantics") + semanticImportDiagnostics(), (state.data.semantic_imports || []).some(entry => !entry.complete) ? "Incomplete import" : "Separate from TAREL annotations")}`;
   $$(".source-semantic-form").forEach(form => form.addEventListener("submit", saveSourceSemantic));
+  $$('[data-related-object]').forEach(button => button.addEventListener("click", () => selectObject(button.dataset.relatedObject)));
   mountLogicalMetadata(item);
+}
+
+function inspectorHeading(kind, name, reference = "") {
+  return `<div class="inspector-head"><p class="eyebrow">${escapeHtml(kind)}</p><h2>${escapeHtml(name)}</h2>${reference ? `<p class="mono">${escapeHtml(reference)}</p>` : ""}<button class="icon-button panel-close" data-close-panel="inspector" aria-label="Close object details">×</button></div>`;
+}
+
+function optionalDetails(title, count, content, trust = "") {
+  if (!count) return "";
+  const caution = /exploratory|unreviewed|stale|incomplete|failed|errors/i.test(trust);
+  return `<details class="optional-details"><summary><span>${escapeHtml(title)} · ${count}</span>${trust ? `<small${caution ? ' class="caution"' : ""}>${escapeHtml(trust)}</small>` : ""}</summary><div class="optional-body">${content}</div></details>`;
+}
+
+function candidateTrust(edges) {
+  const exploratory = edges.filter(edge => edge.metadata.requires_runtime_validation || edge.metadata.usage === "exploratory_only" || !["reviewed", "validated"].includes(edge.metadata.state));
+  return exploratory.length ? `${exploratory.length} exploratory · validate before use` : "Reviewed · inspect evidence";
+}
+
+function relationshipList(edges) {
+  if (!edges.length) return "";
+  return `<section class="detail-section"><h3>Relationships · ${edges.length}</h3><div class="relationship-summary">${edges.map(edge => {
+    const otherId = edge.source === state.selectedId ? edge.target : edge.source;
+    const other = state.data.objects.find(candidate => candidate.id === otherId);
+    return `<button class="quiet-button" data-related-object="${escapeAttr(otherId)}">${escapeHtml(other?.name || otherId)} · ${escapeHtml(edge.metadata.state || "declared")}</button>`;
+  }).join("")}</div></section>`;
 }
 
 function renderFamilyInspector(item) {
@@ -546,7 +609,7 @@ function renderFamilyInspector(item) {
   const page = state.familyPages.get(item.id);
   const hidden = family.hidden_details;
   $("#inspector").innerHTML = `
-    <div class="inspector-head"><p class="eyebrow">Logical object family · ${escapeHtml(item.graph)}</p><h2>${escapeHtml(item.name)}</h2></div>
+    ${inspectorHeading(`Logical object family · ${item.graph}`, item.name)}
     <section class="detail-section"><div class="fact-grid">${fact("State", stateLabel(family.state))}${fact("Usage", family.usage)}${fact("Scope members", String(family.member_count))}${fact("Namespaces", String(family.namespace_count))}${fact("Grain", family.grain.join(" + ") || "—")}${fact("Revision", shortRevision(family.revision))}</div></section>
     <p class="logical-warning">Schema compatibility only. Membership does not prove partition disjointness, common business meaning or a family-wide join.${family.usage === "exploratory_only" ? " Exploratory only · validate at runtime." : ""}</p>
     <section class="detail-section"><h3>Common schema · ${item.fields.length}</h3><div class="logical-field-list">${item.fields.map(logicalOutputFieldCard).join("")}</div></section>
@@ -578,16 +641,16 @@ function renderDerivedRelationInspector(item, connectedEdges) {
   const evidence = logical.evidence || [];
   const derives = connectedEdges.filter(edge => edge.type === "derives");
   $("#inspector").innerHTML = `
-    <div class="inspector-head logical-inspector-head"><p class="eyebrow">Logical object · ${escapeHtml(item.namespace)}</p><h2>${escapeHtml(item.name)}</h2><p class="mono">Derived from ${escapeHtml(source?.label || logical.source_object || "unknown source")}</p></div>
+    ${inspectorHeading(`Logical object · ${item.namespace}`, item.name, `Derived from ${source?.label || logical.source_object || "unknown source"}`)}
     <section class="detail-section"><div class="fact-grid">
       ${fact("State", stateLabel(logical.state || item.state))}${fact("Usage", logical.usage || item.usage || "exploratory_only")}${fact("Grain", (logical.grain_fields || item.primary_key || []).join(" + ") || "—")}${fact("Output fields", String(item.fields.length))}
       ${fact("Steps", String((logical.step_kinds || []).length))}${fact("Evidence runs", String(evidence.length))}${fact("Plan revision", shortRevision(logical.plan_revision))}${fact("Topology revision", shortRevision(logical.document_revision))}
     </div></section>
     ${logical.requires_runtime_validation ? '<p class="logical-warning">Exploratory only · validate this derivation at runtime before analytical use.</p>' : ""}
-    <section class="detail-section logical-operation"><h3>Logical operation</h3><p class="semantic-origin">Read-only typed topology; executable code and extraction pointers are intentionally not exposed here.</p><div class="logical-step-chain">${(logical.step_kinds || []).map((kind, index) => `<span><small>${index + 1}</small>${escapeHtml(kind)}</span>`).join('<i aria-hidden="true">→</i>') || "<em>No steps recorded</em>"}</div></section>
     <section class="detail-section"><h3>Output schema · ${item.fields.length}</h3><div class="logical-field-list">${item.fields.map(logicalOutputFieldCard).join("")}</div></section>
-    ${derivationEvidenceCards(evidence)}
-    ${referenceMappingCards(connectedEdges.filter(edge => edge.type === "reference_mapping"))}
+    <section class="detail-section logical-operation"><h3>Logical operation</h3><p class="semantic-origin">Read-only typed topology; executable code and extraction pointers are intentionally not exposed here.</p><div class="logical-step-chain">${(logical.step_kinds || []).map((kind, index) => `<span><small>${index + 1}</small>${escapeHtml(kind)}</span>`).join('<i aria-hidden="true">→</i>') || "<em>No steps recorded</em>"}</div></section>
+    ${optionalDetails("Derivation evidence", evidence.length, derivationEvidenceCards(evidence), evidence.some(record => record.error_count) ? "Errors reported" : "Aggregate observations")}
+    ${optionalDetails("Reference mappings", connectedEdges.filter(edge => edge.type === "reference_mapping").length, referenceMappingCards(connectedEdges.filter(edge => edge.type === "reference_mapping")), candidateTrust(connectedEdges.filter(edge => edge.type === "reference_mapping")))}
     <section class="detail-section"><p class="semantic-origin">${derives.length} source-to-derived topology edge${derives.length === 1 ? "" : "s"} projected without changing the physical graph.</p></section>`;
   mountLogicalMetadata(item);
 }
@@ -636,7 +699,7 @@ function entityResolutionCards(edges) {
     const threshold = evidence.threshold == null ? "—" : `${Math.round(evidence.threshold * 100)}%`;
     const executor = evidence.executor_id ? `${evidence.executor_id}@${evidence.executor_version}` : "Not recorded";
     const isSelfMatch = evidence.entity_scope === "self_object";
-    const heading = isSelfMatch ? `Self match · ${evidence.self_object || item.name}` : (other?.name || "Unknown object");
+    const heading = isSelfMatch ? `Self match · ${evidence.self_object || other?.name || "Selected object"}` : (other?.name || "Unknown object");
     const fields = isSelfMatch ? (evidence.comparison_fields || []).join(" + ") : `${evidence.source_field} → ${evidence.target_field}`;
     const aliasDetails = evidence.identity_mapping_persisted
       ? `<p class="field-detail"><strong>Protected alias group</strong><span>${escapeHtml(evidence.identity_group_id || "—")} · ${escapeHtml(String(evidence.identity_member_count || 0))} keys · ${Math.round((evidence.identity_group_confidence || 0) * 100)}%</span></p>`
@@ -752,6 +815,8 @@ async function saveSourceSemantic(event) {
 function renderZones() {
   const contexts = [];
   for (const workspace of state.data.workspaces) for (const system of workspace.systems) for (const zone of system.zones) contexts.push({workspace, system, zone});
+  $("#zones-panel").hidden = !contexts.length && !state.data.editable;
+  $("#zone-count").textContent = String(contexts.length);
   $("#zone-list").innerHTML = contexts.map((context, index) => `
     <article class="zone-card" data-zone-index="${index}"><header><strong>${escapeHtml(context.zone.name)}</strong><small>${context.zone.members.length}</small></header><p>${escapeHtml(context.zone.description || `${context.workspace.name} · ${context.system.name}`)}</p><div class="zone-members">${context.zone.members.map(member => { const object = objectForZoneMember(member); return `<button class="zone-member" data-focus-object="${escapeAttr(object?.id || "")}">${escapeHtml(object?.name || `${member.graph}:${member.object_id}`)}</button>`; }).join("")}</div></article>`).join("") || '<div class="zone-card"><strong>No zones yet</strong><p>Create one to group objects across schemas.</p></div>';
   $$(".zone-member").forEach(button => button.addEventListener("click", () => selectObject(button.dataset.focusObject)));
@@ -795,36 +860,82 @@ async function saveZone(workspace, system, zone, members) {
   } catch (error) { toast(error.message); }
 }
 
+function reviewRecords() { return state.reviewData?.review || []; }
+function reviewPending(record) { return record.has_pending ?? (["draft", "review_required", "deferred"].includes(record.state) || record.pending_field_count > 0); }
+
+function renderReviewBadge() {
+  const summary = state.reviewData?.review_summary || state.data?.review_summary;
+  const badge = $("#review-badge");
+  badge.textContent = summary?.known ? String(summary.review_objects) : "?";
+  badge.title = summary?.known ? `${summary.pending_tables} table proposals · ${summary.pending_fields} field proposals awaiting review. Display grouping does not change this count.` : "Review counts have not been loaded. Open Review to inspect the physical scope.";
+}
+
+async function loadReview() {
+  const request = ++state.reviewRequest;
+  state.reviewLoading = true;
+  state.reviewError = null;
+  renderReview();
+  try {
+    const payload = await api("/api/review/view", {focuses: state.focusSelection?.focuses || []});
+    if (request !== state.reviewRequest) return;
+    state.reviewData = payload;
+    state.reviewLoading = false;
+    renderReviewBadge();
+    renderReview();
+  } catch (error) {
+    if (request !== state.reviewRequest) return;
+    state.reviewLoading = false;
+    state.reviewError = error.message;
+    renderReview();
+  }
+}
+
 function renderReview() {
-  const visibleIds = new Set(visibleObjects().map(item => item.id));
-  const scopedReview = state.data.review.filter(item => visibleIds.has(item.id));
-  const pending = scopedReview.filter(item => ["draft", "review_required", "deferred"].includes(item.state));
-  const reviewed = scopedReview.filter(item => ["validated", "rejected"].includes(item.state)).length;
-  const annotated = scopedReview.filter(item => item.state !== "missing").length;
-  $("#review-progress").textContent = `${reviewed} of ${annotated} annotated tables decided · ${scopedReview.length - annotated} missing`;
-  $("#review-progress-bar").style.width = `${annotated ? Math.round(reviewed / annotated * 100) : 0}%`;
+  if (!state.reviewData || state.reviewLoading || state.reviewError) {
+    const message = state.reviewError ? `Review could not be loaded: ${state.reviewError}` : state.reviewLoading ? "Loading physical-scope review records…" : "Open Review to load table and field proposals independently of graph grouping.";
+    $("#review-progress").textContent = message;
+    $("#review-progress-bar").style.width = "0%";
+    $("#review-list").innerHTML = "";
+    $("#review-editor").innerHTML = `<div class="empty-state"><h2>${state.reviewError ? "Review unavailable" : "Annotation review"}</h2><p>${escapeHtml(message)}</p>${state.reviewError ? '<button id="retry-review" class="quiet-button">Retry</button>' : ""}</div>`;
+    $("#retry-review")?.addEventListener("click", loadReview);
+    renderEvidence(null);
+    return;
+  }
+  const scopedReview = reviewRecords();
+  const pending = scopedReview.filter(reviewPending);
+  const summary = state.reviewData.review_summary;
+  $("#review-progress").textContent = `${summary.pending_tables} table proposals · ${summary.pending_fields} field proposals pending · ${summary.missing_tables} tables / ${summary.missing_fields} fields missing annotations`;
+  const decided = scopedReview.filter(item => !reviewPending(item) && item.state !== "missing").length;
+  $("#review-progress-bar").style.width = `${summary.total_objects ? Math.round(decided / summary.total_objects * 100) : 0}%`;
   const records = state.reviewFilter === "pending" ? pending : scopedReview;
   if (!records.some(item => item.id === state.reviewId)) state.reviewId = records[0]?.id || null;
   $("#review-list").innerHTML = records.map(item => `
-    <button class="review-item${item.id === state.reviewId ? " is-active" : ""}" data-review="${escapeAttr(item.id)}"><i class="state-dot ${escapeAttr(item.state)}"></i><span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.annotation?.description || "No semantic description")}</small></span><span class="state-badge">${stateLabel(item.state)}</span></button>`).join("") || '<div class="empty-state"><p>No proposals in this filter.</p></div>';
-  $$(".review-item").forEach(button => button.addEventListener("click", () => { state.reviewId = button.dataset.review; renderReview(); }));
+    <button class="review-item${item.id === state.reviewId ? " is-active" : ""}" data-review="${escapeAttr(item.id)}"><i class="state-dot ${item.pending_field_count ? "draft" : escapeAttr(item.state)}"></i><span><strong>${escapeHtml(item.label)}</strong><small>${item.pending_field_count ? `${item.pending_field_count} field proposal${item.pending_field_count === 1 ? "" : "s"} pending · ` : ""}${escapeHtml(item.annotation?.description || "No semantic description")}</small></span><span class="state-badge">${stateLabel(item.state)}</span></button>`).join("") || '<div class="empty-state"><p>No proposals in this filter.</p></div>';
+  $$(".review-item").forEach(button => button.addEventListener("click", () => { state.reviewId = button.dataset.review; setPanel("review-queue", false); renderReview(); }));
   renderReviewEditor();
 }
 
-function currentReview() { return state.data.review.find(item => item.id === state.reviewId); }
-function nextReview() { return state.data?.review.find(item => ["draft", "review_required", "deferred"].includes(item.state)); }
+function currentReview() { return reviewRecords().find(item => item.id === state.reviewId); }
+function nextReview() { return reviewRecords().find(reviewPending); }
 
 function renderReviewEditor() {
   const record = currentReview();
-  if (!record) { $("#review-editor").innerHTML = '<div class="empty-state"><h2>Queue complete</h2><p>No table-level proposals are waiting.</p></div>'; renderEvidence(null); return; }
+  if (!record) {
+    const emptyScope = !reviewRecords().length;
+    $("#review-editor").innerHTML = `<div class="empty-state"><h2>${emptyScope ? "No objects in this scope" : "No pending proposals"}</h2><p>${emptyScope ? "Change the report or workspace scope to inspect annotations." : "No table or field proposals are waiting in this scope. Missing annotations remain listed under All."}</p></div>`;
+    renderEvidence(null);
+    return;
+  }
   const annotation = record.annotation;
   const disabled = !state.data.editable || !annotation;
   const contextDocuments = record.context_documents || [];
-  const documentById = new Map((state.data.knowledge_documents || []).map(item => [item.id, item]));
+  const documentById = new Map((state.reviewData.knowledge_documents || []).map(item => [item.id, item]));
   const availableDocuments = (record.available_context_document_ids || []).map(id => documentById.get(id)).filter(Boolean);
   $("#review-editor").innerHTML = `
     <div class="review-title"><div><p class="eyebrow">${escapeHtml(record.type)} annotation</p><h2>${escapeHtml(record.label)}</h2><p>${record.field_count} fields · ${stateLabel(record.state)}</p></div><span class="state-badge">${stateLabel(record.state)}</span></div>
     <div class="step-strip"><div class="step"><strong>1 · Read</strong>Understand the proposal</div><div class="step"><strong>2 · Check</strong>Compare evidence</div><div class="step"><strong>3 · Edit</strong>Correct meaning</div><div class="step"><strong>4 · Decide</strong>Approve or reject</div></div>
+    ${!state.data.editable ? '<p class="review-field-notice">Read-only session. Evidence and proposals are inspectable; restart with <code>--edit</code> to record a decision.</p>' : ""}
+    ${record.pending_field_count ? `<div class="review-field-notice"><strong>${record.pending_field_count} field proposals also need review.</strong><p>Approving only the table does not approve its fields. Inspect the field descriptions before applying a decision to them.</p><button id="inspect-review-fields" class="quiet-button">Inspect fields${state.familyMode ? " · physical view" : ""}</button></div>` : ""}
     ${knowledgeContextPanel(record, contextDocuments, availableDocuments)}
     ${!annotation ? `<div class="missing-callout"><strong>No provider proposal exists for this table.</strong><p>Generate one with the configured provider or coding agent, then return here for review. Add a private connector configuration and sampling only when required.</p><code>${escapeHtml(annotationCommand(record))}</code></div>` : `
     <form id="annotation-form" class="editor-form">
@@ -837,10 +948,19 @@ function renderReviewEditor() {
     </form>
     <div class="editor-actions"><button class="danger-button" data-review-action="reject" ${disabled ? "disabled" : ""}>Reject</button><button class="quiet-button" data-review-action="later">Later</button><button class="quiet-button" data-review-action="save" ${disabled ? "disabled" : ""}>Save edits</button><span class="spacer"></span><button class="primary-button" data-review-action="approve" ${disabled ? "disabled" : ""}>Approve &amp; next</button></div>`}`;
   $$('[data-review-action]').forEach(button => button.addEventListener("click", () => reviewAction(button.dataset.reviewAction)));
+  $("#inspect-review-fields")?.addEventListener("click", async () => {
+    try {
+      if (state.familyMode) await load(null);
+      switchView("graph");
+      selectObject(record.id);
+      $("#inspector .field-list")?.scrollIntoView({block: "start", behavior: "smooth"});
+    } catch (error) { toast(error.message); }
+  });
   renderEvidence(record);
 }
 
 function knowledgeContextPanel(record, used, available) {
+  if (!used.length && !available.length) return "";
   const documents = used.length ? used : available;
   return `<details class="knowledge-context" ${used.length ? "open" : ""}>
     <summary><span>Knowledge context</span><small>${used.length} used · ${available.length} available now</small></summary>
@@ -861,11 +981,11 @@ async function reviewAction(action) {
   const reason = values.get("reason");
   try {
     if (action === "save" || changed(record, patch)) {
-      const result = await api("/api/annotation/edit", {graph: record.graph, reference: record.label, patch, reason, revision: state.data.revisions[record.graph]});
-      state.data.revisions[record.graph] = result.revision;
+      const result = await api("/api/annotation/edit", {graph: record.graph, reference: record.label, patch, reason, revision: state.reviewData.revisions[record.graph]});
+      state.reviewData.revisions[record.graph] = result.revision;
     }
     if (action === "approve" || action === "reject") {
-      await api("/api/annotation/decision", {graph: record.graph, reference: record.label, state: action === "approve" ? "validated" : "rejected", reason, include_fields: values.get("include_fields") === "on", revision: state.data.revisions[record.graph]});
+      await api("/api/annotation/decision", {graph: record.graph, reference: record.label, state: action === "approve" ? "validated" : "rejected", reason, include_fields: values.get("include_fields") === "on", revision: state.reviewData.revisions[record.graph]});
     }
     toast(action === "approve" ? "Annotation approved." : action === "reject" ? "Annotation rejected." : "Edits saved as a draft.");
     const previous = record.id; await load(); if (action !== "save") advanceReview(previous);
@@ -873,15 +993,16 @@ async function reviewAction(action) {
 }
 
 function advanceReview(previousId) {
-  const pending = state.data.review.filter(item => ["draft", "review_required", "deferred"].includes(item.state) && item.id !== previousId);
+  const pending = reviewRecords().filter(item => reviewPending(item) && item.id !== previousId);
   state.reviewId = pending[0]?.id || null; renderReview();
 }
 
 function renderEvidence(record) {
-  if (!record?.annotation) { $("#review-evidence").innerHTML = '<div class="empty-state"><h2>No evidence</h2><p>This object has no semantic proposal yet.</p></div>'; return; }
+  const heading = '<div class="evidence-heading"><div><p class="eyebrow">Proposal context</p><h2>Evidence</h2></div><button class="icon-button panel-close" data-close-panel="evidence" aria-label="Close evidence">×</button></div>';
+  if (!record?.annotation) { $("#review-evidence").innerHTML = `${heading}<div class="empty-state"><h2>No evidence selected</h2><p>Select a proposal to inspect its evidence.</p></div>`; return; }
   const annotation = record.annotation;
   const documents = record.context_documents || [];
-  $("#review-evidence").innerHTML = `<p class="eyebrow">Proposal context</p><h2>Evidence</h2>${annotation.evidence.map(item => `<article class="evidence-card"><strong>${escapeHtml(item.source)}</strong><span>${escapeHtml(item.reference)}</span>${item.value ? `<small>${escapeHtml(item.value)}</small>` : ""}${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}</article>`).join("") || '<p class="guidance">No explicit evidence was recorded.</p>'}${documents.length ? `<div class="provenance"><h3>Documents supplied</h3>${documents.map(item => `<p><strong>${escapeHtml(item.title)}</strong><br><small>${escapeHtml(knowledgeScope(item.scope))} · ${escapeHtml(item.state)} · ${escapeHtml(item.revision.slice(0, 10))}</small></p>`).join("")}</div>` : ""}<div class="provenance"><h3>Provenance</h3><p>${escapeHtml(annotation.provenance?.source || "unknown")}${annotation.provenance?.provider ? ` · ${escapeHtml(annotation.provenance.provider)}` : ""}${annotation.provenance?.model ? ` · ${escapeHtml(annotation.provenance.model)}` : ""}</p>${annotation.confidence_reason ? `<p>${escapeHtml(annotation.confidence_reason)}</p>` : ""}</div>`;
+  $("#review-evidence").innerHTML = `${heading}${annotation.evidence.map(item => `<article class="evidence-card"><strong>${escapeHtml(item.source)}</strong><span>${escapeHtml(item.reference)}</span>${item.value ? `<small>${escapeHtml(item.value)}</small>` : ""}${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}</article>`).join("") || '<p class="guidance">No explicit evidence was recorded.</p>'}${documents.length ? `<div class="provenance"><h3>Documents supplied</h3>${documents.map(item => `<p><strong>${escapeHtml(item.title)}</strong><br><small>${escapeHtml(knowledgeScope(item.scope))} · ${escapeHtml(item.state)} · ${escapeHtml(item.revision.slice(0, 10))}</small></p>`).join("")}</div>` : ""}<div class="provenance"><h3>Provenance</h3><p>${escapeHtml(annotation.provenance?.source || "unknown")}${annotation.provenance?.provider ? ` · ${escapeHtml(annotation.provenance.provider)}` : ""}${annotation.provenance?.model ? ` · ${escapeHtml(annotation.provenance.model)}` : ""}</p>${annotation.confidence_reason ? `<p>${escapeHtml(annotation.confidence_reason)}</p>` : ""}</div>`;
 }
 
 function manualDocuments() {
@@ -1024,6 +1145,17 @@ function switchView(view) {
   $$(".tab").forEach(button => button.classList.toggle("is-active", button.dataset.view === view));
   $$(".view").forEach(section => section.classList.toggle("is-active", section.id === `${view}-view`));
   if (view === "graph" && state.cy) setTimeout(() => { state.cy.resize(); state.cy.fit(undefined, 70); }, 0);
+  if (view === "review" && !state.reviewData && !state.reviewLoading) loadReview();
+  for (const panel of ["objects", "review-queue", "evidence"]) setPanel(panel, false);
+}
+
+function setPanel(name, open) {
+  const triggers = {objects: "#open-objects", inspector: "#open-inspector", "review-queue": "#open-review-queue", evidence: "#open-evidence"};
+  document.body.classList.toggle(`${name}-open`, open);
+  if (name === "inspector") document.body.classList.toggle("inspector-closed", !open);
+  $(triggers[name])?.setAttribute("aria-expanded", String(open));
+  if (state.cy && name === "inspector") setTimeout(() => state.cy.resize(), 0);
+  if (open && name === "objects") $("#object-search").focus();
 }
 
 function fact(label, value) { return `<div class="fact"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`; }
@@ -1076,6 +1208,32 @@ function setFooter(value) { $("#footer-status").textContent = value; }
 function toast(value) { const element = $("#toast"); element.textContent = value; element.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { element.hidden = true; }, 4200); }
 
 $("#object-search").addEventListener("input", renderObjectList);
+for (const [id, panel] of [["open-objects", "objects"], ["open-inspector", "inspector"], ["open-review-queue", "review-queue"], ["open-evidence", "evidence"]]) {
+  $(`#${id}`).addEventListener("click", () => {
+    const open = panel === "inspector" ? $("#inspector").getClientRects().length > 0 : document.body.classList.contains(`${panel}-open`);
+    setPanel(panel, !open);
+  });
+}
+document.addEventListener("click", event => {
+  const close = event.target.closest("[data-close-panel]");
+  if (close) {
+    setPanel(close.dataset.closePanel, false);
+    const trigger = {objects: "#open-objects", inspector: "#open-inspector", "review-queue": "#open-review-queue", evidence: "#open-evidence"}[close.dataset.closePanel];
+    $(trigger)?.focus();
+  }
+  if (!event.target.closest("#view-options")) $("#view-options").open = false;
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    const activePanel = document.activeElement?.closest("#object-sidebar, #inspector, #review-queue, #review-evidence")?.id;
+    for (const panel of ["objects", "review-queue", "evidence"]) setPanel(panel, false);
+    if (window.matchMedia("(max-width: 1100px)").matches) setPanel("inspector", false);
+    $("#view-options").open = false;
+    const trigger = {"object-sidebar": "#open-objects", inspector: "#open-inspector", "review-queue": "#open-review-queue", "review-evidence": "#open-evidence"}[activePanel];
+    if (trigger && $(trigger).getClientRects().length) $(trigger).focus();
+  }
+});
+$("#open-inspector").setAttribute("aria-expanded", String(!window.matchMedia("(max-width: 1100px)").matches));
 $("#family-mode").addEventListener("change", async event => {
   const control = event.target;
   control.disabled = true;
@@ -1094,7 +1252,13 @@ $$('[data-kind]').forEach(button => button.addEventListener("click", () => { sta
 $$('.tab').forEach(button => button.addEventListener("click", () => switchView(button.dataset.view)));
 $$('.review-filter').forEach(button => button.addEventListener("click", () => { state.reviewFilter = button.dataset.reviewFilter; $$('.review-filter').forEach(item => item.classList.toggle("is-active", item === button)); renderReview(); }));
 $("#fit-graph").addEventListener("click", focusSelected);
-$("#show-all").addEventListener("click", () => { state.traceOnCanvas = false; state.cy.elements().removeClass("hidden dimmed zone-focus trace-focus"); state.cy.fit(undefined, 70); $("#canvas-title").textContent = state.canvasMode === "space" ? "Information space · all objects" : "Lineage · all selected documents"; });
+$("#show-all").addEventListener("click", () => {
+  state.traceOnCanvas = false;
+  state.cy.elements().removeClass("hidden dimmed zone-focus trace-focus");
+  state.cy.fit(undefined, 70);
+  $("#canvas-title").textContent = state.canvasMode === "space" ? "Information space · all objects" : "Lineage · all selected documents";
+  $("#canvas-subtitle").textContent = "Full current source / report scope";
+});
 $("#toggle-entity-resolution").addEventListener("change", event => { state.showEntityResolution = event.target.checked; renderGraph(); });
 $("#trace-selected").addEventListener("click", () => trace(selectedObject()?.reference || ""));
 $("#show-trace-canvas").addEventListener("click", showTraceOnCanvas);

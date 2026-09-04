@@ -66,6 +66,7 @@ only-include = [
   "SECURITY.md",
   "THIRD_PARTY_NOTICES.md",
   "docs/change-radar.md",
+  "docs/browser-workflows.md",
   "docs/architecture.md",
   "docs/assets",
   "docs/context-contract.md",

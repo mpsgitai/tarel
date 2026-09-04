@@ -75,6 +75,7 @@ from tarel.topology.contracts import LogicalTopologyFailure
 from tarel.topology.endpoint_contracts import LogicalEndpointFailure
 from tarel.ui.logical_metadata import LogicalMetadataFailure, logical_metadata_use_case
 from tarel.ui.presentation import (
+    _review_summary,
     browser_focus_catalog,
     browser_focus_selection,
     browser_graph,
@@ -84,7 +85,7 @@ from tarel.ui.presentation import (
     focus_physical_objects,
     workspace_revision,
 )
-from tarel.workspaces.contracts import WorkspaceFailure
+from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 
 _MAX_REQUEST_BYTES = 256 * 1024
 _STATIC_TYPES = {
@@ -246,6 +247,26 @@ class TarelUIBackend:
             payload["focus_selection"] = (
                 browser_focus_selection(selected_focuses) if names else None
             )
+        if selected_focuses and family_mode is None:
+            # The canvas may retain surrounding nodes; review follows the explicit report scope.
+            focused = focus_physical_objects(selected_focuses)
+            payload["review"] = [
+                record for record in payload["review"]
+                if (record["graph"], record["object_id"]) in focused
+            ]
+            allowed = {(record["graph"], record["object_id"]) for record in payload["review"]}
+            payload["review_summary"] = _review_summary(graphs, allowed)
+        self._attach_review_knowledge(payload, graphs, workspace)
+        if family_mode is not None:
+            from tarel.ui.lazy_family_view import full_family_projection_storage
+
+            payload["storage"] = full_family_projection_storage(fallback_reason)
+        return payload
+
+    def _attach_review_knowledge(
+        self, payload: dict[str, Any], graphs: tuple[GraphDocument, ...],
+        workspace: WorkspaceDocument | None,
+    ) -> None:
         knowledge_documents = list_knowledge_documents_use_case()
         payload["knowledge_documents"] = [
             item.to_dict(include_content=False)
@@ -273,13 +294,35 @@ class TarelUIBackend:
             record["available_context_document_ids"] = [
                 item.id for item in context.references
             ]
-        if family_mode is not None:
-            from tarel.ui.lazy_family_view import full_family_projection_storage
 
-            payload["storage"] = full_family_projection_storage(fallback_reason)
-        return payload
+    def _review_view(self, names: tuple[str, ...]) -> dict[str, object]:
+        """Review physical objects on demand, never the collapsed visual projection."""
+        focuses = self._selected_focus_documents(names) if names else ()
+        workspace = None
+        if self.config.workspace:
+            scope = self._scope()
+            graphs = tuple(load_graph_use_case(name) for name in scope.graph_names)
+            workspace = load_workspace_use_case(self.config.workspace)
+            projection = browser_workspace(
+                graphs, scope, workspace=workspace, editable=self.config.editable,
+                focus_documents=focuses,
+            )
+        else:
+            graphs = (load_graph_use_case(self._single_graph()),)
+            projection = browser_graph(
+                graphs[0], editable=self.config.editable, focus_documents=focuses,
+            )
+        self._attach_review_knowledge(projection, graphs, workspace)
+        return {
+            key: projection[key] for key in (
+                "review", "review_summary", "revisions", "knowledge_documents", "editable",
+            )
+        } | {"focuses": list(names)}
 
     def mutate(self, route: str, payload: dict[str, Any]) -> dict[str, object]:
+        if route == "/api/review/view":
+            names = _strings(payload, "focuses") if "focuses" in payload else self.config.focuses
+            return self._review_view(names)
         if route == "/api/logical/metadata":
             graph_name = self._payload_graph(payload)
             scope = self._scope() if self.config.workspace else None
