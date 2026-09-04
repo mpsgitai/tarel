@@ -28,6 +28,8 @@
             <div class="pane-heading"><p class="eyebrow">Estate explorer</p><h1>Objects</h1></div>
             <label class="search"><span>⌕</span><input id="object-search" type="search" placeholder="Find table or view" autocomplete="off" /></label>
             <div class="filter-row"><button class="chip is-active" data-kind="all">All</button><button class="chip" data-kind="table">Tables</button><button class="chip" data-kind="view">Views</button></div>
+            <label class="family-mode"><span>Object families</span><select id="family-mode"><option value="">Off · physical objects</option><option value="confirmed_only">Reviewed families</option><option value="include_candidates">Include exploratory families</option></select></label>
+            <div id="family-notices" class="topology-notices" role="status" hidden></div>
             <details id="focus-panel" class="focus-panel" open>
               <summary><span>Report / cube focuses</span><small id="focus-count"></small></summary>
               <div class="focus-tools">
@@ -135,6 +137,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="/cytoscape.min.js"></script>
+    <script src="/logical_metadata.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

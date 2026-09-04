@@ -26,6 +26,7 @@ from tarel.discovery.identity import (
     IdentityInventoryManifest,
     IdentityInventoryPage,
 )
+from tarel.discovery.logical_program import LogicalJoinProgram
 from tarel.entity_resolution.contracts import (
     EntityAliasMatch,
     EntityResolutionCandidate,
@@ -36,9 +37,17 @@ from tarel.entity_resolution.contracts import (
     EntityResolutionRule,
     SelfEntityMatch,
 )
+from tarel.expansion.contracts import ContextExpansion, ExpansionInput, ExpansionTarget
 from tarel.graph.revision import physical_graph_revision
+from tarel.graph.selective import GraphHeader, GraphObjectPage, GraphSlice
 from tarel.grounding import GroundingAsset, GroundingBundle, LineageTarget, SourceTarget
 from tarel.knowledge.contracts import KnowledgeContext, KnowledgeDocument, KnowledgeReference
+from tarel.lineage.runtime_logical import RuntimeLogicalArtifactReference, RuntimeLogicalOperation
+from tarel.logical_joins.contracts import LogicalJoin
+from tarel.object_bindings.application import ObjectBindingResolution
+from tarel.object_bindings.contracts import ObjectValueBinding
+from tarel.object_families.application import FamilyMember, FamilyMemberPage
+from tarel.object_families.contracts import FamilyAttribute, FamilyField, FamilyReview, ObjectFamily
 from tarel.reference_mapping.contracts import (
     ReferenceMappingCandidate,
     ReferenceMappingEvidence,
@@ -48,6 +57,11 @@ from tarel.reference_mapping.contracts import (
 )
 from tarel.runtime import TarelRuntime
 from tarel.sdk.client import Tarel
+from tarel.semantic_concepts.contracts import (
+    ConceptBinding,
+    SemanticConcept,
+    SemanticConceptDocument,
+)
 from tarel.sources.application import SourceCheck
 from tarel.sources.contracts import SourceProfile
 from tarel.topology.contracts import (
@@ -63,10 +77,34 @@ from tarel.topology.contracts import (
     OutputField,
     StepOutput,
 )
+from tarel.topology.endpoint_contracts import LogicalEndpoint, ResolvedLogicalEndpoint
 from tarel.workspaces.scope import ScopeSelection as WorkspaceScope
 
 __all__ = [
+    "ContextExpansion",
+    "ExpansionInput",
+    "ExpansionTarget",
+    "ObjectValueBinding",
+    "ObjectBindingResolution",
+    "LogicalEndpoint",
+    "ResolvedLogicalEndpoint",
+    "LogicalJoin",
+    "LogicalJoinProgram",
+    "ConceptBinding",
+    "SemanticConcept",
+    "SemanticConceptDocument",
+    "RuntimeLogicalArtifactReference",
+    "RuntimeLogicalOperation",
+    "GraphHeader",
+    "GraphObjectPage",
+    "GraphSlice",
     "ContextCacheParts",
+    "FamilyAttribute",
+    "FamilyField",
+    "FamilyMember",
+    "FamilyMemberPage",
+    "FamilyReview",
+    "ObjectFamily",
     "DiscoveryCandidate",
     "DiscoveryExecution",
     "DiscoveryMetrics",

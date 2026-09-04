@@ -86,6 +86,7 @@ from tarel.connectors.contracts import (
     SampleResult,
 )
 from tarel.context import DEFAULT_MAX_CONTEXT_CHARACTERS, ContextFailure, ContextResult
+from tarel.context_output import canonical_json
 from tarel.demo import DemoFailure
 from tarel.discovery.cli import add_discovery_commands, dispatch_discovery
 from tarel.discovery.contracts import DiscoveryFailure
@@ -94,8 +95,11 @@ from tarel.entity_resolution.cli import (
     dispatch_entity_resolution,
 )
 from tarel.entity_resolution.contracts import EntityResolutionFailure
+from tarel.expansion.cli import add_expansion_command, dispatch_expansion
+from tarel.expansion.contracts import ContextExpansionFailure
 from tarel.focus.contracts import FocusDocument, FocusFailure
 from tarel.graph.contracts import GraphDocument, GraphFailure
+from tarel.graph.reads_cli import add_graph_read_commands, dispatch_graph_read
 from tarel.grounding import GroundingBundle
 from tarel.grounding_application import (
     compile_graph_grounding_use_case,
@@ -107,6 +111,12 @@ from tarel.knowledge.contracts import (
 )
 from tarel.lineage.cli import add_lineage_commands, dispatch_lineage
 from tarel.lineage.contracts import LineageFailure
+from tarel.logical_joins.cli import add_logical_join_commands, dispatch_logical_join
+from tarel.logical_joins.contracts import LogicalJoinFailure
+from tarel.object_bindings.cli import add_binding_commands, dispatch_binding
+from tarel.object_bindings.contracts import ObjectBindingFailure
+from tarel.object_families.cli import add_family_commands, dispatch_family
+from tarel.object_families.contracts import ObjectFamilyFailure
 from tarel.providers.config import BUILTIN_PROVIDER_ADAPTERS
 from tarel.providers.contracts import ProviderCheck, ProviderFailure
 from tarel.reference_mapping.cli import (
@@ -118,6 +128,8 @@ from tarel.relationships.core import RelationshipFailure
 from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.local import DEFAULT_MODEL_NAME
 from tarel.search import SearchFailure, SearchResults
+from tarel.semantic_concepts.cli import add_concept_commands, dispatch_concept
+from tarel.semantic_concepts.contracts import SemanticConceptFailure
 from tarel.semantics.cli import add_semantic_commands, dispatch_semantic
 from tarel.semantics.contracts import SemanticFailure
 from tarel.sources.application import (
@@ -136,6 +148,7 @@ from tarel.sources.application import (
 from tarel.sources.contracts import SourceFailure, SourceProfile
 from tarel.topology.cli import add_topology_commands, dispatch_topology
 from tarel.topology.contracts import LogicalTopologyFailure
+from tarel.topology.endpoint_contracts import LogicalEndpointFailure
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 from tarel.workspaces.core import ResolvedZone
 from tarel.workspaces.scope import ResolvedScope
@@ -670,6 +683,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     graph = subcommands.add_parser("graph", help="Build and inspect local TAREL graphs.")
     graph_commands = graph.add_subparsers(dest="graph_command")
+    add_graph_read_commands(graph_commands)
 
     graph_build = graph_commands.add_parser(
         "build",
@@ -737,12 +751,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ui.add_argument("--port", type=int, default=0, help="Loopback port; 0 selects a free port.")
     ui.add_argument("--no-open", action="store_true", help="Do not open the browser automatically.")
+    ui.add_argument("--families", choices=("confirmed_only", "include_candidates"))
 
     add_lineage_commands(subcommands)
     add_semantic_commands(subcommands)
     add_entity_resolution_commands(subcommands)
     add_discovery_commands(subcommands)
     add_topology_commands(subcommands)
+    add_family_commands(subcommands)
+    add_binding_commands(subcommands)
+    add_concept_commands(subcommands)
+    add_logical_join_commands(subcommands)
     add_reference_mapping_commands(subcommands)
 
     focus = subcommands.add_parser(
@@ -782,6 +801,10 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--namespace", "--schema", dest="namespace")
     search.add_argument("--limit", type=int, default=20)
     search.add_argument(
+        "--families", choices=("off", "confirmed_only", "include_candidates"),
+        default="confirmed_only", help="Include logical family-name hits; never expand members.",
+    )
+    search.add_argument(
         "--mode",
         choices=("lexical", "bm25", "vector", "hybrid"),
         default="lexical",
@@ -797,6 +820,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build and compare deterministic context packets.",
     )
     context_commands = context.add_subparsers(dest="context_command")
+    add_expansion_command(context_commands)
     context_build = context_commands.add_parser(
         "build",
         help="Compile bounded context from search and reviewed graph relationships.",
@@ -827,6 +851,7 @@ def build_parser() -> argparse.ArgumentParser:
     context_build.add_argument("--threads", type=int, dest="n_threads")
     _add_workspace_retrieval_scope_arguments(context_build)
     _add_annotation_state_arguments(context_build)
+    _add_logical_hint_arguments(context_build)
     _add_format_argument(context_build)
 
     context_prefix = context_commands.add_parser(
@@ -844,6 +869,7 @@ def build_parser() -> argparse.ArgumentParser:
     context_prefix.add_argument("--max-characters", type=int, default=500_000)
     _add_workspace_retrieval_scope_arguments(context_prefix)
     _add_annotation_state_arguments(context_prefix)
+    _add_logical_hint_arguments(context_prefix)
     _add_format_argument(context_prefix)
 
     context_diff = context_commands.add_parser(
@@ -909,6 +935,7 @@ def build_parser() -> argparse.ArgumentParser:
     grounding.add_argument("--threads", type=int, dest="n_threads")
     _add_workspace_retrieval_scope_arguments(grounding)
     _add_annotation_state_arguments(grounding)
+    _add_logical_hint_arguments(grounding)
     _add_format_argument(grounding)
 
     graph_annotate = graph_commands.add_parser(
@@ -1117,7 +1144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if (
         len(arguments) >= 2
         and arguments[0] == "context"
-        and arguments[1] not in {"build", "prefix", "diff", "impact", "-h", "--help"}
+        and arguments[1] not in {"build", "prefix", "diff", "impact", "expand", "-h", "--help"}
     ):
         arguments.insert(1, "build")
     args = parser.parse_args(arguments)
@@ -1140,6 +1167,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             return discovery_result
 
         topology_result = dispatch_topology(args)
+        family_result = dispatch_family(args)
+        if family_result is not None:
+            return family_result
+        binding_result = dispatch_binding(args)
+        if binding_result is not None:
+            return binding_result
+        expansion_result = dispatch_expansion(args)
+        if expansion_result is not None:
+            return expansion_result
+        concept_result = dispatch_concept(args)
+        if concept_result is not None:
+            return concept_result
+        logical_join_result = dispatch_logical_join(args)
+        if logical_join_result is not None:
+            return logical_join_result
+        graph_read_result = dispatch_graph_read(args)
+        if graph_read_result is not None:
+            return graph_read_result
         if topology_result is not None:
             return topology_result
 
@@ -1191,6 +1236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     lineages=tuple(args.lineages or ()),
                     focuses=tuple(args.focuses or ()),
                     editable=args.edit,
+                    family_mode=args.families,
                     port=args.port,
                     open_browser=not args.no_open,
                 )
@@ -1776,6 +1822,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "search":
             search_arguments = {
+                "family_mode": None if args.families == "off" else args.families,
                 "limit": args.limit,
                 "mode": args.mode,
                 "model_path": args.model_path,
@@ -1814,6 +1861,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "grounding":
             grounding_arguments = {
+                "logical_hints": args.logical_hints,
                 "lineage_names": tuple(args.lineages or ()),
                 "source_names": tuple(args.sources or ()),
                 "trace_reference": args.trace_reference,
@@ -1864,6 +1912,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "context" and args.context_command == "build":
             context_arguments = {
+                "logical_hints": args.logical_hints,
                 "seed_limit": args.seed_limit,
                 "max_objects": args.max_objects,
                 "max_joins": args.max_joins,
@@ -1907,6 +1956,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "context" and args.context_command == "prefix":
             prefix_arguments = {
+                "logical_hints": args.logical_hints,
                 "max_objects": args.max_objects,
                 "max_joins": args.max_joins,
                 "max_fields_per_object": args.max_fields_per_object,
@@ -2263,6 +2313,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         KnowledgeFailure,
         LineageFailure,
         LogicalTopologyFailure,
+        ObjectFamilyFailure,
+        ObjectBindingFailure,
+        ContextExpansionFailure,
+        SemanticConceptFailure,
+        LogicalJoinFailure,
+        LogicalEndpointFailure,
         ProviderFailure,
         ReferenceMappingFailure,
         RelationshipFailure,
@@ -2363,6 +2419,14 @@ def _add_workspace_retrieval_scope_arguments(parser: argparse.ArgumentParser) ->
     parser.add_argument("--zone", action="append", dest="zones")
 
 
+def _add_logical_hint_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--logical-hints",
+        choices=("confirmed_only", "confirmed_then_candidates", "include_candidates"),
+        help="Include bounded logical hints for selected objects; disabled by default.",
+    )
+
+
 def _add_annotation_state_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--annotation-state",
@@ -2415,6 +2479,10 @@ def _render_search_results(results: SearchResults, *, output_format: str) -> Non
         graph = f"; graph={hit.source_graph}" if hit.source_graph else ""
         print(f"- {hit.label} [{hit.type}{graph}] score={hit.score}")
         print(f"  Reasons: {', '.join(hit.reasons)}")
+        if hit.family is not None:
+            family = hit.family.to_dict()
+            print(f"  Family: {family['usage']}; {family['member_count']} scoped members; "
+                  "not an executable table. Use family members at the returned revision.")
         if hit.fields:
             fields = ", ".join(f"{field.label} ({field.score})" for field in hit.fields)
             print(f"  Fields: {fields}")
@@ -2464,6 +2532,10 @@ def _render_context(result: ContextResult, *, output_format: str) -> None:
             f"[{join.kind}; {join.state}]"
         )
 
+    if result.logical_hints is not None:
+        print("\n## Stable logical hints")
+        print(canonical_json(result.logical_hints.stable_dict()))
+
     print("\n## Dynamic request")
     print(f"Dynamic hash: {result.dynamic_hash}")
     print(f"Packet hash: {result.packet_hash}")
@@ -2496,6 +2568,9 @@ def _render_context(result: ContextResult, *, output_format: str) -> None:
         f"joins={result.omissions.joins}, paths={result.omissions.paths}; "
         f"reasons={omission_reasons}"
     )
+    if result.logical_hints is not None:
+        print("Logical hint omissions and warnings:")
+        print(canonical_json(result.logical_hints.dynamic_dict()))
     if result.paths:
         print("Expansion paths:")
         for path in result.paths:
@@ -2517,6 +2592,8 @@ def _render_context_diff(payload: dict[str, object], *, output_format: str) -> N
         return
     print(f"Identical: {'yes' if payload['identical'] else 'no'}")
     print(f"Stable changed: {'yes' if payload['stable_changed'] else 'no'}")
+    if "logical_hints_changed" in payload:
+        print(f"Logical hints changed: {'yes' if payload['logical_hints_changed'] else 'no'}")
     print(f"Dynamic changed: {'yes' if payload['dynamic_changed'] else 'no'}")
     print(f"Graph revision changed: {'yes' if payload['graph_revision_changed'] else 'no'}")
     print(f"Scope changed: {'yes' if payload['scope_changed'] else 'no'}")

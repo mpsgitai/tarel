@@ -16,6 +16,9 @@ const state = {
   trace: null,
   traceOnCanvas: false,
   cy: null,
+  familyMode: undefined,
+  familyPages: new Map(),
+  viewRequest: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -33,13 +36,24 @@ async function api(path, payload) {
   return body;
 }
 
-async function load() {
+async function load(familyMode = state.familyMode, focusNames = undefined) {
   setFooter("Loading local artifacts…");
-  state.data = await api("/api/bootstrap");
-  if (state.focusNames === null) {
-    state.focusSelection = state.data.focus_selection;
-    state.focusNames = new Set(state.focusSelection?.focuses || []);
-  }
+  const request = ++state.viewRequest;
+  const focuses = focusNames ?? state.focusSelection?.focuses;
+  const data = familyMode === undefined
+    ? await api("/api/bootstrap")
+    : await api("/api/families/view", {mode: familyMode, ...(focuses ? {focuses} : {})});
+  if (request !== state.viewRequest) return;
+  const nextMode = data.object_families?.mode || null;
+  if (nextMode !== state.familyMode || focusNames !== undefined) state.scopeFilters = null;
+  state.data = data;
+  state.familyMode = nextMode;
+  state.familyPages.clear();
+  if (!data.objects.some(item => item.id === state.selectedId)) state.selectedId = null;
+  if (!data.review.some(item => item.id === state.reviewId)) state.reviewId = null;
+  $("#family-mode").value = nextMode || "";
+  state.focusSelection = state.data.focus_selection;
+  state.focusNames = new Set(state.focusSelection?.focuses || []);
   initializeScopeFilters();
   const params = new URLSearchParams(window.location.search);
   if (params.get("mode") === "lineage") state.canvasMode = "lineage";
@@ -69,6 +83,7 @@ function renderAll() {
   $("#mode").className = `mode-badge${data.editable ? " edit" : ""}`;
   $("#review-badge").textContent = String(data.review.filter(item => ["draft", "review_required", "deferred"].includes(item.state)).length);
   renderLogicalTopologyNotices();
+  renderFamilyNotices();
   renderObjectList();
   renderFocuses();
   renderScopeFilters();
@@ -88,6 +103,14 @@ function renderLogicalTopologyNotices() {
   ).join("");
 }
 
+function renderFamilyNotices() {
+  const summary = state.data.object_families;
+  const container = $("#family-notices");
+  container.hidden = !summary;
+  if (!summary) return;
+  container.innerHTML = `<p><strong>${summary.collapsed_member_count} physical members collapsed</strong><span>${escapeHtml(summary.notice)}</span></p>${summary.stale_graphs.map(graph => `<p><strong>Stale family omitted</strong><span>${escapeHtml(graph)} · Physical objects remain visible.</span></p>`).join("")}`;
+}
+
 function renderObjectList() {
   const needle = $("#object-search").value.trim().toLowerCase();
   const objects = visibleObjects().filter(item =>
@@ -96,12 +119,13 @@ function renderObjectList() {
   );
   $("#object-list").innerHTML = objects.map(item => {
     const memberships = focusMembership(item.id);
-    const logical = item.type === "derived_relation";
+    const logical = ["derived_relation", "object_family"].includes(item.type);
+    const family = item.type === "object_family";
     const objectState = item.state || item.annotation?.state || "missing";
     return `
     <button class="object-row${item.id === state.selectedId ? " is-active" : ""}" data-object="${escapeAttr(item.id)}" draggable="${logical ? "false" : "true"}">
-      <span class="kind-icon">${logical ? "D" : item.type === "view" ? "V" : "T"}</span>
-      <span class="object-copy"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.graph)} · ${escapeHtml(item.namespace)} · ${item.fields.length} fields${memberships.length ? ` · ${memberships.length} focus${memberships.length === 1 ? "" : "es"}` : ""}</small></span>
+      <span class="kind-icon">${family ? "F" : logical ? "D" : item.type === "view" ? "V" : "T"}</span>
+      <span class="object-copy"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.graph)} · ${escapeHtml(item.namespace)} · ${item.fields.length} fields${family ? ` · ${item.object_family.member_count} members` : ""}${memberships.length ? ` · ${memberships.length} focus${memberships.length === 1 ? "" : "es"}` : ""}</small></span>
       <i class="state-dot ${escapeAttr(objectState)}" title="${escapeAttr(objectState)}"></i>
     </button>`;
   }).join("") || '<div class="empty-state"><p>No matching objects.</p></div>';
@@ -141,6 +165,12 @@ function renderFocuses() {
 async function applyFocuses() {
   try {
     setFooter("Loading selected focuses…");
+    if (state.familyMode) {
+      state.trace = null;
+      state.traceOnCanvas = false;
+      await load(state.familyMode, [...state.focusNames].sort());
+      return;
+    }
     state.focusSelection = await api("/api/focus/select", {focuses: [...state.focusNames].sort()});
     state.trace = null;
     state.traceOnCanvas = false;
@@ -156,7 +186,15 @@ async function applyFocuses() {
   }
 }
 
-function clearFocuses() {
+async function clearFocuses() {
+  if (state.familyMode) {
+    try {
+      state.trace = null;
+      state.traceOnCanvas = false;
+      await load(state.familyMode, []);
+    } catch (error) { toast(error.message); setFooter("View unchanged"); }
+    return;
+  }
   state.focusNames.clear();
   state.focusSelection = null;
   state.trace = null;
@@ -274,6 +312,8 @@ function renderGraph() {
       {selector: "node", style: {"background-color": "#181818", "border-color": "#5f5f68", "border-width": 1, "color": "#f4f4f5", "font-family": "Inter, sans-serif", "font-size": 11, "label": "data(label)", "shape": "round-rectangle", "text-max-width": 104, "text-wrap": "ellipsis", "text-valign": "center", "width": 112, "height": 42}},
       {selector: 'node[type = "view"]', style: {"border-color": "#22d3ee"}},
       {selector: 'node[type = "derived_relation"]', style: {"background-color": "#10202a", "border-color": "#2dd4bf", "border-style": "dashed", "shape": "round-tag"}},
+      {selector: 'node[type = "object_family"]', style: {"background-color": "#25213a", "border-color": "#a78bfa", "border-width": 2, "shape": "round-rectangle"}},
+      {selector: 'node[type = "object_family"][state = "candidate"]', style: {"border-style": "dashed"}},
       {selector: 'node[type = "asset"]', style: {"background-color": "#10202a", "border-color": "#22d3ee", "shape": "diamond"}},
       {selector: 'node[type = "procedure"], node[type = "query"], node[type = "script"]', style: {"background-color": "#4a2d73", "border-color": "#d8b4fe", "color": "#faf5ff", "shape": "hexagon"}},
       {selector: 'node[type = "group-system"]', style: {"background-opacity": .05, "border-color": "#6366f1", "border-style": "solid", "border-width": 2, "label": "data(label)", "text-valign": "top", "text-halign": "center", "padding": 34, "shape": "round-rectangle", "font-size": 12}},
@@ -297,7 +337,7 @@ function renderGraph() {
       {selector: ".trace-focus", style: {"opacity": 1, "border-color": "#10b981", "border-width": 3}},
     ],
   });
-  state.cy.on("tap", 'node[type = "table"], node[type = "view"], node[type = "derived_relation"]', event => selectObject(event.target.id()));
+  state.cy.on("tap", 'node[type = "table"], node[type = "view"], node[type = "derived_relation"], node[type = "object_family"]', event => selectObject(event.target.id()));
   state.cy.on("tap", 'node[type = "asset"], node[type = "procedure"], node[type = "query"], node[type = "script"]', event => {
     const reference = event.target.data("reference");
     if (!reference) return;
@@ -438,8 +478,9 @@ function focusSelected() {
   const selected = state.cy.$id(state.selectedId);
   if (!selected.length) return;
   const focus = selected.closedNeighborhood();
+  const visible = focus.union(focus.nodes().ancestors());
   state.cy.elements().removeClass("hidden dimmed zone-focus");
-  state.cy.elements().difference(focus).addClass("hidden");
+  state.cy.elements().difference(visible).addClass("hidden");
   focus.layout({
     name: "concentric",
     animate: false,
@@ -458,8 +499,16 @@ function selectedObject() { return state.data.objects.find(item => item.id === s
 
 function renderInspector() {
   const item = selectedObject();
-  if (!item) return;
+  $("#trace-selected").disabled = !item?.reference;
+  if (!item) {
+    $("#inspector").innerHTML = '<div class="empty-state"><h2>Select an object</h2></div>';
+    return;
+  }
   const connectedEdges = state.data.edges.filter(edge => edge.source === item.id || edge.target === item.id);
+  if (item.type === "object_family") {
+    renderFamilyInspector(item);
+    return;
+  }
   if (item.type === "derived_relation") {
     renderDerivedRelationInspector(item, connectedEdges);
     return;
@@ -489,6 +538,38 @@ function renderInspector() {
     ${semanticImportDiagnostics()}
     ${annotation?.warnings?.length ? `<section class="detail-section"><h3>Warnings</h3><p class="description">${annotation.warnings.map(escapeHtml).join(" · ")}</p></section>` : ""}`;
   $$(".source-semantic-form").forEach(form => form.addEventListener("submit", saveSourceSemantic));
+  mountLogicalMetadata(item);
+}
+
+function renderFamilyInspector(item) {
+  const family = item.object_family;
+  const page = state.familyPages.get(item.id);
+  const hidden = family.hidden_details;
+  $("#inspector").innerHTML = `
+    <div class="inspector-head"><p class="eyebrow">Logical object family · ${escapeHtml(item.graph)}</p><h2>${escapeHtml(item.name)}</h2></div>
+    <section class="detail-section"><div class="fact-grid">${fact("State", stateLabel(family.state))}${fact("Usage", family.usage)}${fact("Scope members", String(family.member_count))}${fact("Namespaces", String(family.namespace_count))}${fact("Grain", family.grain.join(" + ") || "—")}${fact("Revision", shortRevision(family.revision))}</div></section>
+    <p class="logical-warning">Schema compatibility only. Membership does not prove partition disjointness, common business meaning or a family-wide join.${family.usage === "exploratory_only" ? " Exploratory only · validate at runtime." : ""}</p>
+    <section class="detail-section"><h3>Common schema · ${item.fields.length}</h3><div class="logical-field-list">${item.fields.map(logicalOutputFieldCard).join("")}</div></section>
+    <section class="detail-section"><h3>Metadata attributes</h3><p class="semantic-origin">Attribute values are derived only from object names or namespaces and returned with requested members.</p>${family.attributes.map(attribute => `<p class="field-detail"><strong>${escapeHtml(attribute.name)}</strong><span>${escapeHtml(attribute.source)}</span></p>`).join("") || '<p class="semantic-origin">None declared.</p>'}</section>
+    <section class="detail-section"><h3>Collapsed member details</h3><div class="fact-grid">${fact("Relationships", String(hidden.physical_relationships))}${fact("Derived relations", String(hidden.derived_relations))}${fact("Reference mappings", String(hidden.reference_mappings))}${fact("Entity candidates", String(hidden.entity_candidates))}</div><p class="semantic-origin">Disable object families to inspect member annotations, relationships and lineage. Edges are never promoted to family-wide joins.</p></section>
+    <section class="detail-section"><h3>Members · on demand</h3><p class="semantic-origin">Bounded metadata only; no table rows are queried. Page requests are pinned to this family revision and the server workspace and report/cube focus scope.</p><div id="family-member-list">${page ? page.members.map(member => `<article class="family-member"><strong>${escapeHtml(member.reference)}</strong>${Object.entries(member.attributes).map(([name, value]) => `<small>${escapeHtml(name)}: ${escapeHtml(value)}</small>`).join("")}</article>`).join("") || '<p class="semantic-origin">No members in this scope.</p>' : '<p class="semantic-origin">Members have not been loaded.</p>'}</div><div class="family-page-actions">${page ? `<span>${page.offset + (page.members.length ? 1 : 0)}–${page.offset + page.members.length} of ${page.matched_members}</span>${page.offset ? `<button class="quiet-button" data-family-offset="${Math.max(0, page.offset - page.limit)}">Previous</button>` : ""}${page.next_offset !== null ? `<button class="quiet-button" data-family-offset="${page.next_offset}">Next</button>` : ""}` : '<button class="quiet-button" data-family-offset="0">Load members</button>'}</div></section>`;
+  $$("[data-family-offset]").forEach(button => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const scopeRevision = state.data.object_families?.scope_revision;
+      const viewRequest = state.viewRequest;
+      const page = await api("/api/families/members", {
+        graph: item.graph, family_id: family.id, revision: family.revision,
+        mode: state.familyMode, offset: Number(button.dataset.familyOffset), limit: 50,
+        focuses: state.focusSelection?.focuses || [], scope_revision: scopeRevision,
+      });
+      if (viewRequest === state.viewRequest && scopeRevision === state.data.object_families?.scope_revision && page.scope_revision === scopeRevision && state.data.objects.some(current => current.id === item.id && current.object_family?.revision === family.revision)) {
+        state.familyPages.set(item.id, page);
+        if (state.selectedId === item.id) renderFamilyInspector(item);
+      }
+    } catch (error) { toast(error.message); button.disabled = false; }
+  }));
+  mountLogicalMetadata(item);
 }
 
 function renderDerivedRelationInspector(item, connectedEdges) {
@@ -508,6 +589,7 @@ function renderDerivedRelationInspector(item, connectedEdges) {
     ${derivationEvidenceCards(evidence)}
     ${referenceMappingCards(connectedEdges.filter(edge => edge.type === "reference_mapping"))}
     <section class="detail-section"><p class="semantic-origin">${derives.length} source-to-derived topology edge${derives.length === 1 ? "" : "s"} projected without changing the physical graph.</p></section>`;
+  mountLogicalMetadata(item);
 }
 
 function logicalOutputFieldCard(field) {
@@ -705,6 +787,7 @@ function objectForZoneMember(member) {
 }
 
 async function saveZone(workspace, system, zone, members) {
+  if (state.familyMode) return toast("Disable object families before editing zones.");
   if (!state.data.editable) return toast("Restart with --edit to change zones.");
   try {
     await api("/api/zone/save", {workspace: workspace.name, workspace_revision: workspace.revision, system: system.name, area: system.areas[0]?.name || "discovered", zone: zone.name, description: zone.description, members});
@@ -922,6 +1005,7 @@ function showTraceOnCanvas() {
 }
 
 function openZoneDialog() {
+  if (state.familyMode) return toast("Disable object families before editing zones.");
   if (!state.data.editable) return toast("Restart with --edit to create zones.");
   const selected = selectedObject();
   if (selected?.type === "derived_relation") return toast("Logical objects are read-only projections and cannot be zone members.");
@@ -929,6 +1013,7 @@ function openZoneDialog() {
 }
 
 async function createZone(event) {
+  if (state.familyMode) { event.preventDefault(); return toast("Disable object families before editing zones."); }
   event.preventDefault(); const selected = selectedObject(); if (!selected) return toast("Select an object first.");
   if (selected.type === "derived_relation") return toast("Logical objects are read-only projections and cannot be zone members.");
   const values = Object.fromEntries(new FormData(event.currentTarget));
@@ -991,6 +1076,13 @@ function setFooter(value) { $("#footer-status").textContent = value; }
 function toast(value) { const element = $("#toast"); element.textContent = value; element.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { element.hidden = true; }, 4200); }
 
 $("#object-search").addEventListener("input", renderObjectList);
+$("#family-mode").addEventListener("change", async event => {
+  const control = event.target;
+  control.disabled = true;
+  try { await load(control.value || null); }
+  catch (error) { control.value = state.familyMode || ""; toast(error.message); setFooter("View unchanged"); }
+  finally { control.disabled = false; }
+});
 $("#focus-search").addEventListener("input", renderFocuses);
 $("#focus-selected-only").addEventListener("change", event => {
   state.focusSelectedOnly = event.target.checked;

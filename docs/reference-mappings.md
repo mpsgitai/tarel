@@ -176,6 +176,57 @@ tarel.reference_mapping.decide(
 from a trusted caller. New imports must be unreviewed, graph-bound candidates. The normal discovery
 promotion path is preferred because it preserves the complete resumable provenance.
 
+## Offer mappings in ordinary agent context
+
+Dedicated `reference_mapping.find` remains available. To make an existing correspondence visible
+alongside selected physical tables, opt into compact hints:
+
+```bash
+tarel context build warehouse "country region" \
+  --logical-hints confirmed_then_candidates --format json
+```
+
+```python
+packet = tarel.context.graph(
+    "warehouse",
+    "country region",
+    logical_hints="confirmed_then_candidates",
+)
+for hint in packet.stable_dict()["logical_hints"]["items"]:
+    if hint["kind"] != "reference_mapping":
+        continue
+    print(hint["source"]["reference"], hint["target"]["reference"], hint["usage"])
+    matches = tarel.reference_mapping.find(
+        hint["artifact"]["graph"],
+        source=hint["source"]["reference"],
+        target=hint["target"]["reference"],
+        mode="confirmed_then_candidates",
+    )
+    current = next(
+        (match.candidate for match in matches if match.candidate.id == hint["artifact"]["id"]),
+        None,
+    )
+    if current is None or current.revision != hint["artifact"]["revision"]:
+        raise RuntimeError("Mapping or graph changed; recompile context before use.")
+    # Resolve the private mapping through the caller's authorized manifest store.
+    # Runtime-validate exploratory hints before applying them.
+```
+
+At least one endpoint's parent object must already be selected. Both endpoints must be inside the
+explicit namespace or workspace scope; an unselected endpoint contributes only its reference,
+not another selected table or its schema. No mapping is turned into a join or traversal edge.
+Use `find` to recheck current graph binding and review policy before use; `load` alone retrieves
+an audit artifact and does not establish that its physical graph binding is still current.
+
+Hints contain direction, cardinality, state/usage, mapping count, support/challenge aggregates, and
+candidate ID/revision. They exclude mapping values, manifest/query hashes, executor details, and
+free-form reasons. `confirmed_only` excludes unreviewed mappings; `confirmed_then_candidates`
+prefers reviewed mappings for the same directed pair; `include_candidates` retains all active
+candidates. Rejected or stale mappings are omitted, with separate omission counts and stale
+warnings. Workspace context, prefixes, and grounding use the same policy. Hints are off by default
+and are removed first if the complete context exceeds its character budget. See the
+[context contract](context-contract.md#optional-logical-hints) for caching and freshness limits.
+
 ## GUI and boundaries
 
 The browser projects mappings as directed edges between their physical parent objects. Dashed

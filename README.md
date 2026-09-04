@@ -60,6 +60,15 @@ knowledge, review schema drift, and move from a report or measure back through E
 - **Describes typed logical relations** — an experimental graph-bound sidecar records reviewed
   `extract`/`explode` plans, passthrough fields, output schema, grain, and bounded evidence without
   storing executable code or source rows. See [Logical topology](docs/logical-topology.md).
+- **Groups compatible physical objects** — optional, explicitly proposed object families expose
+  reviewed metadata and bounded member pages without changing the physical graph or executing a
+  query. Logical-name search, optional LLM batches and lazy member reads are included.
+  See [Object families](docs/object-families.md).
+- **Adds optional logical context** — [object bindings](docs/object-value-bindings.md),
+  [logical joins](docs/logical-join-discovery.md), [concept hierarchies](docs/semantic-concepts.md)
+  and [targeted context expansion](docs/context-expansion.md) remain small, revision-pinned
+  metadata contracts. The harness executes; TAREL records evidence and review state.
+  See the [validation report and GUI examples](docs/logical-features-validation.md).
 - **Builds reviewed semantics** — models or coding agents propose descriptions, roles, grain,
   synonyms, field semantics, and possible joins; people validate, edit, defer, or reject them.
 - **Offers entity hypotheses** — graph-bound normalization candidates remain separate from joins,
@@ -307,6 +316,11 @@ expansion paths, retrieval reasons, warnings, review state, hashes, and every om
 come before question-specific retrieval state so Codex, Claude Code, Pi, or another harness can use
 provider prefix caching without TAREL depending on that provider.
 
+Opt in with `--logical-hints confirmed_only` (SDK: `logical_hints="confirmed_only"`) to include
+compact logical-relation, object-family and reference-mapping metadata for selected objects. Exploratory
+hints require an explicit candidate policy; no queries, mapping values, or additional graph
+expansion are introduced. See the [context contract](docs/context-contract.md#optional-logical-hints).
+
 ## Sources, systems, and focused exploration
 
 A **source** gives a reviewed connector a stable logical name without persisting its URL. A
@@ -346,6 +360,7 @@ activates the package explicitly.
 | `tarel source` | Manage logical sources; probe, discover, build, refresh, and enrich by policy |
 | `tarel connector` | Inspect, profile, sample, and scaffold read-only adapters |
 | `tarel graph` | Build, import, refresh, inspect, and batch-annotate graphs |
+| `tarel family` | Propose, review, and explicitly page schema-compatible object families |
 | `tarel annotation` | Plan, apply, edit, and review semantic proposals |
 | `tarel knowledge` | Attach bounded Markdown/TXT context to annotation scopes |
 | `tarel relationship` | Add, discover, probe, and review joins |
@@ -404,7 +419,7 @@ Git and agent-facing context.
 
 TAREL is pre-alpha. Its local file-first core supports concurrent reads and one writer per document.
 Shared database-backed stores, authorization, coordinated multi-writer operation, additional source
-families, and standard semantic-model interchange belong to optional future adapters.
+connectors, and standard semantic-model interchange belong to optional future adapters.
 
 TAREL does not execute analytical answer queries, replace a warehouse, or silently promote model
 output to truth. It compiles the map and evidence that humans and agents need to work safely.

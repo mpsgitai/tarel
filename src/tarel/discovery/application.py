@@ -12,6 +12,7 @@ from typing import Any
 
 from tarel.discovery.contracts import (
     DISCOVERY_CONTRACT_VERSION,
+    DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION,
     DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION,
     DiscoveryCandidate,
     DiscoveryFailure,
@@ -32,6 +33,7 @@ from tarel.discovery.identity import (
     IdentityInspection,
     IdentityInventoryManifest,
 )
+from tarel.discovery.logical_program import LogicalJoinProgram
 from tarel.discovery.store import FileDiscoveryStore
 from tarel.entity_resolution.application import (
     import_entity_resolution_candidate_use_case,
@@ -45,6 +47,7 @@ from tarel.entity_resolution.discovery import entity_candidate_from_discovery
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphNode
 from tarel.graph.revision import graph_revision
 from tarel.graph.store import FileGraphStore
+from tarel.logical_joins.contracts import LogicalJoin
 from tarel.providers.contracts import Message, ProviderFailure, StructuredRequest
 from tarel.providers.host import load_provider
 from tarel.reference_mapping.application import (
@@ -64,6 +67,8 @@ from tarel.retrieval.bm25 import rank_bm25
 from tarel.retrieval.contracts import RetrievalDocument
 from tarel.runtime import TarelRuntime
 from tarel.sources.store import FileSourceStore
+from tarel.topology.endpoint_contracts import LogicalEndpointFailure
+from tarel.topology.endpoints import resolve_logical_endpoint_for_graph_use_case
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +100,7 @@ class DiscoveryPromotionResult:
     path: Path
     entity_candidates: tuple[EntityResolutionCandidate, ...] = ()
     reference_mapping_candidates: tuple[ReferenceMappingCandidate, ...] = ()
+    logical_joins: tuple[LogicalJoin, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,10 +185,13 @@ def start_discovery_run_use_case(
     candidate_budget: int = 20,
     advisor_provider: str | None = None,
     identity_inspection: bool = False,
+    logical_endpoints: bool = False,
     scope_mode: str = "global_population",
     run_id: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> DiscoveryChangeResult:
+    if type(logical_endpoints) is not bool or (logical_endpoints and kind != "join_discovery"):
+        raise DiscoveryFailure("invalid_discovery", "Logical endpoints are an opt-in join mode.")
     if identity_inspection and (kind != "entity_matching" or len(source_names) != 1):
         raise DiscoveryFailure(
             "invalid_discovery",
@@ -212,6 +221,8 @@ def start_discovery_run_use_case(
             "candidates": [],
             "completion_reason": None,
             "contract_version": (
+                DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION
+                if logical_endpoints else
                 DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION
                 if kind == "reference_mapping"
                 else DISCOVERY_CONTRACT_VERSION
@@ -408,7 +419,7 @@ def submit_discovery_step_use_case(
             raise DiscoveryFailure(
                 "invalid_discovery", "propose_candidate requires a program object."
             )
-        _validate_program_bindings(graph, program)
+        _validate_program_bindings(graph, program, runtime=runtime)
     changed = apply_discovery_action(run, action=action, actor=actor, payload=payload)
     return DiscoveryChangeResult(run=changed, path=store.save(changed))
 
@@ -523,6 +534,21 @@ def promote_discovery_candidates_use_case(
         raise DiscoveryFailure(
             "invalid_discovery_promotion",
             "Join promotion does not accept entity supersede semantics.",
+        )
+
+    if any(isinstance(candidate.program, LogicalJoinProgram) for candidate in selected):
+        if len(selected) != 1 or not isinstance(selected[0].program, LogicalJoinProgram):
+            raise DiscoveryFailure(
+                "invalid_discovery_promotion",
+                "Promote one logical join at a time, without physical joins.",
+            )
+        from tarel.logical_joins.application import promote_logical_join_use_case
+
+        join, path = promote_logical_join_use_case(
+            run, selected[0], graph, reason=reason, runtime=runtime,
+        )
+        return DiscoveryPromotionResult(
+            run=run, graph=graph, edges=(), path=path, logical_joins=(join,),
         )
 
     updated = graph
@@ -666,7 +692,10 @@ def advise_discovery_run_use_case(
         StructuredRequest(
             messages=_advice_messages(run, graph, requested),
             schema_name="TarelDiscoveryAdvice",
-            schema=_advice_schema(run.kind, requested),
+            schema=_advice_schema(
+                run.kind, requested,
+                logical_endpoints=run.contract_version == DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION,
+            ),
             model=model,
             temperature=0.0,
             max_output_tokens=4_000,
@@ -693,7 +722,7 @@ def advise_discovery_run_use_case(
                 "invalid_provider_response",
                 "Discovery advisor proposal requires a program object.",
             )
-        _validate_program_bindings(graph, program)
+        _validate_program_bindings(graph, program, runtime=runtime)
         current = apply_discovery_action(
             current,
             action="propose_candidate",
@@ -725,10 +754,19 @@ def find_discovery_candidates_use_case(
     for run in list_discovery_runs_use_case(
         graph_name=graph_name, kind=kind, runtime=runtime
     ):
-        current_revision = graph_revision(_graph_store(runtime).load(run.graph_name))
+        current_graph = _graph_store(runtime).load(run.graph_name)
+        current_revision = graph_revision(current_graph)
         if run.graph_revision != current_revision:
             continue
         for candidate in run.candidates:
+            if isinstance(candidate.program, LogicalJoinProgram):
+                try:
+                    _validate_logical_program(current_graph, candidate.program, runtime=runtime)
+                except LogicalEndpointFailure as exc:
+                    if exc.code in {"stale_logical_endpoint", "logical_endpoint_policy_excluded",
+                                    "logical_endpoint_not_found"}:
+                        continue
+                    raise
             if candidate.state == "selected" or (
                 include_exploratory and candidate.state != "rejected"
             ):
@@ -756,8 +794,13 @@ def find_discovery_candidates_use_case(
     )
 
 
-def _validate_program_bindings(graph: GraphDocument, program: dict[str, Any]) -> None:
+def _validate_program_bindings(
+    graph: GraphDocument, program: dict[str, Any], *, runtime: TarelRuntime | None = None,
+) -> None:
     typed = discovery_program_from_dict(program)
+    if isinstance(typed, LogicalJoinProgram):
+        _validate_logical_program(graph, typed, runtime=runtime)
+        return
     if isinstance(typed, ReferenceMappingProgram):
         field_references = (typed.source_field, typed.target_field)
     else:
@@ -803,7 +846,19 @@ def _validate_current_graph(
             "discovery_graph_revision_mismatch",
             "The discovery run does not match the current graph revision.",
         )
+    for candidate in run.candidates:
+        if isinstance(candidate.program, LogicalJoinProgram):
+            _validate_logical_program(graph, candidate.program, runtime=runtime)
     return graph
+
+
+def _validate_logical_program(
+    graph: GraphDocument, program: LogicalJoinProgram, *, runtime: TarelRuntime | None,
+) -> None:
+    for endpoint in (*program.source_endpoints, *program.target_endpoints):
+        resolve_logical_endpoint_for_graph_use_case(
+            graph, endpoint, mode="include_candidates", runtime=runtime,
+        )
 
 
 def _validate_sources(
@@ -1142,6 +1197,19 @@ def _label_tokens(label: str) -> tuple[str, ...]:
 def _retrieval_document(match: DiscoveryMatch) -> RetrievalDocument:
     candidate = match.candidate
     program = candidate.program
+    if isinstance(program, LogicalJoinProgram):
+        text = "\n".join((
+            "Logical join discovery", match.question or "", candidate.state,
+            *(f"{item.kind} {item.object_id} {item.field_id}"
+              for item in (*program.source_endpoints, *program.target_endpoints)),
+            *(f"{item.phase} {item.evidence_level} coverage "
+              f"{item.metrics.coverage if item.metrics else 'unknown'}"
+              for item in candidate.observations),
+        ))
+        return RetrievalDocument(
+            id=f"{match.run_id}:{candidate.id}", object_id=match.run_id,
+            field_id=None, namespace=match.graph_name, label=candidate.id, text=text,
+        )
     if isinstance(program, ReferenceMappingProgram):
         evidence = [
             (
@@ -1262,7 +1330,7 @@ def _advice_messages(
     )
 
 
-def _advice_schema(kind: str, count: int) -> dict[str, object]:
+def _advice_schema(kind: str, count: int, *, logical_endpoints: bool = False) -> dict[str, object]:
     if kind == "reference_mapping":
         program: dict[str, object] = {
             "additionalProperties": False,
@@ -1359,6 +1427,27 @@ def _advice_schema(kind: str, count: int) -> dict[str, object]:
         ],
         "type": "object",
     }
+    if logical_endpoints:
+        endpoint = {
+            "type": "object", "additionalProperties": False,
+            "required": ["kind", "object_id", "field_id", "revision"],
+            "properties": {
+                "kind": {"enum": ["graph_field", "derived_field", "family_field",
+                                  "family_attribute", "reference_mapping"]},
+                "object_id": {"type": "string"}, "field_id": {"type": "string"},
+                "revision": {"type": "string"},
+            },
+        }
+        logical = {
+            "type": "object", "additionalProperties": False,
+            "required": ["kind", "comparison", "source_endpoints", "target_endpoints"],
+            "properties": {"kind": {"enum": ["join_discovery"]}, "comparison": {"enum": ["exact"]},
+                           "source_endpoints": {"type": "array", "items": endpoint,
+                                                "minItems": 1, "maxItems": 3},
+                           "target_endpoints": {"type": "array", "items": endpoint,
+                                                "minItems": 1, "maxItems": 3}},
+        }
+        return _proposal_advice_schema({"anyOf": [program, logical]}, count)
     return _proposal_advice_schema(program, count)
 
 

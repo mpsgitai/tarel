@@ -46,6 +46,8 @@ def add_discovery_commands(
     start.add_argument("--probe-budget", type=int)
     start.add_argument("--candidate-budget", type=int)
     start.add_argument("--advisor-provider")
+    start.add_argument("--logical-endpoints", action="store_true",
+                       help="Opt in to revision-pinned logical join endpoints (v0.3).")
     start.add_argument(
         "--identity-inspection",
         action="store_true",
@@ -168,6 +170,7 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
             candidate_budget=args.candidate_budget or preset_candidate,
             advisor_provider=args.advisor_provider,
             identity_inspection=args.identity_inspection,
+            logical_endpoints=args.logical_endpoints,
             scope_mode=args.scope_mode,
             run_id=args.run_id,
         )
@@ -240,6 +243,8 @@ def dispatch_discovery(args: argparse.Namespace) -> int | None:
                     for candidate in result.reference_mapping_candidates
                 ],
                 "run_id": result.run.id,
+                **({"logical_joins": [item.to_dict() for item in result.logical_joins]}
+                   if result.logical_joins else {}),
             },
             output_format=args.output_format,
         )

@@ -10,13 +10,16 @@ from pathlib import Path
 from typing import Any
 
 from tarel.lineage.contracts import LineageFailure
+from tarel.lineage.runtime_logical import RuntimeLogicalOperation
 
 _INPUT_VERSION = "tarel.runtime-lineage-input.v0.1"
 _INPUT_VERSION_V2 = "tarel.runtime-lineage-input.v0.2"
-_INPUT_VERSIONS = frozenset({_INPUT_VERSION, _INPUT_VERSION_V2})
+_INPUT_VERSION_V3 = "tarel.runtime-lineage-input.v0.3"
+_INPUT_VERSIONS = frozenset({_INPUT_VERSION, _INPUT_VERSION_V2, _INPUT_VERSION_V3})
 _DOCUMENT_VERSION = "tarel.runtime-lineage.v0.1"
 _DOCUMENT_VERSION_V2 = "tarel.runtime-lineage.v0.2"
-_DOCUMENT_VERSIONS = frozenset({_DOCUMENT_VERSION, _DOCUMENT_VERSION_V2})
+_DOCUMENT_VERSION_V3 = "tarel.runtime-lineage.v0.3"
+_DOCUMENT_VERSIONS = frozenset({_DOCUMENT_VERSION, _DOCUMENT_VERSION_V2, _DOCUMENT_VERSION_V3})
 _DIALECTS = frozenset({"duckdb", "postgresql", "sqlite", "sqlserver"})
 _SQL_STATUSES = frozenset({"failed", "succeeded"})
 _MONGO_OPERATIONS = frozenset({"aggregate", "find"})
@@ -478,7 +481,7 @@ class RuntimeFederatedQueryInput:
         *,
         contract_version: str = _INPUT_VERSION,
     ) -> RuntimeFederatedQueryInput:
-        version_two = contract_version == _INPUT_VERSION_V2
+        version_two = contract_version in {_INPUT_VERSION_V2, _INPUT_VERSION_V3}
         analysis_fields = {"analysis", "executor", "inputs"}
         _fields(
             data,
@@ -663,6 +666,7 @@ RuntimeEventInput = (
     | RuntimeMongoAttemptInput
     | RuntimeFederatedQueryInput
     | RuntimePythonAnalysisInput
+    | RuntimeLogicalOperation
 )
 
 
@@ -878,7 +882,7 @@ class RuntimeFederatedQuery:
     ) -> RuntimeFederatedQuery:
         input_version = (
             _INPUT_VERSION_V2
-            if contract_version == _DOCUMENT_VERSION_V2
+            if contract_version in {_DOCUMENT_VERSION_V2, _DOCUMENT_VERSION_V3}
             else _INPUT_VERSION
         )
         event = RuntimeFederatedQueryInput.from_dict(
@@ -945,6 +949,7 @@ class RuntimePythonAnalysis:
 
 RuntimeEvent = (
     RuntimeSQLAttempt | RuntimeMongoAttempt | RuntimeFederatedQuery | RuntimePythonAnalysis
+    | RuntimeLogicalOperation
 )
 
 
@@ -1011,14 +1016,19 @@ class RuntimeTraceCall:
     sequence: int
     kind: str
     status: str
+    operation: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "call_id": self.call_id,
             "kind": self.kind,
             "sequence": self.sequence,
             "status": self.status,
         }
+        if self.operation is not None:
+            payload["operation"] = self.operation
+            payload["artifact_validation"] = "caller_claimed"
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -1082,6 +1092,7 @@ def runtime_lineage_document_version(input_contract_version: str) -> str:
     versions = {
         _INPUT_VERSION: _DOCUMENT_VERSION,
         _INPUT_VERSION_V2: _DOCUMENT_VERSION_V2,
+        _INPUT_VERSION_V3: _DOCUMENT_VERSION_V3,
     }
     try:
         return versions[input_contract_version]
@@ -1113,6 +1124,7 @@ def _validate_event_identity(
                 RuntimeFederatedQuery,
                 RuntimePythonAnalysisInput,
                 RuntimePythonAnalysis,
+                RuntimeLogicalOperation,
             ),
         ):
             frames = {item.call_id: item for item in event.input_frames}
@@ -1153,8 +1165,10 @@ def _runtime_input_event(
             data,
             contract_version=contract_version,
         )
-    if kind == "python_analysis" and contract_version == _INPUT_VERSION_V2:
+    if kind == "python_analysis" and contract_version in {_INPUT_VERSION_V2, _INPUT_VERSION_V3}:
         return RuntimePythonAnalysisInput.from_dict(data)
+    if kind == "logical_operation" and contract_version == _INPUT_VERSION_V3:
+        return RuntimeLogicalOperation.from_dict(data)
     raise LineageFailure("invalid_runtime_lineage", "Unsupported runtime event kind.")
 
 
@@ -1173,8 +1187,12 @@ def _runtime_document_event(
             data,
             contract_version=contract_version,
         )
-    if kind == "python_analysis" and contract_version == _DOCUMENT_VERSION_V2:
+    if kind == "python_analysis" and contract_version in {
+        _DOCUMENT_VERSION_V2, _DOCUMENT_VERSION_V3,
+    }:
         return RuntimePythonAnalysis.from_dict(data)
+    if kind == "logical_operation" and contract_version == _DOCUMENT_VERSION_V3:
+        return RuntimeLogicalOperation.from_dict(data)
     raise LineageFailure("invalid_runtime_lineage", "Unsupported runtime event kind.")
 
 

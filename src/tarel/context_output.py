@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 
 from tarel.annotations.states import DEFAULT_CONTEXT_ANNOTATION_STATES
+from tarel.context_hints import LogicalContextHints
 
 DEFAULT_MAX_CONTEXT_CHARACTERS = 24_000
 CONTEXT_CONTRACT_VERSION = "tarel.context.v0.2"
@@ -222,9 +223,10 @@ class ContextPacket:
     retrieval_mode: str = "lexical"
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES
     contract_version: str = CONTEXT_CONTRACT_VERSION
+    logical_hints: LogicalContextHints | None = None
 
     def stable_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "graph": {"name": self.graph, "revision": self.graph_revision},
             "annotation_states": sorted(self.annotation_states),
             "joins": [
@@ -236,9 +238,12 @@ class ContextPacket:
             ],
             "scope": self.scope.to_dict(),
         }
+        if self.logical_hints is not None:
+            payload["logical_hints"] = self.logical_hints.stable_dict()
+        return payload
 
     def dynamic_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "budgets": {
                 "max_characters": self.max_characters,
                 "max_fields_per_object": self.max_fields_per_object,
@@ -255,6 +260,9 @@ class ContextPacket:
             "retrieval": {"mode": self.retrieval_mode, "terms": list(self.terms)},
             "selection": [item.selection_dict() for item in self.objects],
         }
+        if self.logical_hints is not None:
+            payload["logical_hints"] = self.logical_hints.dynamic_dict()
+        return payload
 
     def to_dict(self) -> dict[str, object]:
         stable = self.stable_dict()

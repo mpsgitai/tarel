@@ -43,13 +43,14 @@ class ContextPacketDiff:
     joins_added: tuple[str, ...]
     joins_removed: tuple[str, ...]
     joins_changed: tuple[str, ...]
+    logical_hints_changed: bool | None = None
 
     @property
     def identical(self) -> bool:
         return self.left_packet_hash == self.right_packet_hash
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "contracts": {"left": self.left_contract, "right": self.right_contract},
             "dynamic_changed": self.dynamic_changed,
             "graph_revision_changed": self.graph_revision_changed,
@@ -72,6 +73,9 @@ class ContextPacketDiff:
             "scope_changed": self.scope_changed,
             "stable_changed": self.stable_changed,
         }
+        if self.logical_hints_changed is not None:
+            payload["logical_hints_changed"] = self.logical_hints_changed
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +191,11 @@ def diff_context_packets(
         joins_added=tuple(sorted(right_joins.keys() - left_joins.keys())),
         joins_removed=tuple(sorted(left_joins.keys() - right_joins.keys())),
         joins_changed=_changed_entities(left_joins, right_joins),
+        logical_hints_changed=(
+            left.stable.get("logical_hints") != right.stable.get("logical_hints")
+            if "logical_hints" in left.stable or "logical_hints" in right.stable
+            else None
+        ),
     )
 
 
@@ -202,6 +211,19 @@ def context_packet_impact(
             f"Context packet belongs to graph {packet_graph}, not {graph.name}.",
         )
     current_revision = graph_revision(graph)
+    if "logical_hints" in packet.stable:
+        return ContextPacketImpact(
+            status="unknown",
+            graph=graph.name,
+            packet_revision=packet_revision,
+            current_revision=current_revision,
+            exact=False,
+            matched_changes=(),
+            reason=(
+                "Graph change reports do not validate logical sidecar freshness. "
+                "Recompile with the same logical-hint policy and compare packet hashes."
+            ),
+        )
     if packet_revision == current_revision:
         return ContextPacketImpact(
             status="current",

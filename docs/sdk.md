@@ -4,6 +4,28 @@ The experimental SDK is a thin Python surface over the same application use case
 does not invoke the CLI through subprocesses and it does not maintain a second implementation of
 search, context, lineage, focus, or annotation behavior.
 
+## Optional logical metadata APIs
+
+Existing APIs keep their behavior. The following experimental additions are opt-in, except that
+normal search now also finds current **reviewed** family names (disable with `family_mode=None`).
+None of these methods executes SQL/Python or resolves private source credentials.
+
+| Need | SDK entry point | CLI and detailed contract |
+| --- | --- | --- |
+| Find logical family names | `search.graph(..., family_mode="include_candidates")` | [Object families](object-families.md) |
+| LLM family proposals | `families.plan(...); families.run(..., resume=True)` | [Family batches](family-proposals.md) |
+| Selective graph pages | `graph.header/objects/slice/rebuild_index` | [Graph storage](graph-storage.md) |
+| Families with report/cube scope | `view.graph(..., family_mode="confirmed_only", focuses=("report",))` | [Family + Focus](family-focus.md) |
+| Value → physical object routing | `bindings.import_document/find/resolve/review` | [Object bindings](object-value-bindings.md) |
+| Logical endpoint discovery | `discovery.start("join_discovery", ..., logical_endpoints=True)`; `logical_joins.find/review` | [Logical joins](logical-join-discovery.md) |
+| Code/label concepts and parent hierarchy | `concepts.import_document/find/review` | [Semantic concepts](semantic-concepts.md) |
+| Bounded metadata delta | `context.expand(packet, targets, inputs=...)` | [Context expansion](context-expansion.md) |
+| Observed logical transformations | `lineage.import_runtime(...)` with runtime v0.3 `logical_operation` | [Runtime lineage](runtime-lineage.md) |
+
+`confirmed_only` is the default at new retrieval/resolution boundaries. A human review of a rule
+never overrides an unreviewed or stale endpoint dependency. Explicit candidate access returns
+`exploratory_only`; a runtime success is evidence, not implicit human confirmation.
+
 ## Open a local TAREL state directory
 
 An embedded application must select the state directory explicitly:
@@ -328,6 +350,37 @@ resulting annotation metadata records only the selected document ID, scope,
 state, revision, character count, and truncation flag. Knowledge content is untrusted reference
 data and is explicitly separated from provider instructions.
 
+## Group physical objects into an optional family
+
+The experimental `families` API records explicitly proposed, exact-schema-compatible members from
+one graph. It does not discover name patterns, read rows, infer disjointness, or execute a union.
+
+```python
+from tarel.object_families import FamilyAttribute
+
+family = tarel.families.propose(
+    "commerce", "monthly-sales", name="monthly_sales",
+    members=("sales.sales_2024_01", "sales.sales_2024_02"),
+    grain=("month", "sale_id"),
+    attributes=(FamilyAttribute(name="month", source="object_name", prefix="sales_"),),
+)
+page = tarel.families.members(
+    "commerce", family.id, expected_revision=family.revision,
+    mode="include_candidates", filters={"month": "2024_01"}, limit=20,
+)
+print(page.to_dict())
+```
+
+`list(graph)` returns summaries without member IDs; `load(graph, id)` returns the stored audit
+declaration without asserting current graph binding. `members` validates the current physical
+revision and review policy, requires a pinned artifact revision, and returns at most 100 references.
+Its default `confirmed_only` policy excludes candidates; `include_candidates` explicitly permits
+exploratory use. Rejected or stale families cannot be resolved. Human `review` also requires
+`expected_revision`; altered membership requires a new family ID.
+
+See [Object families](object-families.md) for complete CLI/SDK examples, schema and attribute rules,
+scoped pagination, import/export, and the distinction between declared grain and measured evidence.
+
 ## Retrieve context
 
 ```python
@@ -355,6 +408,58 @@ prompt_json = packet.canonical_json()
 Returned objects are the same typed contracts used internally by the CLI. Their `to_dict()` and
 `canonical_json()` projections are deterministic and contain no timestamps or implicit runtime
 paths.
+
+### Include optional logical hints
+
+The normal context path can expose logical relations, object families and reference mappings without
+adding physical objects, joins, source calls, or a new index:
+
+```python
+packet = tarel.context.graph(
+    "commerce",
+    "orders and items",
+    logical_hints="confirmed_only",
+    max_characters=24_000,
+)
+print(packet.stable_dict()["logical_hints"])
+print(packet.dynamic_dict()["logical_hints"])
+
+bundle = tarel.grounding.context(
+    "orders and items",
+    graph="commerce",
+    logical_hints="confirmed_then_candidates",
+)
+print(bundle.stable_prompt())
+```
+
+`logical_hints=None` is the default and does not read sidecars or add packet sections. The same
+keyword is supported by `context.workspace`, `prefix_graph`, `prefix_workspace`, and
+`grounding.context`/`grounding.find`. CLI equivalents use `--logical-hints POLICY` on
+`context build`, `context prefix`, or `grounding`.
+
+`confirmed_only` offers reviewed artifacts only. `confirmed_then_candidates` also offers derived
+and family candidates, plus reference-mapping candidates where no reviewed mapping exists for the directed
+pair. `include_candidates` offers all active artifacts. Unreviewed hints are explicitly
+`exploratory_only` and require runtime validation; rejected artifacts are never usable hints.
+
+Derived hints require an already selected source object. Mapping hints must touch a selected
+object, with both endpoints inside the explicit namespace/workspace scope. An unselected mapping
+endpoint remains a reference, not an expanded object. The projection contains schema/grain or
+directed endpoints, aggregate evidence, and artifact ID/revision—not samples, SQL, mapping values,
+manifest/query hashes, or free-form reasons. Load the current referenced artifact before use;
+execution and private manifest resolution remain the harness's responsibility.
+
+Family hints reference only already selected member objects. Their member count is restricted to
+the explicit namespace/workspace scope, and `schema_only` evidence does not claim data coverage or
+safe aggregation. Full membership, injected values and affix rules stay outside the packet; resolve
+a bounded page explicitly with `families.members`.
+
+Hint items are removed before physical fields under the existing character budget. Dynamic hint
+metadata reports scope, policy, rejected, stale, and budget omissions; stale artifacts generate a
+warning. See [the context contract](context-contract.md#optional-logical-hints),
+[logical topology](logical-topology.md#offer-a-compact-hint-in-agent-context), and
+[reference mappings](reference-mappings.md#offer-mappings-in-ordinary-agent-context), and
+[object families](object-families.md#context-and-gui-boundaries).
 
 ## Search and trace lineage
 
@@ -726,6 +831,11 @@ index, context packet, or annotation evidence.
 These operations let an embedding application reuse stable context safely instead of guessing from
 file timestamps.
 
+Packets with logical hints include projected hint content and artifact revisions in their stable
+hash/cache key. `impact` returns conservative `unknown` for such packets because a physical
+graph-refresh report cannot establish sidecar freshness; recompile and compare instead. A saved
+packet is a snapshot, not a live sidecar reference.
+
 ### Choose a prompt-caching strategy
 
 For a short context window or a one-off request, compile only a retrieval snippet and place the
@@ -773,7 +883,8 @@ cache_key = cached_zone.packet_hash
 `prefix_graph(...)` provides the equivalent graph or schema scope. Prefix packets report every
 object, field, and join omission. Their bytes change only when the selected scope, budgets, visible
 annotation states, graph revisions, semantics, or relationships change—not when the user asks a
-new question.
+new question. With `logical_hints` enabled, selected hint metadata, policy, revisions, and omission
+state also affect the packet identity.
 
 The optional local model remains an explicit operation:
 

@@ -18,6 +18,16 @@ def graph_revision(graph: GraphDocument) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def physical_schema_revision(fields: tuple[tuple[str, str, bool], ...]) -> str:
+    """Exact typed field-schema identity, independent of graph and field ordering."""
+    payload = json.dumps(
+        sorted(fields, key=lambda item: item[0]),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def physical_graph_revision(graph: GraphDocument) -> str:
     """Hash physical object/field identity without annotations or inferred edges."""
     nodes = []
