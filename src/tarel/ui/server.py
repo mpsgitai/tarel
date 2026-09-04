@@ -76,6 +76,7 @@ from tarel.topology.application import project_logical_topologies_for_graphs_use
 from tarel.topology.contracts import LogicalTopologyFailure
 from tarel.topology.endpoint_contracts import LogicalEndpointFailure
 from tarel.ui.logical_metadata import LogicalMetadataFailure, logical_metadata_use_case
+from tarel.ui.optional_metadata import OptionalMetadataFailure, optional_object_metadata
 from tarel.ui.presentation import (
     _review_summary,
     browser_focus_catalog,
@@ -97,6 +98,7 @@ from tarel.ui.query_tools import (
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 
 _MAX_REQUEST_BYTES = 256 * 1024
+_OPTIONAL_KINDS = ("identity", "mappings", "coverage", "imports")
 _STATIC_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".html": "text/html; charset=utf-8",
@@ -136,10 +138,11 @@ class TarelUIBackend:
 
     def _bootstrap(
         self, family_mode: str | None, focus_names: tuple[str, ...] | None = None,
+        *, derived: bool = False,
     ) -> dict[str, object]:
         names = self.config.focuses if focus_names is None else focus_names
         fallback_reason = "workspace_requires_full_projection"
-        if family_mode is not None and not self.config.workspace:
+        if family_mode is not None and not self.config.workspace and not derived:
             from tarel.ui.lazy_family_view import try_lazy_family_graph_view_use_case
 
             attempted = try_lazy_family_graph_view_use_case(
@@ -154,6 +157,11 @@ class TarelUIBackend:
             if attempted.payload is not None:
                 payload = attempted.payload
                 payload.update(focuses=[], focus_selection=None, knowledge_documents=[])
+                payload.update(
+                    optional_metadata={"state": "not_loaded", "kinds": list(_OPTIONAL_KINDS)},
+                    scope_revision=payload["object_families"]["scope_revision"],
+                    derived_enabled=False,
+                )
                 for record in payload["review"]:
                     record["available_context_document_ids"] = []
                 return payload
@@ -161,6 +169,7 @@ class TarelUIBackend:
         selected_focuses = self._selected_focus_documents(names) if names else ()
         documents = tuple(load_lineage_use_case(name) for name in self._lineages)
         workspace = None
+        scope = None
         if self.config.workspace:
             workspace = load_workspace_use_case(self.config.workspace)
             scope = self._scope()
@@ -171,12 +180,12 @@ class TarelUIBackend:
             )
             logical_topology_projection = project_logical_topologies_for_graphs_use_case(
                 graphs
-            )
+            ) if family_mode is not None or derived else None
             semantic_imports = tuple(
                 item
                 for graph in graphs
                 for item in list_semantic_imports_use_case(graph_name=graph.name)
-            )
+            ) if family_mode is not None else ()
             payload = browser_workspace(
                 graphs,
                 scope,
@@ -188,16 +197,20 @@ class TarelUIBackend:
                     match
                     for graph in graphs
                     for match in find_entity_resolution_candidates_for_graph_use_case(graph)
-                ),
+                ) if family_mode is not None else (),
                 query_linked_coverages=tuple(
                     coverage
                     for graph in graphs
                     for coverage in list_query_linked_coverages_use_case(
                         graph_name=graph.name
                     )
+                ) if family_mode is not None else (),
+                logical_topologies=(
+                    logical_topology_projection.documents if logical_topology_projection else ()
                 ),
-                logical_topologies=logical_topology_projection.documents,
-                logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
+                logical_topology_stale_graphs=(
+                    logical_topology_projection.stale_graphs if logical_topology_projection else ()
+                ),
                 reference_mapping_matches=tuple(
                     match
                     for graph in graphs
@@ -205,7 +218,7 @@ class TarelUIBackend:
                         graph,
                         mode="confirmed_then_candidates",
                     )
-                ),
+                ) if family_mode is not None else (),
                 family_mode=family_mode,
                 object_families=families.families if families else (),
                 object_family_stale_graphs=families.stale_graphs if families else (),
@@ -220,7 +233,7 @@ class TarelUIBackend:
             )
             logical_topology_projection = project_logical_topologies_for_graphs_use_case(
                 graphs
-            )
+            ) if family_mode is not None or derived else None
             workspaces = tuple(
                 load_workspace_use_case(name) for name in list_workspaces_use_case()
             )
@@ -229,19 +242,26 @@ class TarelUIBackend:
                 workspaces=workspaces,
                 editable=self.config.editable,
                 lineage_documents=documents,
-                semantic_imports=list_semantic_imports_use_case(graph_name=graph.name),
+                semantic_imports=(
+                    list_semantic_imports_use_case(graph_name=graph.name)
+                    if family_mode is not None else ()
+                ),
                 entity_resolution_matches=find_entity_resolution_candidates_for_graph_use_case(
                     graph
-                ),
+                ) if family_mode is not None else (),
                 query_linked_coverages=list_query_linked_coverages_use_case(
                     graph_name=graph.name
+                ) if family_mode is not None else (),
+                logical_topologies=(
+                    logical_topology_projection.documents if logical_topology_projection else ()
                 ),
-                logical_topologies=logical_topology_projection.documents,
-                logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
+                logical_topology_stale_graphs=(
+                    logical_topology_projection.stale_graphs if logical_topology_projection else ()
+                ),
                 reference_mapping_matches=find_reference_mapping_candidates_for_graph_use_case(
                     graph,
                     mode="confirmed_then_candidates",
-                ),
+                ) if family_mode is not None else (),
                 family_mode=family_mode,
                 object_families=families.families if families else (),
                 object_family_stale_graphs=families.stale_graphs if families else (),
@@ -265,12 +285,71 @@ class TarelUIBackend:
             ]
             allowed = {(record["graph"], record["object_id"]) for record in payload["review"]}
             payload["review_summary"] = _review_summary(graphs, allowed)
-        self._attach_review_knowledge(payload, graphs, workspace)
+        payload.update(
+            optional_metadata={"state": "not_loaded", "kinds": list(_OPTIONAL_KINDS)},
+            scope_revision=family_view_scope_revision(graphs, selected_focuses, scope),
+            derived_enabled=derived,
+        )
+        # Evidence documents belong to the explicit Review workflow, not object navigation.
+        payload["knowledge_documents"] = []
+        for record in payload["review"]:
+            record["available_context_document_ids"] = []
         if family_mode is not None:
             from tarel.ui.lazy_family_view import full_family_projection_storage
 
             payload["storage"] = full_family_projection_storage(fallback_reason)
         return payload
+
+    def _optional_scope(
+        self, payload: dict[str, Any],
+    ) -> tuple[GraphDocument, frozenset[str], str]:
+        """Resolve physical ownership before touching any optional artifact store."""
+        graph_name = self._payload_graph(payload)
+        scope = self._scope() if self.config.workspace else None
+        graphs = tuple(load_graph_use_case(name) for name in (
+            scope.graph_names if scope else (self._single_graph(),)
+        ))
+        graph = next(item for item in graphs if item.name == graph_name)
+        allowed = frozenset(node.id for node in graph.nodes if node.type in {"table", "view"})
+        if scope:
+            allowed &= frozenset(
+                item.object_id for item in scope.objects if item.graph == graph_name
+            )
+        names = _strings(payload, "focuses") if "focuses" in payload else self.config.focuses
+        focuses = self._selected_focus_documents(names) if names else ()
+        if focuses:
+            allowed &= frozenset(
+                identifier for owner, identifier in focus_physical_objects(focuses)
+                if owner == graph_name
+            )
+        revision = family_view_scope_revision(graphs, focuses, scope)
+        if (
+            payload.get("revision") != graph_revision(graph)
+            or payload.get("scope_revision") != revision
+        ):
+            raise UIFailure(
+                "stale_optional_scope", "Reload the changed object or report scope.", status=409,
+            )
+        if _string(payload, "object_id") not in allowed:
+            raise UIFailure(
+                "optional_object_outside_scope", "The physical object is outside this scope.",
+            )
+        return graph, allowed, revision
+
+    def _optional_details(self, payload: dict[str, Any]) -> dict[str, object]:
+        if set(payload) - {
+            "graph", "object_id", "kind", "revision", "scope_revision", "focuses", "limit",
+        } or not isinstance(payload.get("kind"), str) or payload["kind"] not in _OPTIONAL_KINDS:
+            raise UIFailure("invalid_optional_request", "Unsupported optional detail request.")
+        limit = _integer(payload, "limit", default=20, minimum=1, maximum=20)
+        graph, allowed, revision = self._optional_scope(payload)
+        result = optional_object_metadata(
+            graph, _string(payload, "object_id"), allowed_object_ids=allowed,
+            kind=payload["kind"], limit=limit,
+        )
+        # Discard results if source ownership/revisions changed while loading sidecars.
+        self._optional_scope(payload)
+        return {**result, "revision": graph_revision(graph), "scope_revision": revision}
 
     def _attach_review_knowledge(
         self, payload: dict[str, Any], graphs: tuple[GraphDocument, ...],
@@ -329,6 +408,19 @@ class TarelUIBackend:
         } | {"focuses": list(names)}
 
     def mutate(self, route: str, payload: dict[str, Any]) -> dict[str, object]:
+        if route == "/api/optional/details":
+            return self._optional_details(payload)
+        if route == "/api/optional/view":
+            if set(payload) - {"kind", "enabled", "mode", "focuses"} or (
+                payload.get("kind") != "derived_relations"
+                or not isinstance(payload.get("enabled"), bool)
+            ):
+                raise UIFailure("invalid_optional_request", "Invalid optional view request.")
+            mode = _optional_string(payload.get("mode"))
+            if mode not in {None, "confirmed_only", "include_candidates"}:
+                raise UIFailure("invalid_optional_request", "Unsupported family policy.")
+            names = _strings(payload, "focuses") if "focuses" in payload else None
+            return self._bootstrap(mode, names, derived=payload["enabled"])
         if route in {"/api/query/scope", "/api/search", "/api/context/preview"}:
             scope = UIQueryScope(
                 graph=self.config.graph, workspace=self.config.workspace,
@@ -379,7 +471,10 @@ class TarelUIBackend:
             if mode not in {None, "confirmed_only", "include_candidates"}:
                 raise UIFailure("invalid_object_family_mode", "Unsupported family policy.")
             names = _strings(payload, "focuses") if "focuses" in payload else None
-            return self._bootstrap(mode, names)
+            derived = payload.get("derived", False)
+            if not isinstance(derived, bool):
+                raise UIFailure("invalid_optional_request", "Derived view must be a boolean.")
+            return self._bootstrap(mode, names, derived=derived)
         if route == "/api/families/members":
             graph_name = self._payload_graph(payload)
             scope = self._scope() if self.config.workspace else None
@@ -560,7 +655,15 @@ class TarelUIBackend:
         return tuple(documents)
 
     def _select_focuses(self, names: tuple[str, ...]) -> dict[str, object]:
-        return browser_focus_selection(self._selected_focus_documents(names))
+        focuses = self._selected_focus_documents(names)
+        scope = self._scope() if self.config.workspace else None
+        graphs = tuple(load_graph_use_case(name) for name in (
+            scope.graph_names if scope else (self._single_graph(),)
+        ))
+        return {
+            **browser_focus_selection(focuses),
+            "scope_revision": family_view_scope_revision(graphs, focuses, scope),
+        }
 
     def _selected_focus_documents(self, names: tuple[str, ...]) -> tuple[FocusDocument, ...]:
         if len(names) != len(set(names)):
@@ -871,6 +974,7 @@ class _Handler(BaseHTTPRequestHandler):
         if name not in {
             "index.html", "app.js", "styles.css", "cytoscape.min.js", "logical_metadata.js",
             "query_tools.js",
+            "optional_details.js",
         }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -983,6 +1087,7 @@ def _ui_failure(exc: Exception) -> UIFailure:
             SemanticConceptFailure,
             LogicalEndpointFailure,
             LogicalMetadataFailure,
+            OptionalMetadataFailure,
             ReferenceMappingFailure,
             RelationshipFailure,
             SearchFailure,

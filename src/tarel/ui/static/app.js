@@ -12,6 +12,8 @@ const state = {
   focusSelection: null,
   focusSelectedOnly: false,
   showEntityResolution: false,
+  showDerived: false,
+  loadedHintEdges: new Map(),
   scopeFilters: null,
   trace: null,
   traceOnCanvas: false,
@@ -40,17 +42,22 @@ async function api(path, payload) {
   return body;
 }
 
-async function load(familyMode = state.familyMode, focusNames = undefined) {
+async function load(familyMode = state.familyMode, focusNames = undefined, derivedSelection = undefined) {
   setFooter("Loading local artifacts…");
   const request = ++state.viewRequest;
   const focuses = focusNames ?? state.focusSelection?.focuses;
-  const data = familyMode === undefined
+  const data = derivedSelection !== undefined
+    ? await api("/api/optional/view", {kind: "derived_relations", enabled: derivedSelection, mode: familyMode || null, focuses: focuses || []})
+    : familyMode === undefined
     ? await api("/api/bootstrap")
-    : await api("/api/families/view", {mode: familyMode, ...(focuses ? {focuses} : {})});
+    : await api("/api/families/view", {mode: familyMode, derived: state.showDerived, ...(focuses ? {focuses} : {})});
   if (request !== state.viewRequest) return;
   const nextMode = data.object_families?.mode || null;
   if (nextMode !== state.familyMode || focusNames !== undefined) state.scopeFilters = null;
   state.data = data;
+  state.showDerived = data.derived_enabled ?? derivedSelection ?? state.showDerived;
+  clearLoadedHintEdges();
+  $("#toggle-derived-relations").checked = state.showDerived;
   state.reviewData = null;
   state.reviewLoading = false;
   state.reviewError = null;
@@ -99,7 +106,11 @@ function renderAll() {
   const hasLineage = Boolean(data.lineages.length);
   $('[data-canvas-mode="lineage"]').disabled = !hasLineage;
   $('[data-canvas-mode="lineage"]').title = hasLineage ? "Show selected lineage documents" : "No lineage documents loaded. Add --lineage when starting the UI.";
-  $("#entity-layer-option").hidden = !data.edges.some(edge => edge.type === "entity_resolution_candidate");
+  $("#entity-layer-option").hidden = !state.loadedHintEdges.size && !data.edges.some(isOptionalHintEdge);
+  $("#entity-layer-option span").textContent = "Show loaded hint edges";
+  $("#toggle-derived-relations").disabled = Boolean(state.familyMode);
+  $("#toggle-derived-relations").checked = state.showDerived || Boolean(state.familyMode && data.objects.some(item => item.type === "derived_relation"));
+  $("#toggle-derived-relations").title = state.familyMode ? "Family view owns its logical projection. Switch to physical objects to change this layer." : "Read logical-topology metadata on demand; no execution.";
   renderLogicalTopologyNotices();
   renderFamilyNotices();
   renderObjectList();
@@ -195,6 +206,9 @@ async function applyFocuses() {
       return;
     }
     state.focusSelection = await api("/api/focus/select", {focuses: [...state.focusNames].sort()});
+    state.data.scope_revision = state.focusSelection.scope_revision;
+    state.viewRequest += 1;
+    clearLoadedHintEdges();
     state.reviewData = null;
     state.reviewLoading = false;
     state.data.review_summary = {known: false};
@@ -222,6 +236,12 @@ async function clearFocuses() {
     } catch (error) { toast(error.message); setFooter("View unchanged"); }
     return;
   }
+  let selection;
+  try { selection = await api("/api/focus/select", {focuses: []}); }
+  catch (error) { toast(error.message); setFooter("View unchanged"); return; }
+  state.data.scope_revision = selection.scope_revision;
+  state.viewRequest += 1;
+  clearLoadedHintEdges();
   state.focusNames.clear();
   state.focusSelection = null;
   state.reviewData = null;
@@ -284,6 +304,7 @@ function renderScopeFilters() {
 }
 
 function applyVisualScope() {
+  clearLoadedHintEdges();
   if (state.selectedId && !visibleObjects().some(item => item.id === state.selectedId)) {
     state.selectedId = visibleObjects()[0]?.id || null;
   }
@@ -312,6 +333,31 @@ function visibleObjects() {
 
 function unique(values) { return [...new Set(values)].sort((left, right) => left.localeCompare(right)); }
 
+function clearLoadedHintEdges() {
+  state.loadedHintEdges.clear();
+  state.showEntityResolution = false;
+  $("#toggle-entity-resolution").checked = false;
+  $("#entity-layer-option").hidden = !state.data.edges.some(isOptionalHintEdge);
+}
+
+function isOptionalHintEdge(edge) {
+  return ["entity_resolution_candidate", "reference_mapping"].includes(edge.type);
+}
+
+function graphEdgesForView(objectIds) {
+  const loaded = state.showEntityResolution ? [...state.loadedHintEdges.values()] : [];
+  const edges = [...new Map([...state.data.edges, ...loaded].map(edge => [edge.id, edge])).values()];
+  return edges.filter(edge => objectIds.has(edge.source) && objectIds.has(edge.target) &&
+    (state.showEntityResolution || !isOptionalHintEdge(edge)));
+}
+
+function graphRelationshipSummary(edges) {
+  const hints = edges.filter(isOptionalHintEdge).length;
+  const derivations = edges.filter(edge => edge.type === "derives").length;
+  const relationships = edges.length - hints - derivations;
+  return `${relationships} relationships${hints ? ` · ${hints} optional hints` : ""}${derivations ? ` · ${derivations} derivations` : ""}`;
+}
+
 function renderGraph() {
   const data = state.data;
   const scopedObjects = visibleObjects();
@@ -331,10 +377,7 @@ function renderGraph() {
   });
   if (state.canvasMode === "space") {
     elements.unshift(...spaceGroupElements(objects));
-    const graphEdges = data.edges.filter(edge =>
-      objectIds.has(edge.source) && objectIds.has(edge.target) &&
-      (state.showEntityResolution || edge.type !== "entity_resolution_candidate")
-    );
+    const graphEdges = graphEdgesForView(objectIds);
     elements.push(...graphEdges.map(edge => ({data: {id: edge.id, source: edge.source, target: edge.target, type: edge.type, state: edge.metadata.state || "declared"}})));
   } else {
     elements.push(...lineageElements(objectIds));
@@ -389,7 +432,7 @@ function renderGraph() {
     ? `Report filter · ${focusCount} report${focusCount === 1 ? "" : "s"}`
     : state.canvasMode === "space" ? "Information space" : "Data & process lineage";
   $("#canvas-subtitle").textContent = state.canvasMode === "space"
-    ? `${objects.length} objects · ${data.edges.filter(edge => objectIds.has(edge.source) && objectIds.has(edge.target)).length} relationships · ${lanes.length} schema spaces`
+    ? `${objects.length} objects · ${graphRelationshipSummary(graphEdgesForView(objectIds))} · ${lanes.length} schema spaces`
     : `${objects.length} graph objects · ${activeLineageFlows().edges.length} lineage edges${focusCount ? ` · ${state.focusSelection.origins.length} origins` : ` · ${data.lineages.length} documents`}`;
 }
 
@@ -559,13 +602,7 @@ function renderInspector() {
     return;
   }
   const annotation = item.annotation;
-  const entityCandidates = connectedEdges.filter(edge => edge.type === "entity_resolution_candidate");
-  const mappingEdges = connectedEdges.filter(edge => edge.type === "reference_mapping");
   const relationships = connectedEdges.filter(edge => !["derives", "entity_resolution_candidate", "reference_mapping"].includes(edge.type));
-  const fieldSemantics = item.fields.flatMap(field => (field.source_semantics || []).map(entry => ({...entry, field_label: field.label})));
-  const relationshipSemantics = relationships.flatMap(edge => edge.source_semantics || []);
-  const coverages = (state.data.query_linked_coverages || []).filter(coverage => coverage.graph === item.graph);
-  const coverageTrust = coverages.some(coverage => coverage.failed_component_count) ? "Failed components · graph scope" : coverages.some(coverage => coverage.candidate_usage === "exploratory_only") ? "Exploratory · graph scope" : "Run-level · not table coverage";
   $("#inspector").innerHTML = `
     ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label)}
     <section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation?.description || "No TAREL annotation yet.")}</p><small class="semantic-origin">Editable in Review · stored on the TAREL graph</small></section>
@@ -574,15 +611,9 @@ function renderInspector() {
     </div></section>
     ${annotation?.warnings?.length ? `<section class="detail-section"><h3>Warnings</h3><p class="logical-warning">${annotation.warnings.map(escapeHtml).join(" · ")}</p></section>` : ""}
     <section class="detail-section"><h3>Fields · ${item.fields.length}</h3><div class="field-list">${item.fields.map(fieldAnnotationCard).join("")}</div></section>
-    ${relationshipList(relationships)}
-    ${optionalDetails("Identity hints", entityCandidates.length, entityResolutionCards(entityCandidates), candidateTrust(entityCandidates))}
-    ${optionalDetails("Reference mappings", mappingEdges.length, referenceMappingCards(mappingEdges), candidateTrust(mappingEdges))}
-    ${optionalDetails("Query-linked coverage", coverages.length, queryLinkedCoverageCards(coverages), coverageTrust)}
-    ${optionalDetails("Imported object semantics", (item.source_semantics || []).length + fieldSemantics.length + relationshipSemantics.length, sourceSemanticCards(item.source_semantics || [], "Imported dataset semantics") + sourceSemanticCards(fieldSemantics, "Imported field semantics") + sourceSemanticCards(relationshipSemantics, "Imported relationship semantics"))}
-    ${optionalDetails("Source model imports · graph scope", (state.data.semantic_imports || []).length, semanticImportStrip() + sourceSemanticCards(semanticCatalogEntries(), "Model-wide & unbound source semantics") + semanticImportDiagnostics(), (state.data.semantic_imports || []).some(entry => !entry.complete) ? "Incomplete import" : "Separate from TAREL annotations")}`;
-  $$(".source-semantic-form").forEach(form => form.addEventListener("submit", saveSourceSemantic));
+    ${relationshipList(relationships)}`;
   $$('[data-related-object]').forEach(button => button.addEventListener("click", () => selectObject(button.dataset.relatedObject)));
-  mountLogicalMetadata(item);
+  mountOptionalInformation(item);
 }
 
 function inspectorHeading(kind, name, reference = "") {
@@ -637,7 +668,7 @@ function renderFamilyInspector(item) {
       }
     } catch (error) { toast(error.message); button.disabled = false; }
   }));
-  mountLogicalMetadata(item);
+  mountOptionalInformation(item);
 }
 
 function renderDerivedRelationInspector(item, connectedEdges) {
@@ -657,7 +688,7 @@ function renderDerivedRelationInspector(item, connectedEdges) {
     ${optionalDetails("Derivation evidence", evidence.length, derivationEvidenceCards(evidence), evidence.some(record => record.error_count) ? "Errors reported" : "Aggregate observations")}
     ${optionalDetails("Reference mappings", connectedEdges.filter(edge => edge.type === "reference_mapping").length, referenceMappingCards(connectedEdges.filter(edge => edge.type === "reference_mapping")), candidateTrust(connectedEdges.filter(edge => edge.type === "reference_mapping")))}
     <section class="detail-section"><p class="semantic-origin">${derives.length} source-to-derived topology edge${derives.length === 1 ? "" : "s"} projected without changing the physical graph.</p></section>`;
-  mountLogicalMetadata(item);
+  mountOptionalInformation(item);
 }
 
 function logicalOutputFieldCard(field) {
@@ -678,7 +709,7 @@ function referenceMappingCards(edges) {
     const support = mapping.support || {};
     const challenge = mapping.challenge || {};
     const executor = support.executor || challenge.executor;
-    return `<article class="source-semantic-card reference-mapping-card"><header><span><strong>${escapeHtml(other?.name || mapping.target_object || mapping.source_object || "Reference mapping")}</strong><small>${escapeHtml(mapping.source_object)}.${escapeHtml(mapping.source_field)} → ${escapeHtml(mapping.target_object)}.${escapeHtml(mapping.target_field)}</small></span><span class="source-state">${escapeHtml(mapping.usage || mapping.state)}</span></header><div class="fact-grid">${fact("State", stateLabel(mapping.state))}${fact("Cardinality", mapping.cardinality || "—")}${fact("Mapped references", String(mapping.mapping_count ?? "—"))}${fact("Support coverage", coveragePercent(support.coverage))}${fact("Challenge coverage", coveragePercent(challenge.coverage))}${fact("Counterexamples", String(challenge.counterexample_count ?? "—"))}${fact("Collision rate", coveragePercent(support.collision_rate))}${fact("Revision", shortRevision(mapping.revision))}</div>${executor ? `<p class="field-detail"><strong>Executor</strong><span>${escapeHtml(executor.id || "—")}@${escapeHtml(executor.version || "—")}</span></p>` : ""}${mapping.review ? `<p class="field-detail"><strong>Human review</strong><span>${escapeHtml(mapping.review.decision)} · ${escapeHtml(mapping.review.source)}</span></p>` : ""}${mapping.requires_runtime_validation ? '<p class="field-detail warning"><strong>Usage</strong><span>Exploratory only · validate at runtime</span></p>' : ""}</article>`;
+    return `<article class="source-semantic-card reference-mapping-card"><header><span><strong>${escapeHtml(other?.name || mapping.target_object || mapping.source_object || "Reference mapping")}</strong><small>${escapeHtml(mapping.source_object)}.${escapeHtml(mapping.source_field)} → ${escapeHtml(mapping.target_object)}.${escapeHtml(mapping.target_field)}</small></span>${sourceStateBadge(mapping.usage || mapping.state, mapping.usage || mapping.state, mapping.requires_runtime_validation)}</header><div class="fact-grid">${fact("State", stateLabel(mapping.state))}${fact("Cardinality", mapping.cardinality || "—")}${fact("Mapped references", String(mapping.mapping_count ?? "—"))}${fact("Support coverage", coveragePercent(support.coverage))}${fact("Challenge coverage", coveragePercent(challenge.coverage))}${fact("Counterexamples", String(challenge.counterexample_count ?? "—"))}${fact("Collision rate", coveragePercent(support.collision_rate))}${fact("Revision", shortRevision(mapping.revision))}</div>${executor ? `<p class="field-detail"><strong>Executor</strong><span>${escapeHtml(executor.id || "—")}@${escapeHtml(executor.version || "—")}</span></p>` : ""}${mapping.review ? `<p class="field-detail"><strong>Human review</strong><span>${escapeHtml(mapping.review.decision)} · ${escapeHtml(mapping.review.source)}</span></p>` : ""}${mapping.requires_runtime_validation ? '<p class="field-detail warning"><strong>Usage</strong><span>Exploratory only · validate at runtime</span></p>' : ""}</article>`;
   }).join("")}</section>`;
 }
 
@@ -691,7 +722,7 @@ function queryLinkedCoverageCards(coverages) {
   return `<section class="detail-section"><h3>Query-linked entity coverage · ${coverages.length}</h3><p class="semantic-origin">Ranking-slice coverage is independent from inventory, probes, and global mapping.</p>${coverages.map(coverage => {
     const measure = coverage.measure || {};
     const failures = Number(coverage.failed_component_count || 0);
-    return `<article class="source-semantic-card"><header><span><strong>Query-linked Slice</strong><small>${escapeHtml(coverage.run_id)}</small></span><span class="source-state">${escapeHtml(coverage.candidate_usage)}</span></header><p class="field-detail"><strong>Ranking scope</strong><span>Top-${escapeHtml(String(coverage.top_n))} · ${escapeHtml(measure.reference || "—")} · ${escapeHtml(measure.sort_direction || "—")}</span></p><p class="field-detail"><strong>Components fully reviewed</strong><span>${escapeHtml(String(coverage.completed_component_count))}/${escapeHtml(String(coverage.declared_component_count))}</span></p><p class="field-detail${failures ? " warning" : ""}"><strong>Failed components</strong><span>${escapeHtml(String(failures))}</span></p><div class="fact-grid">${fact("Inventory coverage", coveragePercent(coverage.inventory_coverage))}${fact("Query-slice coverage", coveragePercent(coverage.query_slice_coverage))}${fact("Probe coverage", coveragePercent(coverage.probe_coverage))}${fact("Global mapping coverage", coveragePercent(coverage.mapped_record_coverage))}</div></article>`;
+    return `<article class="source-semantic-card"><header><span><strong>Query-linked Slice</strong><small>${escapeHtml(coverage.run_id)}</small></span>${sourceStateBadge(coverage.candidate_usage)}</header><p class="field-detail"><strong>Ranking scope</strong><span>Top-${escapeHtml(String(coverage.top_n))} · ${escapeHtml(measure.reference || "—")} · ${escapeHtml(measure.sort_direction || "—")}</span></p><p class="field-detail"><strong>Components fully reviewed</strong><span>${escapeHtml(String(coverage.completed_component_count))}/${escapeHtml(String(coverage.declared_component_count))}</span></p><p class="field-detail${failures ? " warning" : ""}"><strong>Failed components</strong><span>${escapeHtml(String(failures))}</span></p><div class="fact-grid">${fact("Inventory coverage", coveragePercent(coverage.inventory_coverage))}${fact("Query-slice coverage", coveragePercent(coverage.query_slice_coverage))}${fact("Probe coverage", coveragePercent(coverage.probe_coverage))}${fact("Global mapping coverage", coveragePercent(coverage.mapped_record_coverage))}</div></article>`;
   }).join("")}</section>`;
 }
 
@@ -712,12 +743,23 @@ function entityResolutionCards(edges) {
     const selfDetails = isSelfMatch
       ? `<p class="field-detail"><strong>Record key</strong><span>${escapeHtml(evidence.record_key_field || "—")}</span></p><p class="field-detail"><strong>Contradiction guards</strong><span>${escapeHtml((evidence.guard_fields || []).join(" + ") || "—")}</span></p><p class="field-detail"><strong>Pair policy</strong><span>${escapeHtml(evidence.pair_policy || "—")}</span></p>${aliasDetails}${evidence.supersedes_candidate_id ? `<p class="field-detail"><strong>Supersedes</strong><span>${escapeHtml(evidence.supersedes_candidate_id)}</span></p>` : ""}`
       : "";
-    return `<article class="source-semantic-card"><header><span><strong>${escapeHtml(heading)}</strong><small>${escapeHtml(fields)}</small></span><span class="source-state">${escapeHtml(evidence.state)}</span></header><div class="fact-grid">${fact("Evidence", evidence.evidence_level)}${fact("Evaluated", evidence.evaluated_count)}${fact("Candidate evidence coverage", `${Math.round(evidence.coverage * 100)}%`)}${fact("Collisions", `${Math.round(evidence.collision_rate * 100)}%`)}${fact("Quality", evidence.quality_rating || "legacy")}${fact("Score", `${Math.round((evidence.quality_score ?? evidence.confidence) * 100)}%`)}${fact("Threshold", threshold)}${fact("Human review", evidence.human_reviewed ? "Yes" : "No")}</div><p class="description mono">${escapeHtml(evidence.rule_kind)} · ${escapeHtml((evidence.operations || []).join(" → "))}</p>${selfDetails}<p class="field-detail"><strong>Executor</strong><span>${escapeHtml(executor)} · ${escapeHtml(evidence.blocking_strategy || "blocking not recorded")}</span></p>${(evidence.quality_warnings || []).length ? `<p class="field-detail warning"><strong>Quality warnings</strong><span>${escapeHtml(evidence.quality_warnings.join(" · "))}</span></p>` : ""}${evidence.requires_runtime_validation ? '<p class="field-detail warning"><strong>Usage</strong><span>Exploratory only · validate at runtime</span></p>' : ""}</article>`;
+    return `<article class="source-semantic-card"><header><span><strong>${escapeHtml(heading)}</strong><small>${escapeHtml(fields)}</small></span>${sourceStateBadge(evidence.state, evidence.usage || evidence.state, evidence.requires_runtime_validation)}</header><div class="fact-grid">${fact("Evidence", evidence.evidence_level)}${fact("Evaluated", evidence.evaluated_count)}${fact("Candidate evidence coverage", coveragePercent(evidence.coverage))}${fact("Collisions", `${Math.round(evidence.collision_rate * 100)}%`)}${fact("Quality", evidence.quality_rating || "legacy")}${fact("Score", `${Math.round((evidence.quality_score ?? evidence.confidence) * 100)}%`)}${fact("Threshold", threshold)}${fact("Human review", evidence.human_reviewed ? "Yes" : "No")}</div><p class="description mono">${escapeHtml(evidence.rule_kind)} · ${escapeHtml((evidence.operations || []).join(" → "))}</p>${selfDetails}<p class="field-detail"><strong>Executor</strong><span>${escapeHtml(executor)} · ${escapeHtml(evidence.blocking_strategy || "blocking not recorded")}</span></p>${(evidence.quality_warnings || []).length ? `<p class="field-detail warning"><strong>Quality warnings</strong><span>${escapeHtml(evidence.quality_warnings.join(" · "))}</span></p>` : ""}${evidence.requires_runtime_validation ? '<p class="field-detail warning"><strong>Usage</strong><span>Exploratory only · validate at runtime</span></p>' : ""}</article>`;
   }).join("")}</section>`;
 }
 
 function coveragePercent(value) {
-  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : "—";
+  if (!Number.isFinite(value) || value < 0 || value > 1) return "—";
+  if (value === 1) return "100%";
+  if (value === 0) return "0%";
+  const percent = Math.round(value * 1000) / 10;
+  if (percent >= 100) return "<100%";
+  if (percent === 0) return "<0.1%";
+  return `${percent}%`;
+}
+
+function sourceStateBadge(label, reviewState = label, requiresRuntimeValidation = false) {
+  const confirmed = ["confirmed", "reviewed", "validated"].includes(reviewState) && !requiresRuntimeValidation;
+  return `<span class="source-state${confirmed ? "" : " caution"}">${escapeHtml(label || "unknown")}</span>`;
 }
 
 function fieldAnnotationCard(field) {
@@ -771,7 +813,7 @@ function sourceSemanticCards(entries, title) {
       <label><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${state.data.editable ? "" : "disabled"}>${escapeHtml((entry.synonyms || []).join("\n"))}</textarea></label>
       <label><span>Edit reason</span><input name="reason" value="Reviewed in the local TAREL UI." required ${state.data.editable ? "" : "disabled"} /></label>
       <div class="source-actions"><small class="mono">${escapeHtml(entry.source_reference)}</small><button class="quiet-button" type="submit" ${state.data.editable ? "" : "disabled"}>Save source overlay</button></div>
-      <details><summary>Original imported values</summary><p>${escapeHtml(entry.original?.description || "No description")}</p><small>${escapeHtml((entry.original?.synonyms || []).join(" · ") || "No synonyms")}</small></details>
+      ${entry.original ? `<details><summary>Original imported values</summary><p>${escapeHtml(entry.original.description || "No description")}</p><small>${escapeHtml((entry.original.synonyms || []).join(" · ") || "No synonyms")}</small></details>` : '<p class="semantic-origin">Original source snapshots are intentionally not included in this projection.</p>'}
     </form>`).join("")}</section>`;
 }
 
@@ -1269,6 +1311,13 @@ $("#show-all").addEventListener("click", () => {
   $("#canvas-subtitle").textContent = "Full current source / report scope";
 });
 $("#toggle-entity-resolution").addEventListener("change", event => { state.showEntityResolution = event.target.checked; renderGraph(); });
+$("#toggle-derived-relations").addEventListener("change", async event => {
+  const control = event.target;
+  control.disabled = true;
+  try { await load(state.familyMode, undefined, control.checked); }
+  catch (error) { control.checked = state.showDerived; toast(error.message); setFooter("View unchanged"); }
+  finally { control.disabled = false; }
+});
 $("#trace-selected").addEventListener("click", () => trace(selectedObject()?.reference || ""));
 $("#show-trace-canvas").addEventListener("click", showTraceOnCanvas);
 $$('[data-canvas-mode]').forEach(button => button.addEventListener("click", () => {

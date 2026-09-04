@@ -55,7 +55,18 @@
           <section class="canvas-pane">
             <div class="canvas-toolbar">
               <div class="canvas-heading"><strong id="canvas-title">Schema topology</strong><span id="canvas-subtitle"></span></div>
-              <div class="toolbar-actions"><button id="open-objects" class="quiet-button mobile-only" aria-controls="object-sidebar" aria-expanded="false">Objects</button><div class="canvas-mode" role="group" aria-label="Canvas mode"><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div><button id="show-all" class="quiet-button">All objects</button><button id="fit-graph" class="quiet-button" title="Show the selected object and its immediate neighbours">Neighbours</button><details id="view-options" class="view-options"><summary class="quiet-button">View</summary><div class="view-options-menu"><label class="family-mode"><span>Object families</span><select id="family-mode"><option value="">Physical objects</option><option value="confirmed_only">Reviewed families</option><option value="include_candidates">Include exploratory families</option></select></label><label id="entity-layer-option" class="compact-check"><input id="toggle-entity-resolution" type="checkbox" /><span>Show identity-hint edges</span></label><button id="add-lineage" class="quiet-button">＋ Manual job / hop</button></div></details><button id="trace-selected" class="quiet-button">Trace</button><button id="open-inspector" class="quiet-button" aria-controls="inspector" aria-expanded="true">Details</button></div>
+              <div class="toolbar-actions">
+                <button id="open-objects" class="quiet-button mobile-only" aria-controls="object-sidebar" aria-expanded="false">Objects</button>
+                <div class="canvas-mode" role="group" aria-label="Canvas mode"><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
+                <button id="show-all" class="quiet-button">All objects</button><button id="fit-graph" class="quiet-button" title="Show the selected object and its immediate neighbours">Neighbours</button>
+                <details id="view-options" class="view-options"><summary class="quiet-button">View</summary><div class="view-options-menu">
+                  <label class="family-mode"><span>Object families</span><select id="family-mode"><option value="">Physical objects</option><option value="confirmed_only">Reviewed families</option><option value="include_candidates">Include exploratory families</option></select></label>
+                  <label class="compact-check"><input id="toggle-derived-relations" type="checkbox" /><span>Derived relations · may include exploratory metadata</span></label>
+                  <label id="entity-layer-option" class="compact-check" hidden><input id="toggle-entity-resolution" type="checkbox" /><span>Show loaded identity / mapping hints</span></label>
+                  <button id="add-lineage" class="quiet-button">＋ Manual job / hop</button>
+                </div></details>
+                <button id="trace-selected" class="quiet-button">Trace</button><button id="open-inspector" class="quiet-button" aria-controls="inspector" aria-expanded="true">Details</button>
+              </div>
             </div>
             <div id="graph-canvas" role="application" aria-label="Interactive schema graph"></div>
             <section id="lineage-drawer" class="lineage-drawer" hidden>
@@ -161,6 +172,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="/cytoscape.min.js"></script>
     <script src="/logical_metadata.js"></script>
+    <script src="/optional_details.js"></script>
     <script src="/query_tools.js"></script>
     <script src="/app.js"></script>
   </body>

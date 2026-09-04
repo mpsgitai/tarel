@@ -181,7 +181,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const elements = new Map();
 class Element {
-  constructor(){this.children=[];this.innerHTML='';this.textContent='';}
+  constructor(){this.children=[];this.innerHTML='';this.textContent='';this.dataset={};}
   append(...items){this.children.push(...items);}
   after(...items){this.afterNodes=items;}
   addEventListener(){}
@@ -200,6 +200,8 @@ const context = vm.createContext({
 const script = fs.readFileSync(process.argv[1], 'utf8');
 vm.runInContext(fs.readFileSync(require('node:path').join(
   require('node:path').dirname(process.argv[1]), 'logical_metadata.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require('node:path').join(
+  require('node:path').dirname(process.argv[1]), 'optional_details.js'), 'utf8'), context);
 vm.runInContext(script.slice(0, script.indexOf('$("#object-search").addEventListener')), context);
 vm.runInContext('state.familyMode = "confirmed_only"; renderFamilyInspector(fixture);', context);
 process.stdout.write(elements.get('#inspector').innerHTML);

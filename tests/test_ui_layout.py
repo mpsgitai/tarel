@@ -47,6 +47,40 @@ assert.equal(candidateTrust([{metadata:{state:'candidate'}}]),
 """)
 
     @skipUnless(shutil.which("node"), "Node.js is only needed for renderer regressions")
+    def test_coverage_rounding_never_claims_false_completeness_or_zero(self) -> None:
+        self._script(r"""
+assert.equal(coveragePercent(0), '0%');
+assert.equal(coveragePercent(1), '100%');
+assert.equal(coveragePercent(0.9995), '<100%');
+assert.equal(coveragePercent(0.00001), '<0.1%');
+assert.equal(coveragePercent(0.854), '85.4%');
+for (const unavailable of [null, undefined, NaN, Infinity, -0.1, 1.1]) {
+  assert.equal(coveragePercent(unavailable), '—');
+}
+""")
+
+    @skipUnless(shutil.which("node"), "Node.js is only needed for renderer regressions")
+    def test_exploratory_badges_do_not_use_confirmed_green_styling(self) -> None:
+        self._script(r"""
+state.data = {objects:[]};
+state.selectedId = 'selected';
+const candidate = {id:'hint',source:'selected',target:'other',metadata:{
+  state:'candidate',usage:'exploratory_only',requires_runtime_validation:true,
+  coverage:0.5,collision_rate:0,confidence:0.5
+}};
+assert.ok(entityResolutionCards([candidate]).includes('class="source-state caution"'));
+assert.ok(referenceMappingCards([candidate]).includes('class="source-state caution"'));
+assert.ok(queryLinkedCoverageCards([{candidate_usage:'exploratory_only'}])
+  .includes('class="source-state caution">exploratory_only'));
+assert.ok(queryLinkedCoverageCards([{candidate_usage:'confirmed'}])
+  .includes('class="source-state">confirmed'));
+assert.equal(sourceStateBadge('reviewed','reviewed',true),
+  '<span class="source-state caution">reviewed</span>');
+""")
+        styles = (STATIC / "styles.css").read_text()
+        self.assertIn(".source-state.caution { color: #fbbf24;", styles)
+
+    @skipUnless(shutil.which("node"), "Node.js is only needed for renderer regressions")
     def test_single_source_omits_redundant_graph_boxes(self) -> None:
         self._script(r"""
 const single = [{graph:'warehouse',namespace:'sales'}, {graph:'warehouse',namespace:'sales'}];
@@ -96,7 +130,7 @@ state.data = {
   edges:[],lineages:[],semantic_imports:[],semantic_models:[],
   query_linked_coverages:[{graph:'other',run_id:'do-not-show',top_n:10}]
 };
-mountLogicalMetadata = () => {};
+mountOptionalInformation = () => {};
 renderInspector();
 const html = $('#inspector').innerHTML;
 assert.ok(html.includes('Orders by item'));

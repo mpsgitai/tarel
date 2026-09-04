@@ -1,7 +1,7 @@
 /* Optional inspector details. Metadata is rendered as text, never executable HTML. */
 let logicalMetadataRequest = 0;
 
-function mountLogicalMetadata(object) {
+function mountLogicalMetadata(object, target = document.querySelector("#inspector"), onStatus = () => {}) {
   const section = document.createElement("details");
   section.className = "optional-details logical-metadata-details";
   const summary = document.createElement("summary");
@@ -31,6 +31,7 @@ function mountLogicalMetadata(object) {
     const uncertain = items.some(item => item.usage === "exploratory_only");
     status.textContent = !payload ? "Load failed" : payload.omissions?.length ? `${items.length} shown · omissions` : uncertain ? `${items.length} · exploratory` : `${items.length} in scope`;
     status.className = !payload || uncertain || payload.omissions?.length ? "caution" : "";
+    onStatus({failed: !payload, caution: !payload || uncertain || Boolean(payload.omissions?.length)});
     button.hidden = loaded;
     button.disabled = false;
     if (!payload) button.textContent = "Retry loading metadata";
@@ -39,7 +40,7 @@ function mountLogicalMetadata(object) {
   section.addEventListener("toggle", () => { if (section.open && !loaded) load(); });
   body.append(button, container);
   section.append(summary, body);
-  document.querySelector("#inspector")?.append(section);
+  target?.append(section);
 }
 
 function renderLogicalMetadata(container, payload) {
@@ -111,7 +112,7 @@ async function loadLogicalMetadata(object) {
       object_ids: [object.object_id],
       mode: "include_candidates",
       focuses: state.focusSelection?.focuses || [],
-      scope_revision: state.data.object_families?.scope_revision,
+      scope_revision: state.data.scope_revision || state.data.object_families?.scope_revision,
     });
     if (request === logicalMetadataRequest && container.isConnected && state.selectedId === object.id) {
       renderLogicalMetadata(container, payload);
