@@ -54,6 +54,7 @@ from tarel.lineage.runtime import (
     runtime_lineage_document_version,
     validate_runtime_lineage_input,
 )
+from tarel.lineage.runtime_logical import RuntimeLogicalOperation
 from tarel.lineage.runtime_store import FileRuntimeLineageStore
 from tarel.lineage.source import LineageInput, load_lineage_input
 from tarel.lineage.status import LineageStatus, lineage_status
@@ -243,7 +244,9 @@ def trace_runtime_lineage_use_case(
         if event.call_id in reached:
             return
         reached.add(event.call_id)
-        if isinstance(event, (RuntimeFederatedQuery, RuntimePythonAnalysis)):
+        if isinstance(
+            event, (RuntimeFederatedQuery, RuntimePythonAnalysis, RuntimeLogicalOperation)
+        ):
             for source_call_id in event.consumes:
                 dependencies.add((source_call_id, event.call_id))
                 visit(events[source_call_id])
@@ -266,7 +269,9 @@ def trace_runtime_lineage_use_case(
                 call_id=event.call_id,
                 sequence=event.sequence,
                 kind=(
-                    "python_analysis"
+                    "logical_operation"
+                    if isinstance(event, RuntimeLogicalOperation)
+                    else "python_analysis"
                     if isinstance(event, RuntimePythonAnalysis)
                     else "federated_query"
                     if isinstance(event, RuntimeFederatedQuery)
@@ -275,6 +280,7 @@ def trace_runtime_lineage_use_case(
                     else "sql_query"
                 ),
                 status=event.status,
+                operation=event.operation if isinstance(event, RuntimeLogicalOperation) else None,
             )
             for event in selected
         ),
@@ -294,6 +300,8 @@ def trace_runtime_lineage_use_case(
 
 
 def _runtime_event(graph: GraphDocument, event: RuntimeEventInput) -> RuntimeEvent:
+    if isinstance(event, RuntimeLogicalOperation):
+        return event
     if isinstance(event, RuntimePythonAnalysisInput):
         return RuntimePythonAnalysis(
             sequence=event.sequence,

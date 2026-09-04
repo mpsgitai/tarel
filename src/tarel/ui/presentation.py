@@ -14,6 +14,11 @@ from tarel.graph.contracts import GraphDocument, GraphEdge, GraphNode
 from tarel.graph.revision import graph_revision, physical_graph_revision
 from tarel.lineage.contracts import LineageDocument
 from tarel.lineage.revision import lineage_revision
+from tarel.object_families.application import (
+    family_summary,
+    validate_object_families_against_graph,
+)
+from tarel.object_families.contracts import ObjectFamily, ObjectFamilyFailure
 from tarel.reference_mapping.contracts import (
     ReferenceMappingEvidence,
     ReferenceMappingFailure,
@@ -45,6 +50,10 @@ def browser_graph(
     logical_topologies: Iterable[LogicalTopologyDocument] = (),
     logical_topology_stale_graphs: Iterable[str] = (),
     reference_mapping_matches: Iterable[ReferenceMappingMatch] = (),
+    family_mode: str | None = None,
+    object_families: Iterable[ObjectFamily] = (),
+    object_family_stale_graphs: Iterable[str] = (),
+    focus_documents: Iterable[FocusDocument] = (),
 ) -> dict[str, object]:
     return _browser_payload(
         (graph,),
@@ -58,6 +67,10 @@ def browser_graph(
         logical_topologies=tuple(logical_topologies),
         logical_topology_stale_graphs=tuple(logical_topology_stale_graphs),
         reference_mapping_matches=tuple(reference_mapping_matches),
+        family_mode=family_mode,
+        object_families=tuple(object_families),
+        object_family_stale_graphs=tuple(object_family_stale_graphs),
+        focus_documents=tuple(focus_documents),
     )
 
 
@@ -74,6 +87,10 @@ def browser_workspace(
     logical_topologies: Iterable[LogicalTopologyDocument] = (),
     logical_topology_stale_graphs: Iterable[str] = (),
     reference_mapping_matches: Iterable[ReferenceMappingMatch] = (),
+    family_mode: str | None = None,
+    object_families: Iterable[ObjectFamily] = (),
+    object_family_stale_graphs: Iterable[str] = (),
+    focus_documents: Iterable[FocusDocument] = (),
 ) -> dict[str, object]:
     payload = _browser_payload(
         tuple(graphs),
@@ -86,6 +103,10 @@ def browser_workspace(
         logical_topologies=tuple(logical_topologies),
         logical_topology_stale_graphs=tuple(logical_topology_stale_graphs),
         reference_mapping_matches=tuple(reference_mapping_matches),
+        family_mode=family_mode,
+        object_families=tuple(object_families),
+        object_family_stale_graphs=tuple(object_family_stale_graphs),
+        focus_documents=tuple(focus_documents),
         scope=scope,
     )
     objects = payload["objects"]
@@ -108,16 +129,23 @@ def _browser_payload(
     logical_topologies: tuple[LogicalTopologyDocument, ...],
     logical_topology_stale_graphs: tuple[str, ...],
     reference_mapping_matches: tuple[ReferenceMappingMatch, ...],
+    family_mode: str | None,
+    object_families: tuple[ObjectFamily, ...],
+    object_family_stale_graphs: tuple[str, ...],
+    focus_documents: tuple[FocusDocument, ...],
     lineage_names: tuple[str, ...] = (),
     scope: ResolvedScope | None = None,
 ) -> dict[str, object]:
     if not graphs:
         raise ValueError("Browser projection requires at least one graph.")
+    if family_mode not in {None, "confirmed_only", "include_candidates"}:
+        raise ObjectFamilyFailure("invalid_object_family_mode", "Unsupported family policy.")
     selected = (
         {(item.graph, item.object_id): item for item in scope.objects}
         if scope is not None
         else None
     )
+    focus_objects = focus_physical_objects(focus_documents) if focus_documents else None
     object_payloads: list[dict[str, object]] = []
     edge_payloads: list[dict[str, object]] = []
     graph_names = {graph.name for graph in graphs}
@@ -136,6 +164,10 @@ def _browser_payload(
         topology_by_graph[document.graph_name] = document
     node_semantics = semantic_node_bindings(imports)
     edge_semantics = semantic_edge_bindings(imports)
+    collapsed: set[tuple[str, str]] = set()
+    collapsed_fields: set[tuple[str, str]] = set()
+    visible_fields: set[tuple[str, str]] = set()
+    allowed_objects: set[tuple[str, str]] = set()
     for graph in sorted(graphs, key=lambda item: item.name):
         nodes = graph.node_by_id()
         objects = [
@@ -143,14 +175,31 @@ def _browser_payload(
             for node in graph.nodes
             if node.type in {"table", "view"}
             and (selected is None or (graph.name, node.id) in selected)
+            and (focus_objects is None or (graph.name, node.id) in focus_objects)
         ]
         object_ids = {node.id for node in objects}
+        allowed_objects.update((graph.name, object_id) for object_id in object_ids)
+        if family_mode is not None:
+            family_payloads, hidden_ids = _object_family_payloads(
+                graph, object_families, object_ids, family_mode,
+                topology_by_graph.get(graph.name), reference_mapping_matches,
+                entity_resolution_matches,
+            )
+            object_payloads.extend(family_payloads)
+            collapsed.update((graph.name, object_id) for object_id in hidden_ids)
+            collapsed_fields.update(
+                (graph.name, node.id) for node in graph.nodes
+                if node.type == "field" and node.metadata.get("object_id") in hidden_ids
+            )
+            objects = [node for node in objects if node.id not in hidden_ids]
+            object_ids -= hidden_ids
         fields_by_object: dict[str, list[GraphNode]] = {node.id: [] for node in objects}
         for node in graph.nodes:
             if node.type == "field":
                 parent = str(node.metadata.get("object_id") or "")
                 if parent in fields_by_object:
                     fields_by_object[parent].append(node)
+                    visible_fields.add((graph.name, node.id))
         physical_payloads = [
             _object_payload(
                 node,
@@ -205,6 +254,8 @@ def _browser_payload(
         edge_payloads.extend(
             payload
             for edge in project_entity_resolution_edges(graph, graph_entity_matches)
+            if family_mode is None
+            or (edge.source_id in object_ids and edge.target_id in object_ids)
             if (
                 payload := _edge_payload(
                     edge,
@@ -234,7 +285,7 @@ def _browser_payload(
         for graph in sorted(graphs, key=lambda item: item.name)
     ]
     first = sorted(graphs, key=lambda item: item.name)[0]
-    return {
+    payload = {
         "catalog": first.catalog if len(graphs) == 1 else None,
         "connector": first.connector if len(graphs) == 1 else None,
         "dialect": first.dialect if len(graphs) == 1 else None,
@@ -246,6 +297,19 @@ def _browser_payload(
                 entity_resolution_matches,
                 key=lambda match: (match.candidate.graph_name, match.candidate.id),
             )
+            if not any(
+                (item.candidate.graph_name, endpoint) in collapsed_fields
+                for endpoint in (
+                    item.candidate.source_field_id,
+                    item.candidate.target_field_id,
+                )
+            )
+            and (not focus_documents or all(
+                (item.candidate.graph_name, endpoint) in visible_fields
+                for endpoint in (
+                    item.candidate.source_field_id, item.candidate.target_field_id
+                )
+            ))
         ],
         "graph": first.name,
         "graphs": graph_payloads,
@@ -288,6 +352,178 @@ def _browser_payload(
             )
         ],
     }
+    if family_mode is not None:
+        payload["object_families"] = {
+            "mode": family_mode,
+            "scope_revision": family_view_scope_revision(graphs, focus_documents, scope),
+            "collapsed_member_count": len(collapsed),
+            "stale_graphs": sorted(set(object_family_stale_graphs) & graph_names),
+            "notice": (
+                "Families summarize compatible schemas, not union or join correctness. "
+                "Members load on demand. Disable families to inspect member annotations, "
+                "relationships, derivations, review queues, zones and lineage."
+            ),
+        }
+        if scope is not None:
+            payload["scope"] = {
+                "graphs": list(scope.graph_names),
+                "object_count": sum(
+                    focus_objects is None or (item.graph, item.object_id) in focus_objects
+                    for item in scope.objects
+                ),
+                "scope_hash": scope.scope_hash,
+                "selection": scope.selection.to_dict(),
+                "workspace": scope.workspace,
+            }
+        _compact_family_workspace_members(payload, collapsed)
+    if focus_documents:
+        selection = browser_focus_selection(focus_documents)
+        payload["focus_selection"] = (
+            _compact_family_focus_selection(
+                selection, object_payloads, object_families, allowed_objects
+            )
+            if family_mode is not None else selection
+        )
+    return payload
+
+
+def _object_family_payloads(
+    graph: GraphDocument,
+    families: tuple[ObjectFamily, ...],
+    allowed_ids: set[str],
+    mode: str,
+    topology: LogicalTopologyDocument | None,
+    mappings: tuple[ReferenceMappingMatch, ...],
+    entities: tuple[EntityResolutionMatch, ...],
+) -> tuple[list[dict[str, object]], set[str]]:
+    """Collapse metadata only; a member edge never becomes a family-wide edge."""
+    objects: list[dict[str, object]] = []
+    hidden: set[str] = set()
+    nodes = graph.node_by_id()
+    revision = physical_graph_revision(graph)
+    eligible = tuple(
+        family for family in families
+        if family.graph_name == graph.name and family.graph_revision == revision
+        and family.state != "rejected"
+        and (mode != "confirmed_only" or family.state == "reviewed")
+        and allowed_ids.intersection(family.member_ids)
+    )
+    validate_object_families_against_graph(eligible, graph)
+    details: dict[str, dict[str, set[str]]] = {
+        kind: {} for kind in (
+            "physical_relationships", "derived_relations", "reference_mappings", "entity_candidates"
+        )
+    }
+
+    def record_detail(kind: str, reference: str, endpoints: tuple[str, ...]) -> None:
+        if all(endpoint in allowed_ids for endpoint in endpoints):
+            for endpoint in endpoints:
+                details[kind].setdefault(endpoint, set()).add(reference)
+
+    for edge in graph.edges:
+        record_detail("physical_relationships", edge.id, (edge.source_id, edge.target_id))
+    for relation in topology.derived_relations if topology else ():
+        record_detail("derived_relations", relation.id, (relation.source.id,))
+    for kind, matches in (("reference_mappings", mappings), ("entity_candidates", entities)):
+        for match in matches:
+            candidate = match.candidate
+            if candidate.graph_name != graph.name:
+                continue
+            endpoints = tuple(
+                str(nodes[field_id].metadata.get("object_id") or "")
+                if field_id in nodes else ""
+                for field_id in (candidate.source_field_id, candidate.target_field_id)
+            )
+            record_detail(kind, candidate.id, endpoints)
+    for family in sorted(eligible, key=lambda item: (item.name, item.id)):
+        member_ids = set(family.member_ids) & allowed_ids
+        if member_ids & hidden:
+            raise ObjectFamilyFailure(
+                "object_family_overlap", "Active families overlap within the browser scope."
+            )
+        hidden.update(member_ids)
+        summary = family_summary(family, member_count=len(member_ids))
+        summary["hidden_details"] = {
+            kind: len({reference for member_id in member_ids
+                       for reference in references.get(member_id, ())})
+            for kind, references in details.items()
+        }
+        summary["namespace_count"] = len({
+            str(nodes[member_id].metadata.get("namespace") or "") for member_id in member_ids
+        })
+        objects.append(_family_object_payload(graph.name, graph.catalog, family, summary))
+    return objects, hidden
+
+
+def _family_object_payload(
+    graph_name: str,
+    catalog: str,
+    family: ObjectFamily,
+    summary: dict[str, object],
+) -> dict[str, object]:
+    """Render an already validated family without inventing physical-table semantics."""
+    object_id = f"object_family:{family.id}"
+    return {
+            "annotation": None,
+            "annotation_context_documents": [],
+            "area": None,
+            "area_ref": None,
+            "catalog": catalog,
+            "fields": [
+                {
+                    "annotation": None,
+                    "data_type": field.data_type,
+                    "id": _ui_id(graph_name, f"{object_id}:field:{index}"),
+                    "is_nullable": field.nullable,
+                    "kind": "family_field",
+                    "label": field.name,
+                    "position": index,
+                    "source_semantics": [],
+                }
+                for index, field in enumerate(family.schema, start=1)
+            ],
+            "grain": " + ".join(family.grain),
+            "graph": graph_name,
+            "id": _ui_id(graph_name, object_id),
+            "label": family.name,
+            "name": family.name,
+            "namespace": "Logical families",
+            "object_family": summary,
+            "object_id": object_id,
+            "primary_key": [],
+            "reference": None,
+            "review": None,
+            "schema_ref": f"{graph_name}:Logical families",
+            "source_semantics": [],
+            "state": family.state,
+            "system": None,
+            "technical_description": None,
+            "type": "object_family",
+            "usage": summary["usage"],
+            "zones": [],
+        }
+
+
+def _compact_family_workspace_members(
+    payload: dict[str, object], collapsed: set[tuple[str, str]]
+) -> None:
+    # Zone editing is disabled in family view: sending a truncated member list to
+    # the existing replace-style zone API would remove hidden members.
+    visible = {
+        (item["graph"], item["object_id"]) for item in payload["objects"]
+        if item["type"] in {"table", "view"}
+    }
+    for workspace in payload["workspaces"]:
+        for system in workspace["systems"]:
+            for zone in system["zones"]:
+                members = zone["members"]
+                zone["members"] = [
+                    item for item in members
+                    if (item["graph"], item["object_id"]) in visible
+                ]
+                zone["collapsed_member_count"] = sum(
+                    (item["graph"], item["object_id"]) in collapsed for item in members
+                )
 
 
 def _query_linked_coverage_summary(
@@ -508,6 +744,109 @@ def browser_focus_catalog(
         }
         for document in sorted(documents, key=lambda item: item.name.casefold())
     ]
+
+
+def focus_physical_objects(
+    documents: Iterable[FocusDocument],
+) -> frozenset[tuple[str, str]]:
+    """Union physical focus members; caller intersects its own workspace scope."""
+    return frozenset(
+        (graph, item.id.removeprefix(f"graph:{graph}:"))
+        for document in documents
+        for item in document.members
+        if item.kind in {"table", "view"}
+        if (graph := _focus_member_graph(item)) is not None
+    )
+
+
+def family_view_scope_revision(
+    graphs: Iterable[GraphDocument],
+    documents: Iterable[FocusDocument],
+    scope: ResolvedScope | None = None,
+) -> str:
+    """Bind member pages to the server-resolved physical and report/cube scope."""
+    return family_view_scope_revision_from_revisions(
+        {item.name: graph_revision(item) for item in graphs}, documents, scope,
+    )
+
+
+def family_view_scope_revision_from_revisions(
+    revisions: dict[str, str],
+    documents: Iterable[FocusDocument] = (),
+    scope: ResolvedScope | None = None,
+) -> str:
+    """Identical view identity from verified full-source headers, not subset hashes."""
+    payload = {
+        "graphs": revisions,
+        "focuses": {item.name: item.revision for item in documents},
+        "workspace_scope": scope.scope_hash if scope else None,
+    }
+    return hashlib.sha256(json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode()).hexdigest()
+
+
+def _compact_family_focus_selection(
+    selection: dict[str, object],
+    objects: list[dict[str, object]],
+    families: tuple[ObjectFamily, ...],
+    allowed_objects: set[tuple[str, str]],
+) -> dict[str, object]:
+    """Keep focus provenance without leaking or relabelling collapsed member hops."""
+    visible_ids = {item["id"] for item in objects}
+    allowed_ids = {_ui_id(graph, object_id) for graph, object_id in allowed_objects}
+    members = [
+        item for item in selection["members"]
+        if item["graph"] is None or item["id"] in allowed_ids
+    ]
+    physical = {
+        item["id"]: item for item in members
+        if item["graph"] is not None and item["id"] in allowed_ids
+    }
+    retained = [item for item in members if item["graph"] is None or item["id"] in visible_ids]
+    by_family = {(item.graph_name, item.id): item for item in families}
+    for item in objects:
+        if item["type"] != "object_family":
+            continue
+        family = by_family[(item["graph"], item["object_family"]["id"])]
+        included = [
+            physical[identifier]
+            for member_id in family.member_ids
+            if (identifier := _ui_id(family.graph_name, member_id)) in physical
+        ]
+        if not included:
+            continue
+        retained.append({
+            "annotation_state": None,
+            "depth": min(member["depth"] for member in included),
+            "focuses": sorted({name for member in included for name in member["focuses"]}),
+            "graph": item["graph"], "id": item["id"], "kind": "object_family",
+            "label": item["name"], "origin": False,
+            "reasons": ["contains_focus_members"], "reference": None,
+            "source": f"graph:{item['graph']}",
+        })
+    kept_ids = {item["id"] for item in retained}
+    scoped_ids = {item["id"] for item in members}
+    scoped_edges = [
+        edge for edge in selection["edges"]
+        if edge["source"] in scoped_ids and edge["target"] in scoped_ids
+    ]
+    edges = [
+        edge for edge in scoped_edges
+        if edge["source"] in kept_ids and edge["target"] in kept_ids
+    ]
+    return {
+        **selection,
+        "members": sorted(retained, key=lambda item: item["id"]),
+        "object_ids": sorted(visible_ids),
+        "origins": [item for item in retained if item["origin"]],
+        "edges": edges,
+        "hidden_member_count": len(members) - sum(item["id"] in kept_ids for item in members),
+        "hidden_edge_count": len(scoped_edges) - len(edges),
+        "warnings": sorted({*selection["warnings"],
+            "Collapsed physical focus members and their lineage hops are hidden; "
+            "no family-wide relationship is inferred."}),
+    }
 
 
 def browser_focus_selection(documents: Iterable[FocusDocument]) -> dict[str, object]:

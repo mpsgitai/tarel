@@ -322,3 +322,9 @@ footer #footer-status { margin-left: auto; }
   .field-grid { grid-template-columns: 1fr; }
   .field-grid .span-two { grid-column: auto; }
 }
+.family-mode {display: grid; gap: 7px; padding: 10px 14px; font-size: 12px; color: var(--muted);}
+.family-mode select {width: 100%; border: 1px solid #383842; border-radius: 6px; background: #18181b; color: #e4e4e7; padding: 7px;}
+.family-member {display: grid; gap: 5px; padding: 9px 0; border-bottom: 1px solid #303036; overflow-wrap: anywhere;}
+.family-member strong {font-size: 12px;}
+.family-member small {color: #a1a1aa;}
+.family-page-actions {display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 11px;}

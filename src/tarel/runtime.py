@@ -22,6 +22,7 @@ from tarel.sources.store import FileSourceStore
 from tarel.workspaces.store import FileWorkspaceStore
 
 if TYPE_CHECKING:
+    from tarel.object_families.store import FileObjectFamilyStore
     from tarel.reference_mapping.store import FileReferenceMappingStore
     from tarel.topology.store import FileLogicalTopologyStore
 
@@ -87,3 +88,8 @@ class TarelRuntime:
         from tarel.reference_mapping.store import FileReferenceMappingStore
 
         return FileReferenceMappingStore(self.root / "reference-mappings")
+
+    def object_family_store(self) -> FileObjectFamilyStore:
+        from tarel.object_families.store import FileObjectFamilyStore
+
+        return FileObjectFamilyStore(self.root / "object-families")

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 
 from tarel.context import ContextResult
-from tarel.context_output import canonical_hash
+from tarel.context_output import canonical_hash, canonical_json
 from tarel.graph.contracts import GraphNode
 from tarel.lineage.contracts import LineageEvidence
 from tarel.lineage.traversal import LineageReference, UpstreamTrace
@@ -204,6 +204,15 @@ class GroundingBundle:
                 f"[{join.kind}; state={join.state}; origin={join.origin}; id={join.id}]"
             )
 
+        if self.context.logical_hints is not None:
+            lines.extend(
+                (
+                    "",
+                    "## Logical hints",
+                    canonical_json(self.context.logical_hints.stable_dict()),
+                )
+            )
+
         lines.extend(("", "## Lineage sources"))
         if not self.lineages:
             lines.append("- none selected")
@@ -251,6 +260,15 @@ class GroundingBundle:
             state = f"; annotation={item.annotation_state}" if item.annotation_state else ""
             lines.append(
                 f"- {item.reference} [{item.kind}; source={item.source}{state}]{description}"
+            )
+
+        if packet.logical_hints is not None:
+            lines.extend(
+                (
+                    "",
+                    "## Logical hint omissions and warnings",
+                    canonical_json(packet.logical_hints.dynamic_dict()),
+                )
             )
 
         lines.extend(("", "## Upstream trace"))

@@ -20,13 +20,17 @@ from tarel.discovery.identity import (
     add_page,
     add_reflection,
 )
+from tarel.discovery.logical_program import LogicalJoinProgram
+from tarel.topology.endpoint_contracts import LogicalEndpointFailure
 
 DISCOVERY_CONTRACT_VERSION = "tarel.discovery-run.v0.1.experimental"
 DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION = (
     "tarel.discovery-run.v0.2.experimental"
 )
+DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION = "tarel.discovery-run.v0.3.experimental"
 DISCOVERY_CONTRACT_VERSIONS = frozenset(
-    {DISCOVERY_CONTRACT_VERSION, DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION}
+    {DISCOVERY_CONTRACT_VERSION, DISCOVERY_REFERENCE_MAPPING_CONTRACT_VERSION,
+     DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION}
 )
 DISCOVERY_KINDS = frozenset(
     {"entity_matching", "join_discovery", "reference_mapping"}
@@ -332,10 +336,15 @@ class ReferenceMappingManifest:
         )
 
 
-DiscoveryProgramType = DiscoveryProgram | ReferenceMappingProgram
+DiscoveryProgramType = DiscoveryProgram | ReferenceMappingProgram | LogicalJoinProgram
 
 
 def discovery_program_from_dict(data: dict[str, Any]) -> DiscoveryProgramType:
+    if "source_endpoints" in data or "target_endpoints" in data:
+        try:
+            return LogicalJoinProgram.from_dict(data)
+        except LogicalEndpointFailure as exc:
+            raise DiscoveryFailure(exc.code, str(exc)) from exc
     if data.get("kind") == "reference_mapping":
         return ReferenceMappingProgram.from_dict(data)
     return DiscoveryProgram.from_dict(data)
@@ -1102,6 +1111,17 @@ def validate_discovery_run(run: DiscoveryRun) -> None:
         raise DiscoveryFailure(
             "unsupported_discovery",
             "The v0.2 discovery-run contract is reserved for reference mapping.",
+        )
+    if (
+        run.contract_version == DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION
+        and run.kind != "join_discovery"
+    ):
+        raise DiscoveryFailure("unsupported_discovery", "The v0.3 contract is for logical joins.")
+    if any(isinstance(item.program, LogicalJoinProgram) for item in run.candidates) and (
+        run.contract_version != DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION
+    ):
+        raise DiscoveryFailure(
+            "unsupported_discovery", "Logical endpoints require an explicitly opted-in v0.3 run."
         )
     _identifier(run.id, "run id")
     _sha256(run.graph_revision, "graph revision")

@@ -110,8 +110,9 @@ tarel lineage list-runtime
 tarel lineage trace-runtime local-run-001 accepted-duckdb-call --format json
 ```
 
-The current analysis input contract is `tarel.runtime-lineage-input.v0.2`; it produces stored
-documents with `tarel.runtime-lineage.v0.2`. Imports are create-only and fail if the graph revision
+The v0.2 analysis input contract is `tarel.runtime-lineage-input.v0.2`; it produces stored
+documents with `tarel.runtime-lineage.v0.2`. The optional logical-operation extension uses v0.3
+input and stored documents. Imports are create-only and fail if the graph revision
 has changed or an input node cannot be resolved exactly. Files live below
 `.tarel/runtime-lineage/` and are not mixed into static lineage documents.
 
@@ -130,7 +131,102 @@ dialects must include `duckdb`; it can then project those observations without m
 partial merely because of the dialect. DuckDB and Python remain different executor-plugin types
 even when they consume the same source calls.
 
-Final answer claims and browser rendering remain explicit follow-up work rather than being
-approximated with static workflow edges. The read-only browser currently has no runtime-lineage
-projection; import, validation, storage, export, CLI display, and trace projection are covered by
-this contract.
+## Logical operations: optional v0.3
+
+`tarel.runtime-lineage-input.v0.3` adds one `logical_operation` event. It describes an actual
+caller-executed logical operation over prior frames, not a new TAREL executor. Existing SQL,
+MongoDB, federated DuckDB and Python event types remain distinct. v0.1 and v0.2 retain their
+existing accepted shapes; they do not silently accept logical operations.
+
+| `operation` | Required dependency-reference kind |
+| --- | --- |
+| `extract`, `explode` | `logical_topology` |
+| `reference_mapping` | `reference_mapping` |
+| `object_binding` | `object_binding` |
+| `family_resolution` | `object_family` |
+| `hierarchy_rollup` | `semantic_concept` |
+| `context_expand` | `context_expansion` |
+
+Each logical event requires:
+
+- Ordered `sequence`, unique `call_id`, `status` and explicit `consumes` call IDs.
+- A SHA-256 `operation_sha256` of the caller's operation manifest, not its code or SQL.
+- Between 1 and 32 unique `dependency_refs`, each containing only `kind`, `graph`, `id` and
+  the exact artifact `revision` SHA-256. At least one reference must match the operation's kind.
+- `artifact_validation: "caller_claimed"`. Runtime import does not certify the referenced
+  artifact's current existence, review state, coverage or suitability.
+- The actual caller `executor`, `inputs`, `analysis`, hashed `result`, and safe `error_code`
+  structures already used by v0.2 analysis events. Never invent an executor for TAREL.
+
+For example, the logical part of an event can be expressed as:
+
+```json
+{
+  "kind": "logical_operation",
+  "operation": "explode",
+  "operation_sha256": "<operation-manifest-sha256>",
+  "dependency_refs": [{
+    "kind": "logical_topology",
+    "graph": "commerce",
+    "id": "order-items",
+    "revision": "<logical-topology-document-sha256>"
+  }],
+  "artifact_validation": "caller_claimed"
+}
+```
+
+This is an illustrative **fragment**, not a complete import document. Include all required
+event metadata listed above, a v0.3 envelope, and the earlier source events; replace hash
+placeholders with actual lowercase SHA-256 values. `inputs` hashes describe the frames used
+by the harness; result hashes describe the returned bounded output. TAREL stores these
+observations but cannot independently recompute private results.
+
+`family_resolution` and `context_expand` may start a run with empty `consumes` and `inputs`
+because they can operate on already stored metadata. They still require actual executor,
+artifact, timing, limits, nonempty output grain, counts and output-hash evidence on success.
+Other logical operations require earlier successful/accepted calls. Downstream analysis may
+consume logical results; failed operations remain visible but cannot become input evidence.
+All call references remain local to the same imported document, including v0.3.
+
+One supported chain is:
+
+```text
+physical orders → SQL source call → extract → explode → reference mapping → Python result frame
+```
+
+The source call uses physical graph inputs. The harness then emits the logical stages and
+the final analysis using explicit `consumes`. `trace-runtime` shows those actual stages and
+the original physical inputs. It does not fabricate SQL dependencies on earlier planning
+operations: direct SQL events retain their existing physical-input shape. Final answer prose
+or answer claims are not part of this observation contract.
+
+The CLI path is unchanged:
+
+```bash
+tarel lineage import-runtime logical-run --source sanitized-v03.json --format json
+tarel lineage show-runtime logical-run --format json
+tarel lineage trace-runtime logical-run accepted-analysis-call --format json
+```
+
+The SDK uses that same application path:
+
+```python
+from tarel.sdk import Tarel
+from tarel.lineage.runtime import RuntimeLineageInput
+
+tarel = Tarel(".tarel")
+observed = RuntimeLineageInput.from_dict(sanitized_v03_payload)
+tarel.lineage.import_runtime("logical-run", observed)
+trace = tarel.lineage.trace_runtime("logical-run", "accepted-analysis-call")
+```
+
+Historical references are intentionally revision-pinned claims, so a later sidecar edit does
+not erase the record of what the caller reported using. A `succeeded` or `accepted` operation
+**never promotes or confirms** a candidate. Consumers must apply current retrieval/review
+policy separately before reusing any mapping, family, binding or logical relation.
+
+`tarel.lineage.runtime_projection.browser_runtime_lineage(document)` provides a read-only
+browser-shaped projection with physical source references, operation labels, explicit
+`reads`/`consumes` edges, result counts and `caller_claimed` artifact references. It is separate
+from reusable static ETL flows. This pure projection is available to embedders; it does not
+automatically add runtime documents to the existing static-lineage browser tab.

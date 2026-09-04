@@ -34,6 +34,7 @@ from tarel.application import (
     compile_workspace_context_use_case,
     context_packet_impact_use_case,
     create_workspace_use_case,
+    current_focus_use_case,
     decide_annotation_use_case,
     decide_relationship_use_case,
     decide_workspace_relationship_use_case,
@@ -77,7 +78,7 @@ from tarel.connectors.contracts import (
 from tarel.context import ContextResult
 from tarel.context_caching import ContextCacheParts, split_context_packet
 from tarel.context_output import DEFAULT_MAX_CONTEXT_CHARACTERS
-from tarel.context_packets import ContextPacketDiff, ContextPacketImpact
+from tarel.context_packets import ContextPacketDiff, ContextPacketImpact, ContextPacketSnapshot
 from tarel.discovery.application import (
     DiscoveryAdviceResult,
     DiscoveryChangeResult,
@@ -114,8 +115,17 @@ from tarel.entity_resolution.contracts import (
     EntityResolutionCandidate,
     EntityResolutionMatch,
 )
+from tarel.expansion.application import expand_context_use_case
+from tarel.expansion.contracts import ContextExpansion, ExpansionInput, ExpansionTarget
 from tarel.focus.contracts import FocusDocument
 from tarel.graph.contracts import GraphDocument, GraphEdge
+from tarel.graph.reads import (
+    graph_header_use_case,
+    graph_objects_use_case,
+    graph_slice_use_case,
+    rebuild_graph_index_use_case,
+)
+from tarel.graph.selective import GraphHeader, GraphObjectPage, GraphSlice
 from tarel.grounding import GroundingAsset, GroundingBundle
 from tarel.grounding_application import (
     compile_graph_grounding_use_case,
@@ -165,6 +175,41 @@ from tarel.lineage.runtime import (
 from tarel.lineage.status import LineageStatus
 from tarel.lineage.tasks import LineageTask
 from tarel.lineage.traversal import LineageReference, UpstreamTrace
+from tarel.logical_joins.application import (
+    LogicalJoinMatch,
+    find_logical_joins_use_case,
+    list_logical_joins_use_case,
+    load_logical_join_use_case,
+    review_logical_join_use_case,
+)
+from tarel.logical_joins.contracts import LogicalJoin
+from tarel.object_bindings.application import (
+    ObjectBindingResolution,
+    find_object_bindings_use_case,
+    load_object_binding_use_case,
+    resolve_object_binding_use_case,
+    review_object_binding_use_case,
+    save_object_binding_use_case,
+)
+from tarel.object_bindings.contracts import ObjectValueBinding
+from tarel.object_families.application import (
+    FamilyMemberPage,
+    FamilyProjection,
+    import_object_family_use_case,
+    list_object_families_use_case,
+    load_object_family_use_case,
+    project_families_for_graphs_use_case,
+    propose_object_family_use_case,
+    resolve_family_members_use_case,
+    review_object_family_use_case,
+)
+from tarel.object_families.contracts import FamilyAttribute, ObjectFamily
+from tarel.object_families.proposals import (
+    FamilyProposalRun,
+    load_family_proposals_use_case,
+    plan_family_proposals_use_case,
+    run_family_proposals_use_case,
+)
 from tarel.reference_mapping.application import (
     ReferenceMappingChangeResult,
     decide_reference_mapping_candidate_use_case,
@@ -182,6 +227,14 @@ from tarel.retrieval.contracts import IndexBuildResult
 from tarel.retrieval.local import DEFAULT_MODEL_NAME, ModelDownloadResult
 from tarel.runtime import TarelRuntime
 from tarel.search import SearchResults
+from tarel.semantic_concepts.application import (
+    SemanticConceptMatch,
+    find_semantic_concepts_use_case,
+    load_semantic_concepts_use_case,
+    review_semantic_concept_use_case,
+    save_semantic_concepts_use_case,
+)
+from tarel.semantic_concepts.contracts import SemanticConceptDocument
 from tarel.semantics.application import (
     SemanticImportResult,
     edit_semantic_source_use_case,
@@ -214,6 +267,7 @@ from tarel.topology.application import (
     save_logical_topology_use_case,
 )
 from tarel.topology.contracts import DerivedRelation, LogicalTopologyDocument
+from tarel.topology.endpoint_contracts import LogicalEndpoint
 from tarel.ui.presentation import browser_graph, browser_workspace
 from tarel.workspaces.contracts import (
     WorkspaceDocument,
@@ -229,15 +283,19 @@ class Tarel:
 
     __slots__ = (
         "annotation",
+        "bindings",
         "context",
+        "concepts",
         "discovery",
         "entity_resolution",
+        "families",
         "focus",
         "graph",
         "grounding",
         "index",
         "knowledge",
         "lineage",
+        "logical_joins",
         "model",
         "reference_mapping",
         "relationship",
@@ -258,14 +316,18 @@ class Tarel:
         self.source = SourceAPI(self.runtime)
         self.semantic = SemanticAPI(self.runtime)
         self.context = ContextAPI(self.runtime)
+        self.concepts = ConceptsAPI(self.runtime)
         self.discovery = DiscoveryAPI(self.runtime)
         self.entity_resolution = EntityResolutionAPI(self.runtime)
         self.reference_mapping = ReferenceMappingAPI(self.runtime)
         self.topology = TopologyAPI(self.runtime)
+        self.families = FamiliesAPI(self.runtime)
         self.grounding = GroundingAPI(self.runtime)
         self.lineage = LineageAPI(self.runtime)
+        self.logical_joins = LogicalJoinsAPI(self.runtime)
         self.focus = FocusAPI(self.runtime)
         self.annotation = AnnotationAPI(self.runtime)
+        self.bindings = BindingsAPI(self.runtime)
         self.relationship = RelationshipAPI(self.runtime)
         self.model = ModelAPI(self.runtime)
         self.index = IndexAPI(self.runtime)
@@ -285,6 +347,31 @@ class _RuntimeAPI:
 
 
 class GraphAPI(_RuntimeAPI):
+    def header(self, name: str) -> GraphHeader:
+        return graph_header_use_case(name, runtime=self._runtime)
+
+    def objects(
+        self, name: str, *, object_ids: tuple[str, ...] | None = None,
+        namespace: str | None = None, offset: int = 0, limit: int = 100,
+        expected_revision: str | None = None,
+    ) -> GraphObjectPage:
+        return graph_objects_use_case(
+            name, object_ids=object_ids, namespace=namespace, offset=offset, limit=limit,
+            expected_revision=expected_revision, runtime=self._runtime,
+        )
+
+    def slice(
+        self, name: str, object_ids: tuple[str, ...], *, namespace: str | None = None,
+        expected_revision: str | None = None,
+    ) -> GraphSlice:
+        return graph_slice_use_case(
+            name, object_ids, namespace=namespace, expected_revision=expected_revision,
+            runtime=self._runtime,
+        )
+
+    def rebuild_index(self, name: str) -> GraphHeader:
+        return rebuild_graph_index_use_case(name, runtime=self._runtime)
+
     def list(self) -> tuple[str, ...]:
         return list_graphs_use_case(runtime=self._runtime)
 
@@ -325,6 +412,160 @@ class GraphAPI(_RuntimeAPI):
             config_path=_optional_path(config),
             namespace=namespace,
             runtime=self._runtime,
+        )
+
+
+class FamiliesAPI(_RuntimeAPI):
+    """Declare schema-compatible families and resolve only needed physical members."""
+
+    def plan(
+        self, graph: str, run_id: str, *, provider_name: str, model: str | None = None,
+        objects_per_batch: int = 50, max_input_chars: int = 40_000, max_objects: int = 1_000,
+    ) -> FamilyProposalRun:
+        return plan_family_proposals_use_case(
+            graph, run_id, provider_name=provider_name, model=model,
+            objects_per_batch=objects_per_batch, max_input_chars=max_input_chars,
+            max_objects=max_objects, runtime=self._runtime,
+        )
+
+    def run(
+        self, run_id: str, *, workers: int = 1, resume: bool = False, timeout: float = 120.0,
+    ) -> FamilyProposalRun:
+        return run_family_proposals_use_case(
+            run_id, workers=workers, resume=resume, timeout=timeout, runtime=self._runtime,
+        )
+
+    def load_run(self, run_id: str) -> FamilyProposalRun:
+        return load_family_proposals_use_case(run_id, runtime=self._runtime)
+
+    def propose(
+        self, graph: str, family_id: str, *, name: str, members: tuple[str, ...],
+        grain: tuple[str, ...], attributes: tuple[FamilyAttribute, ...] = (),
+        producer: str = "coding_agent",
+    ) -> ObjectFamily:
+        return propose_object_family_use_case(
+            graph, family_id, name=name, members=members, grain=grain,
+            attributes=attributes, producer=producer, runtime=self._runtime,
+        )
+
+    def import_document(self, document: ObjectFamily) -> ObjectFamily:
+        return import_object_family_use_case(document, runtime=self._runtime)
+
+    def load(self, graph: str, family_id: str) -> ObjectFamily:
+        return load_object_family_use_case(graph, family_id, runtime=self._runtime)
+
+    def list(self, graph: str) -> tuple[dict[str, object], ...]:
+        return list_object_families_use_case(graph, runtime=self._runtime)
+
+    def review(
+        self, graph: str, family_id: str, *, decision: str, reason: str,
+        expected_revision: str,
+    ) -> ObjectFamily:
+        return review_object_family_use_case(
+            graph, family_id, decision=decision, reason=reason,
+            expected_revision=expected_revision, runtime=self._runtime,
+        )
+
+    def members(
+        self, graph: str, family_id: str, *, expected_revision: str,
+        mode: str = "confirmed_only", offset: int = 0, limit: int = 50,
+        filters: Mapping[str, str] | None = None, namespace: str | None = None,
+        allowed_object_ids: frozenset[str] | None = None,
+    ) -> FamilyMemberPage:
+        return resolve_family_members_use_case(
+            graph, family_id, expected_revision=expected_revision, mode=mode,
+            offset=offset, limit=limit, filters=filters, namespace=namespace,
+            allowed_object_ids=allowed_object_ids,
+            runtime=self._runtime,
+        )
+
+
+class BindingsAPI(_RuntimeAPI):
+    """Optional exact bindings; private values are used only in memory during resolution."""
+
+    def import_document(self, binding: ObjectValueBinding) -> ObjectValueBinding:
+        return save_object_binding_use_case(binding, runtime=self._runtime)
+
+    def load(self, graph: str, binding_id: str) -> ObjectValueBinding:
+        return load_object_binding_use_case(graph, binding_id, runtime=self._runtime)
+
+    def find(self, graph: str, *, mode: str = "confirmed_only") -> tuple[dict[str, object], ...]:
+        return find_object_bindings_use_case(graph, mode=mode, runtime=self._runtime)
+
+    def review(
+        self, graph: str, binding_id: str, *, expected_revision: str, decision: str, reason: str,
+    ) -> ObjectValueBinding:
+        return review_object_binding_use_case(
+            graph, binding_id, expected_revision=expected_revision, decision=decision,
+            reason=reason, runtime=self._runtime,
+        )
+
+    def resolve(
+        self, graph: str, binding_id: str, *, expected_revision: str, values: tuple[str, ...],
+        mode: str = "confirmed_only", limit: int = 100, namespace: str | None = None,
+        allowed_object_ids: frozenset[str] | None = None,
+    ) -> ObjectBindingResolution:
+        return resolve_object_binding_use_case(
+            graph, binding_id, expected_revision=expected_revision, values=values, mode=mode,
+            limit=limit, namespace=namespace, allowed_object_ids=allowed_object_ids,
+            runtime=self._runtime,
+        )
+
+
+class LogicalJoinsAPI(_RuntimeAPI):
+    def load(self, join_id: str) -> LogicalJoin:
+        return load_logical_join_use_case(join_id, runtime=self._runtime)
+
+    def list(self, *, graph: str | None = None) -> tuple[LogicalJoin, ...]:
+        return list_logical_joins_use_case(graph_name=graph, runtime=self._runtime)
+
+    def find(
+        self, graph: str, *, mode: str = "confirmed_only", endpoint: LogicalEndpoint | None = None,
+        join_id: str | None = None, limit: int = 20,
+    ) -> tuple[LogicalJoinMatch, ...]:
+        return find_logical_joins_use_case(
+            graph, mode=mode, endpoint=endpoint, join_id=join_id, limit=limit,
+            runtime=self._runtime,
+        )
+
+    def review(
+        self, join_id: str, *, expected_revision: str, decision: str, reason: str,
+    ) -> LogicalJoin:
+        return review_logical_join_use_case(
+            join_id, expected_revision=expected_revision, decision=decision, reason=reason,
+            runtime=self._runtime,
+        )
+
+
+class ConceptsAPI(_RuntimeAPI):
+    """Optional reviewed concept representations and explicit parent hierarchies."""
+
+    def import_document(
+        self, document: SemanticConceptDocument, *, expected_revision: str | None = None,
+    ) -> SemanticConceptDocument:
+        return save_semantic_concepts_use_case(
+            document, expected_revision=expected_revision, runtime=self._runtime,
+        )
+
+    def load(self, graph: str) -> SemanticConceptDocument:
+        return load_semantic_concepts_use_case(graph, runtime=self._runtime)
+
+    def find(
+        self, graph: str, *, query: str | None = None, endpoint: LogicalEndpoint | None = None,
+        mode: str = "confirmed_only", limit: int = 20, concept_id: str | None = None,
+        allowed_object_ids: frozenset[str] | None = None,
+    ) -> tuple[SemanticConceptMatch, ...]:
+        return find_semantic_concepts_use_case(
+            graph, query=query, endpoint=endpoint, mode=mode, limit=limit, concept_id=concept_id,
+            allowed_object_ids=allowed_object_ids, runtime=self._runtime,
+        )
+
+    def review(
+        self, graph: str, concept_id: str, *, expected_revision: str, decision: str, reason: str,
+    ) -> SemanticConceptDocument:
+        return review_semantic_concept_use_case(
+            graph, concept_id, expected_revision=expected_revision, decision=decision,
+            reason=reason, runtime=self._runtime,
         )
 
 
@@ -689,6 +930,7 @@ class SearchAPI(_RuntimeAPI):
         n_threads: int | None = None,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        family_mode: str | None = "confirmed_only",
     ) -> SearchResults:
         return search_graph_use_case(
             name,
@@ -700,6 +942,7 @@ class SearchAPI(_RuntimeAPI):
             n_threads=n_threads,
             annotation_states=annotation_states,
             validated_only=validated_only,
+            family_mode=family_mode,
             runtime=self._runtime,
         )
 
@@ -720,6 +963,7 @@ class SearchAPI(_RuntimeAPI):
         n_threads: int | None = None,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        family_mode: str | None = "confirmed_only",
     ) -> SearchResults:
         systems, graphs, areas, schemas, zones = _workspace_scope_arguments(
             selection,
@@ -743,11 +987,22 @@ class SearchAPI(_RuntimeAPI):
             n_threads=n_threads,
             annotation_states=annotation_states,
             validated_only=validated_only,
+            family_mode=family_mode,
             runtime=self._runtime,
         )
 
 
 class ContextAPI(_RuntimeAPI):
+    def expand(
+        self, packet: ContextResult | ContextPacketSnapshot | dict[str, object],
+        targets: tuple[ExpansionTarget, ...], *, mode: str = "confirmed_only",
+        inputs: Mapping[str, ExpansionInput] | None = None, max_characters: int = 24_000,
+    ) -> ContextExpansion:
+        return expand_context_use_case(
+            packet, targets, mode=mode, inputs=inputs, max_characters=max_characters,
+            runtime=self._runtime,
+        )
+
     def prefix_graph(
         self,
         name: str,
@@ -759,6 +1014,7 @@ class ContextAPI(_RuntimeAPI):
         max_characters: int = 500_000,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        logical_hints: str | None = None,
     ) -> ContextResult:
         return compile_context_prefix_use_case(
             name,
@@ -769,6 +1025,7 @@ class ContextAPI(_RuntimeAPI):
             max_characters=max_characters,
             annotation_states=annotation_states,
             validated_only=validated_only,
+            logical_hints=logical_hints,
             runtime=self._runtime,
         )
 
@@ -788,6 +1045,7 @@ class ContextAPI(_RuntimeAPI):
         max_characters: int = 500_000,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        logical_hints: str | None = None,
     ) -> ContextResult:
         systems, graphs, areas, schemas, zones = _workspace_scope_arguments(
             selection,
@@ -810,6 +1068,7 @@ class ContextAPI(_RuntimeAPI):
             max_characters=max_characters,
             annotation_states=annotation_states,
             validated_only=validated_only,
+            logical_hints=logical_hints,
             runtime=self._runtime,
         )
 
@@ -843,6 +1102,7 @@ class ContextAPI(_RuntimeAPI):
         n_threads: int | None = None,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        logical_hints: str | None = None,
     ) -> ContextResult:
         return compile_context_use_case(
             name,
@@ -859,6 +1119,7 @@ class ContextAPI(_RuntimeAPI):
             n_threads=n_threads,
             annotation_states=annotation_states,
             validated_only=validated_only,
+            logical_hints=logical_hints,
             runtime=self._runtime,
         )
 
@@ -884,6 +1145,7 @@ class ContextAPI(_RuntimeAPI):
         n_threads: int | None = None,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        logical_hints: str | None = None,
     ) -> ContextResult:
         systems, graphs, areas, schemas, zones = _workspace_scope_arguments(
             selection,
@@ -912,6 +1174,7 @@ class ContextAPI(_RuntimeAPI):
             n_threads=n_threads,
             annotation_states=annotation_states,
             validated_only=validated_only,
+            logical_hints=logical_hints,
             runtime=self._runtime,
         )
 
@@ -950,6 +1213,7 @@ class GroundingAPI(_RuntimeAPI):
         n_threads: int | None = None,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        logical_hints: str | None = None,
     ) -> GroundingBundle:
         if (graph is None) == (workspace is None):
             raise WorkspaceFailure(
@@ -975,6 +1239,7 @@ class GroundingAPI(_RuntimeAPI):
             "n_threads": n_threads,
             "annotation_states": annotation_states,
             "validated_only": validated_only,
+            "logical_hints": logical_hints,
             "runtime": self._runtime,
         }
         if graph is not None:
@@ -1036,6 +1301,7 @@ class GroundingAPI(_RuntimeAPI):
         n_threads: int | None = None,
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
+        logical_hints: str | None = None,
     ) -> GroundingBundle:
         """Return ranked semantic assets without relationship expansion."""
         if not 1 <= limit <= 20:
@@ -1066,6 +1332,7 @@ class GroundingAPI(_RuntimeAPI):
             n_threads=n_threads,
             annotation_states=annotation_states,
             validated_only=validated_only,
+            logical_hints=logical_hints,
         )
 
     def describe(
@@ -1433,7 +1700,24 @@ class ViewAPI(_RuntimeAPI):
         *,
         lineages: tuple[str, ...] = (),
         editable: bool = False,
+        family_mode: str | None = None,
+        focuses: tuple[str, ...] = (),
     ) -> dict[str, object]:
+        fallback_reason = "full_projection_required"
+        if family_mode is not None:
+            from tarel.ui.lazy_family_view import try_lazy_family_graph_view_use_case
+
+            attempted = try_lazy_family_graph_view_use_case(
+                name, family_mode=family_mode,
+                workspaces=tuple(load_workspace_use_case(item, runtime=self._runtime)
+                                 for item in list_workspaces_use_case(runtime=self._runtime)),
+                lineage_documents=tuple(load_lineage_use_case(item, runtime=self._runtime)
+                                        for item in lineages),
+                editable=editable, has_focus=bool(focuses), runtime=self._runtime,
+            )
+            if attempted.payload is not None:
+                return attempted.payload
+            fallback_reason = attempted.fallback_reason or fallback_reason
         graph = load_graph_use_case(name, runtime=self._runtime)
         documents = tuple(load_lineage_use_case(item, runtime=self._runtime) for item in lineages)
         workspaces = tuple(
@@ -1462,7 +1746,11 @@ class ViewAPI(_RuntimeAPI):
             mode="confirmed_then_candidates",
             runtime=self._runtime,
         )
-        return browser_graph(
+        families = (
+            project_families_for_graphs_use_case((graph,), mode=family_mode, runtime=self._runtime)
+            if family_mode is not None else FamilyProjection((), ())
+        )
+        payload = browser_graph(
             graph,
             workspaces=workspaces,
             editable=editable,
@@ -1473,7 +1761,17 @@ class ViewAPI(_RuntimeAPI):
             logical_topologies=logical_topology_projection.documents,
             logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
             reference_mapping_matches=reference_mapping_matches,
+            family_mode=family_mode,
+            object_families=families.families,
+            object_family_stale_graphs=families.stale_graphs,
+            focus_documents=tuple(current_focus_use_case(item, runtime=self._runtime)
+                                  for item in focuses),
         )
+        if family_mode is not None:
+            from tarel.ui.lazy_family_view import full_family_projection_storage
+
+            payload["storage"] = full_family_projection_storage(fallback_reason)
+        return payload
 
     def workspace(
         self,
@@ -1487,6 +1785,8 @@ class ViewAPI(_RuntimeAPI):
         schemas: tuple[str, ...] = (),
         zones: tuple[str, ...] = (),
         editable: bool = False,
+        family_mode: str | None = None,
+        focuses: tuple[str, ...] = (),
     ) -> dict[str, object]:
         scope = _resolve_workspace_scope(
             self._runtime,
@@ -1543,7 +1843,12 @@ class ViewAPI(_RuntimeAPI):
                 runtime=self._runtime,
             )
         )
-        return browser_workspace(
+        families = (
+            project_families_for_graphs_use_case(
+                graph_documents, mode=family_mode, runtime=self._runtime,
+            ) if family_mode is not None else FamilyProjection((), ())
+        )
+        payload = browser_workspace(
             graph_documents,
             scope,
             workspace=workspace,
@@ -1555,7 +1860,19 @@ class ViewAPI(_RuntimeAPI):
             logical_topologies=logical_topology_projection.documents,
             logical_topology_stale_graphs=logical_topology_projection.stale_graphs,
             reference_mapping_matches=reference_mapping_matches,
+            family_mode=family_mode,
+            object_families=families.families,
+            object_family_stale_graphs=families.stale_graphs,
+            focus_documents=tuple(current_focus_use_case(item, runtime=self._runtime)
+                                  for item in focuses),
         )
+        if family_mode is not None:
+            from tarel.ui.lazy_family_view import full_family_projection_storage
+
+            payload["storage"] = full_family_projection_storage(
+                "workspace_requires_full_projection"
+            )
+        return payload
 
 
 class FocusAPI(_RuntimeAPI):
@@ -1930,6 +2247,7 @@ class DiscoveryAPI(_RuntimeAPI):
         candidate_budget: int = 20,
         advisor_provider: str | None = None,
         identity_inspection: bool = False,
+        logical_endpoints: bool = False,
         scope_mode: str = "global_population",
         run_id: str | None = None,
     ) -> DiscoveryChangeResult:
@@ -1942,6 +2260,7 @@ class DiscoveryAPI(_RuntimeAPI):
             candidate_budget=candidate_budget,
             advisor_provider=advisor_provider,
             identity_inspection=identity_inspection,
+            logical_endpoints=logical_endpoints,
             scope_mode=scope_mode,
             run_id=run_id,
             runtime=self._runtime,

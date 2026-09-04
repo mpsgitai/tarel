@@ -14,6 +14,11 @@ The contract version is `tarel.logical-topology.v0.1.experimental`. It is intent
 from `GraphDocument`: importing or reviewing a logical relation does not add physical nodes or
 edges and does not change the graph revision.
 
+[Object families](object-families.md) use a separate experimental sidecar. A family groups explicitly
+selected, schema-compatible physical objects and resolves their references through bounded member
+pages. It does not introduce an `extract`/`explode` step or change this topology document. Both
+features remain optional metadata; neither executes a query or proves that data can be combined.
+
 ## Contract at a glance
 
 One logical-topology document is stored per graph. It contains:
@@ -289,6 +294,46 @@ Callers that construct contracts directly should obtain the graph through
 `tarel.topology.document("commerce", relations)` to bind the canonical graph revision and validate
 the endpoints before persistence. Evidence should be added only after the authorized executor
 returns its real aggregates and manifest hashes.
+
+## Offer a compact hint in agent context
+
+Logical relations are not automatically searched or traversed. Enable hints when compiling the
+existing physical context:
+
+```bash
+tarel context build commerce "orders and items" \
+  --logical-hints confirmed_only --format json
+```
+
+```python
+packet = tarel.context.graph(
+    "commerce",
+    "orders and items",
+    logical_hints="confirmed_only",
+)
+hints = packet.stable_dict()["logical_hints"]["items"]
+for hint in hints:
+    if hint["kind"] == "derived_relation":
+        artifact = hint["artifact"]
+        current = tarel.topology.load(artifact["graph"])
+        if current.revision != artifact["revision"]:
+            raise RuntimeError("Logical topology changed; recompile context before use.")
+        relation = next(item for item in current.derived_relations if item.id == artifact["id"])
+        # An authorized harness, not TAREL, may execute the reviewed relation.
+```
+
+Only a relation whose physical source object is already selected can appear. The hint contains its
+name, operation kinds, output schema, grain, state, aggregate evidence, and an artifact reference;
+it omits the JSON Pointers, manifests, executor details, and review reason. Load the full artifact
+explicitly when the harness needs the plan.
+
+`confirmed_only` includes reviewed relations. `confirmed_then_candidates` and `include_candidates`
+also offer unreviewed relations as `exploratory_only`, requiring runtime validation. TAREL does not
+guess that two separately declared derived relations are equivalent. Rejected relations never
+appear. Hints are removed before physical fields when the context character budget is tight;
+stale relations are omitted with a warning. The same policy is available on workspace context,
+query-independent prefixes, and grounding. Without the option, the ordinary context is unchanged.
+See [Optional logical hints](context-contract.md#optional-logical-hints) for cache and scope rules.
 
 ## Evidence and review
 

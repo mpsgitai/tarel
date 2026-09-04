@@ -54,6 +54,7 @@ from tarel.context import (
     compile_context_from_search,
     compile_context_prefix,
 )
+from tarel.context_hints_application import add_logical_context_hints_use_case
 from tarel.context_output import ContextScope
 from tarel.context_packets import (
     ContextPacketDiff,
@@ -635,6 +636,13 @@ def load_focus_use_case(
     return _focus_store(runtime).load(name)
 
 
+def current_focus_use_case(
+    name: str, *, runtime: TarelRuntime | None = None,
+) -> FocusDocument:
+    """Usable focus, checked against all source graph and lineage revisions."""
+    return _load_current_focus(name, runtime=runtime)[0]
+
+
 def list_focuses_use_case(*, runtime: TarelRuntime | None = None) -> tuple[str, ...]:
     return _focus_store(runtime).list()
 
@@ -876,6 +884,7 @@ def search_graph_use_case(
     n_threads: int | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    family_mode: str | None = "confirmed_only",
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
     graph = _graph_store(runtime).load(name)
@@ -883,7 +892,7 @@ def search_graph_use_case(
         annotation_states,
         validated_only=validated_only,
     )
-    return _search_loaded_graph(
+    results = _search_loaded_graph(
         graph,
         query,
         limit=limit,
@@ -894,6 +903,11 @@ def search_graph_use_case(
         annotation_states=selected_states,
         runtime=runtime,
     )
+    from tarel.object_families.search import family_name_hits, with_family_hits
+
+    return with_family_hits(results, family_name_hits(
+        graph, results, mode=family_mode, namespace=namespace, runtime=runtime,
+    ), limit=limit)
 
 
 def search_workspace_use_case(
@@ -911,6 +925,7 @@ def search_workspace_use_case(
     n_threads: int | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    family_mode: str | None = "confirmed_only",
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
     if not 1 <= limit <= 100:
@@ -948,7 +963,19 @@ def search_workspace_use_case(
         )
         for name in scope.graph_names
     )
-    return combine_workspace_search(scope, results, limit=limit)
+    from tarel.object_families.search import family_name_hits, with_family_hits
+
+    combined = combine_workspace_search(scope, results, limit=limit)
+    families = tuple(
+        hit for graph_name in scope.graph_names
+        for hit in family_name_hits(
+            loaded[graph_name], combined, mode=family_mode, scoped=True,
+            object_ids=frozenset(
+                item.object_id for item in scope.objects if item.graph == graph_name
+            ), runtime=runtime,
+        )
+    )
+    return with_family_hits(combined, families, limit=limit)
 
 
 def _search_loaded_graph(
@@ -1017,6 +1044,7 @@ def compile_context_use_case(
     n_threads: int | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     graph = _graph_store(runtime).load(name)
@@ -1025,7 +1053,7 @@ def compile_context_use_case(
         validated_only=validated_only,
     )
     if mode == "lexical":
-        return compile_context(
+        result = compile_context(
             graph,
             query,
             namespace=namespace,
@@ -1037,28 +1065,33 @@ def compile_context_use_case(
             max_characters=max_characters,
             annotation_states=selected_states,
         )
-    search = search_graph_use_case(
-        name,
-        query,
-        limit=100,
-        namespace=namespace,
-        mode=mode,
-        model_path=model_path,
-        n_threads=n_threads,
-        annotation_states=selected_states,
-        runtime=runtime,
-    )
-    return compile_context_from_search(
-        graph,
-        search,
-        namespace=namespace,
-        seed_limit=seed_limit,
-        max_objects=max_objects,
-        max_joins=max_joins,
-        max_hops=max_hops,
-        max_fields_per_object=max_fields_per_object,
-        max_characters=max_characters,
-        annotation_states=selected_states,
+    else:
+        search = search_graph_use_case(
+            name,
+            query,
+            limit=100,
+            namespace=namespace,
+            mode=mode,
+            model_path=model_path,
+            n_threads=n_threads,
+            annotation_states=selected_states,
+            family_mode=None,
+            runtime=runtime,
+        )
+        result = compile_context_from_search(
+            graph,
+            search,
+            namespace=namespace,
+            seed_limit=seed_limit,
+            max_objects=max_objects,
+            max_joins=max_joins,
+            max_hops=max_hops,
+            max_fields_per_object=max_fields_per_object,
+            max_characters=max_characters,
+            annotation_states=selected_states,
+        )
+    return add_logical_context_hints_use_case(
+        result, (graph,), mode=logical_hints, runtime=runtime,
     )
 
 
@@ -1082,6 +1115,7 @@ def compile_workspace_context_use_case(
     n_threads: int | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     workspace, loaded, scope = _load_workspace_scope(
@@ -1110,11 +1144,12 @@ def compile_workspace_context_use_case(
         model_path=model_path,
         n_threads=n_threads,
         annotation_states=selected_states,
+        family_mode=None,
         runtime=runtime,
     )
     projection = project_workspace_scope(workspace, loaded, scope)
     selection = scope.selection
-    return compile_context_from_search(
+    result = compile_context_from_search(
         projection,
         search,
         seed_limit=seed_limit,
@@ -1135,6 +1170,10 @@ def compile_workspace_context_use_case(
             zones=tuple(sorted(set(selection.zones))),
         ),
     )
+    return add_logical_context_hints_use_case(
+        result, tuple(loaded.values()), mode=logical_hints,
+        projection=projection, runtime=runtime,
+    )
 
 
 def compile_context_prefix_use_case(
@@ -1147,6 +1186,7 @@ def compile_context_prefix_use_case(
     max_characters: int = 500_000,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     graph = _graph_store(runtime).load(name)
@@ -1154,7 +1194,7 @@ def compile_context_prefix_use_case(
         annotation_states,
         validated_only=validated_only,
     )
-    return compile_context_prefix(
+    result = compile_context_prefix(
         graph,
         namespace=namespace,
         max_objects=max_objects,
@@ -1162,6 +1202,9 @@ def compile_context_prefix_use_case(
         max_fields_per_object=max_fields_per_object,
         max_characters=max_characters,
         annotation_states=selected_states,
+    )
+    return add_logical_context_hints_use_case(
+        result, (graph,), mode=logical_hints, runtime=runtime,
     )
 
 
@@ -1179,6 +1222,7 @@ def compile_workspace_context_prefix_use_case(
     max_characters: int = 500_000,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     workspace, loaded, scope = _load_workspace_scope(
@@ -1196,7 +1240,7 @@ def compile_workspace_context_prefix_use_case(
     )
     projection = project_workspace_scope(workspace, loaded, scope)
     selection = scope.selection
-    return compile_context_prefix(
+    result = compile_context_prefix(
         projection,
         max_objects=max_objects,
         max_joins=max_joins,
@@ -1213,6 +1257,10 @@ def compile_workspace_context_prefix_use_case(
             schemas=tuple(sorted(set(selection.schemas))),
             zones=tuple(sorted(set(selection.zones))),
         ),
+    )
+    return add_logical_context_hints_use_case(
+        result, tuple(loaded.values()), mode=logical_hints,
+        projection=projection, runtime=runtime,
     )
 
 

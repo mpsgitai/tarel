@@ -104,6 +104,7 @@ def compile_graph_grounding_use_case(
     n_threads: int | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> GroundingBundle:
     lineage_names = _lineage_names(lineage_names)
@@ -123,6 +124,7 @@ def compile_graph_grounding_use_case(
         n_threads=n_threads,
         annotation_states=annotation_states,
         validated_only=validated_only,
+        logical_hints=logical_hints,
         runtime=runtime,
     )
     graph = load_graph_use_case(name, runtime=runtime)
@@ -169,6 +171,7 @@ def compile_workspace_grounding_use_case(
     n_threads: int | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> GroundingBundle:
     lineage_names = _lineage_names(lineage_names)
@@ -202,6 +205,7 @@ def compile_workspace_grounding_use_case(
         n_threads=n_threads,
         annotation_states=annotation_states,
         validated_only=validated_only,
+        logical_hints=logical_hints,
         runtime=runtime,
     )
     return _bundle(

@@ -59,6 +59,24 @@ class FieldSearchHit:
 
 
 @dataclass(frozen=True, slots=True)
+class FamilySearchReference:
+    """A metadata hit, never an executable table or a member expansion."""
+
+    id: str
+    revision: str
+    state: str
+    member_count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "object_family", "id": self.id, "revision": self.revision,
+            "state": self.state, "member_count": self.member_count,
+            "usage": "confirmed" if self.state == "reviewed" else "exploratory_only",
+            "executable": False,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SearchHit:
     id: str
     label: str
@@ -68,6 +86,7 @@ class SearchHit:
     reasons: tuple[str, ...]
     fields: tuple[FieldSearchHit, ...]
     source_graph: str | None = None
+    family: FamilySearchReference | None = None
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -81,6 +100,8 @@ class SearchHit:
         }
         if self.source_graph is not None:
             payload["source_graph"] = self.source_graph
+        if self.family is not None:
+            payload["family"] = self.family.to_dict()
         return payload
 
 

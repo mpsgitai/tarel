@@ -51,11 +51,19 @@ from tarel.lineage.application import (
 )
 from tarel.lineage.contracts import LineageDocument, LineageFailure
 from tarel.lineage.revision import lineage_revision
+from tarel.logical_joins.contracts import LogicalJoinFailure
+from tarel.object_bindings.contracts import ObjectBindingFailure
+from tarel.object_families.application import (
+    project_families_for_graphs_use_case,
+    resolve_family_members_use_case,
+)
+from tarel.object_families.contracts import ObjectFamilyFailure
 from tarel.reference_mapping.application import (
     find_reference_mapping_candidates_for_graph_use_case,
 )
 from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
+from tarel.semantic_concepts.contracts import SemanticConceptFailure
 from tarel.semantics.application import (
     edit_semantic_source_use_case,
     list_semantic_imports_use_case,
@@ -64,12 +72,16 @@ from tarel.semantics.application import (
 from tarel.semantics.contracts import SemanticFailure
 from tarel.topology.application import project_logical_topologies_for_graphs_use_case
 from tarel.topology.contracts import LogicalTopologyFailure
+from tarel.topology.endpoint_contracts import LogicalEndpointFailure
+from tarel.ui.logical_metadata import LogicalMetadataFailure, logical_metadata_use_case
 from tarel.ui.presentation import (
     browser_focus_catalog,
     browser_focus_selection,
     browser_graph,
     browser_lineages,
     browser_workspace,
+    family_view_scope_revision,
+    focus_physical_objects,
     workspace_revision,
 )
 from tarel.workspaces.contracts import WorkspaceFailure
@@ -101,21 +113,52 @@ class UIConfig:
     lineages: tuple[str, ...] = ()
     focuses: tuple[str, ...] = ()
     editable: bool = False
+    family_mode: str | None = None
 
 
 class TarelUIBackend:
     def __init__(self, config: UIConfig) -> None:
         self.config = config
         self._lineages = list(config.lineages)
-        self._focus_cache: tuple[FocusDocument, ...] | None = None
 
     def bootstrap(self) -> dict[str, object]:
+        return self._bootstrap(self.config.family_mode)
+
+    def _bootstrap(
+        self, family_mode: str | None, focus_names: tuple[str, ...] | None = None,
+    ) -> dict[str, object]:
+        names = self.config.focuses if focus_names is None else focus_names
+        fallback_reason = "workspace_requires_full_projection"
+        if family_mode is not None and not self.config.workspace:
+            from tarel.ui.lazy_family_view import try_lazy_family_graph_view_use_case
+
+            attempted = try_lazy_family_graph_view_use_case(
+                self._single_graph(), family_mode=family_mode,
+                workspaces=tuple(
+                    load_workspace_use_case(name) for name in list_workspaces_use_case()
+                ),
+                lineage_documents=tuple(load_lineage_use_case(name) for name in self._lineages),
+                editable=self.config.editable,
+                has_focus=bool(names) or bool(self._focus_documents()),
+            )
+            if attempted.payload is not None:
+                payload = attempted.payload
+                payload.update(focuses=[], focus_selection=None, knowledge_documents=[])
+                for record in payload["review"]:
+                    record["available_context_document_ids"] = []
+                return payload
+            fallback_reason = attempted.fallback_reason or "full_projection_required"
+        selected_focuses = self._selected_focus_documents(names) if names else ()
         documents = tuple(load_lineage_use_case(name) for name in self._lineages)
         workspace = None
         if self.config.workspace:
             workspace = load_workspace_use_case(self.config.workspace)
             scope = self._scope()
             graphs = tuple(load_graph_use_case(name) for name in scope.graph_names)
+            families = (
+                project_families_for_graphs_use_case(graphs, mode=family_mode)
+                if family_mode is not None else None
+            )
             logical_topology_projection = project_logical_topologies_for_graphs_use_case(
                 graphs
             )
@@ -153,10 +196,18 @@ class TarelUIBackend:
                         mode="confirmed_then_candidates",
                     )
                 ),
+                family_mode=family_mode,
+                object_families=families.families if families else (),
+                object_family_stale_graphs=families.stale_graphs if families else (),
+                focus_documents=selected_focuses if family_mode is not None else (),
             )
         else:
             graph = load_graph_use_case(self._single_graph())
             graphs = (graph,)
+            families = (
+                project_families_for_graphs_use_case(graphs, mode=family_mode)
+                if family_mode is not None else None
+            )
             logical_topology_projection = project_logical_topologies_for_graphs_use_case(
                 graphs
             )
@@ -181,15 +232,20 @@ class TarelUIBackend:
                     graph,
                     mode="confirmed_then_candidates",
                 ),
+                family_mode=family_mode,
+                object_families=families.families if families else (),
+                object_family_stale_graphs=families.stale_graphs if families else (),
+                focus_documents=selected_focuses if family_mode is not None else (),
             )
         focus_documents = self._focus_documents()
         payload["focuses"] = browser_focus_catalog(
             focus_documents,
             stale_reasons=self._focus_stale_reasons(focus_documents),
         )
-        payload["focus_selection"] = (
-            self._select_focuses(self.config.focuses) if self.config.focuses else None
-        )
+        if "focus_selection" not in payload:
+            payload["focus_selection"] = (
+                browser_focus_selection(selected_focuses) if names else None
+            )
         knowledge_documents = list_knowledge_documents_use_case()
         payload["knowledge_documents"] = [
             item.to_dict(include_content=False)
@@ -217,9 +273,96 @@ class TarelUIBackend:
             record["available_context_document_ids"] = [
                 item.id for item in context.references
             ]
+        if family_mode is not None:
+            from tarel.ui.lazy_family_view import full_family_projection_storage
+
+            payload["storage"] = full_family_projection_storage(fallback_reason)
         return payload
 
     def mutate(self, route: str, payload: dict[str, Any]) -> dict[str, object]:
+        if route == "/api/logical/metadata":
+            graph_name = self._payload_graph(payload)
+            scope = self._scope() if self.config.workspace else None
+            allowed = (frozenset(item.object_id for item in scope.objects
+                                 if item.graph == graph_name) if scope else None)
+            names = _strings(payload, "focuses") if "focuses" in payload else self.config.focuses
+            focuses = self._selected_focus_documents(names) if names else ()
+            if focuses:
+                focused = frozenset(
+                    identifier for graph, identifier in focus_physical_objects(focuses)
+                    if graph == graph_name
+                )
+                allowed = focused if allowed is None else allowed & focused
+            expected = _optional_string(payload.get("scope_revision"))
+            if expected is not None:
+                actual = family_view_scope_revision(
+                    tuple(load_graph_use_case(name) for name in (
+                        scope.graph_names if scope else (self._single_graph(),)
+                    )), focuses, scope,
+                )
+                if actual != expected:
+                    raise UIFailure(
+                        "stale_logical_metadata_scope", "Reload the changed metadata scope.",
+                        status=409,
+                    )
+            return logical_metadata_use_case(
+                graph_name, _strings(payload, "object_ids"), allowed_object_ids=allowed,
+                mode=_optional_string(payload.get("mode")) or "include_candidates",
+            )
+        if route == "/api/families/view":
+            mode = _optional_string(payload.get("mode"))
+            if mode not in {None, "confirmed_only", "include_candidates"}:
+                raise UIFailure("invalid_object_family_mode", "Unsupported family policy.")
+            names = _strings(payload, "focuses") if "focuses" in payload else None
+            return self._bootstrap(mode, names)
+        if route == "/api/families/members":
+            graph_name = self._payload_graph(payload)
+            scope = self._scope() if self.config.workspace else None
+            allowed_ids = (
+                frozenset(
+                    item.object_id for item in scope.objects
+                    if item.graph == graph_name
+                )
+                if scope is not None else None
+            )
+            names = _strings(payload, "focuses") if "focuses" in payload else self.config.focuses
+            focuses = self._selected_focus_documents(names) if names else ()
+            if focuses:
+                focused_ids = frozenset(
+                    object_id for graph, object_id in focus_physical_objects(focuses)
+                    if graph == graph_name
+                )
+                allowed_ids = focused_ids if allowed_ids is None else allowed_ids & focused_ids
+            if scope is None and not focuses:
+                from tarel.object_families.application import _graphs
+                from tarel.ui.presentation import family_view_scope_revision_from_revisions
+
+                header = _graphs(None).header(self._single_graph())
+                revision = family_view_scope_revision_from_revisions({header.name: header.revision})
+            else:
+                revision = family_view_scope_revision(
+                    tuple(load_graph_use_case(name) for name in (
+                        scope.graph_names if scope else (self._single_graph(),)
+                    )), focuses, scope,
+                )
+            expected_scope = _optional_string(payload.get("scope_revision"))
+            if (focuses or expected_scope is not None) and expected_scope != revision:
+                raise UIFailure(
+                    "stale_object_family_scope",
+                    "The report/cube or workspace scope changed; reload the family view.",
+                    status=409,
+                )
+            page = resolve_family_members_use_case(
+                graph_name,
+                _string(payload, "family_id"),
+                expected_revision=_string(payload, "revision"),
+                mode=_string(payload, "mode"),
+                offset=_integer(payload, "offset", default=0, minimum=0, maximum=10_000_000),
+                limit=_integer(payload, "limit", default=50, minimum=1, maximum=100),
+                allowed_object_ids=allowed_ids,
+            ).to_dict()
+            page["scope_revision"] = revision
+            return page
         if route == "/api/focus/select":
             return self._select_focuses(_strings(payload, "focuses"))
         if route == "/api/lineage/upstream":
@@ -342,8 +485,6 @@ class TarelUIBackend:
         raise UIFailure("route_not_found", "Unknown UI API route.", status=404)
 
     def _focus_documents(self) -> tuple[FocusDocument, ...]:
-        if self._focus_cache is not None:
-            return self._focus_cache
         graph_names = set(self._graph_names())
         documents: list[FocusDocument] = []
         for name in list_focuses_use_case():
@@ -351,10 +492,12 @@ class TarelUIBackend:
             required = {item.name for item in document.sources if item.kind == "graph"}
             if required and required <= graph_names:
                 documents.append(document)
-        self._focus_cache = tuple(documents)
-        return self._focus_cache
+        return tuple(documents)
 
     def _select_focuses(self, names: tuple[str, ...]) -> dict[str, object]:
+        return browser_focus_selection(self._selected_focus_documents(names))
+
+    def _selected_focus_documents(self, names: tuple[str, ...]) -> tuple[FocusDocument, ...]:
         if len(names) != len(set(names)):
             raise UIFailure("duplicate_focus", "Select every focus at most once.")
         allowed = {item.name: item for item in self._focus_documents()}
@@ -369,7 +512,7 @@ class TarelUIBackend:
         if stale:
             name = sorted(stale)[0]
             raise FocusFailure("focus_stale", stale[name])
-        return browser_focus_selection(documents)
+        return documents
 
     def _focus_stale_reasons(
         self,
@@ -660,7 +803,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _static(self, path: str) -> None:
         name = "index.html" if path in {"", "/"} else path.removeprefix("/")
-        if name not in {"index.html", "app.js", "styles.css", "cytoscape.min.js"}:
+        if name not in {
+            "index.html", "app.js", "styles.css", "cytoscape.min.js", "logical_metadata.js",
+        }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         resource = files("tarel.ui").joinpath("static", name)
@@ -707,6 +852,7 @@ def run_ui(
     lineages: tuple[str, ...] = (),
     focuses: tuple[str, ...] = (),
     editable: bool = False,
+    family_mode: str | None = None,
     port: int = 0,
     open_browser: bool = True,
 ) -> int:
@@ -729,6 +875,7 @@ def run_ui(
             lineages=lineages,
             focuses=focuses,
             editable=editable,
+            family_mode=family_mode,
         )
     )
     backend.bootstrap()
@@ -761,6 +908,12 @@ def _ui_failure(exc: Exception) -> UIFailure:
             KnowledgeFailure,
             LineageFailure,
             LogicalTopologyFailure,
+            ObjectFamilyFailure,
+            ObjectBindingFailure,
+            LogicalJoinFailure,
+            SemanticConceptFailure,
+            LogicalEndpointFailure,
+            LogicalMetadataFailure,
             ReferenceMappingFailure,
             RelationshipFailure,
             SemanticFailure,
@@ -780,6 +933,8 @@ def _ui_failure(exc: Exception) -> UIFailure:
             "logical_topology_graph_rebase_forbidden",
             "reference_mapping_graph_revision_mismatch",
             "reference_mapping_review_conflict",
+            "object_family_graph_revision_mismatch",
+            "stale_object_family",
         } else 400
         if code.endswith("_not_found"):
             status = 404

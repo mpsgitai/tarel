@@ -7,9 +7,17 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from tarel.graph.contracts import GraphDocument, GraphFailure
+
+if TYPE_CHECKING:
+    from tarel.graph.selective import (
+        GraphHeader,
+        GraphObjectPage,
+        GraphObjectSchemaHashes,
+        GraphSlice,
+    )
 
 _GRAPH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -65,12 +73,73 @@ class FileGraphStore:
         if not self.root.exists():
             return ()
         return tuple(
-            sorted(
-                path.parent.name
-                for path in self.root.glob("*/graph.json")
-                if path.is_file()
-            )
+            sorted(path.parent.name for path in self.root.glob("*/graph.json") if path.is_file())
         )
+
+    def header(self, name: str) -> GraphHeader:
+        """Read graph identity without materializing nodes after a visible cold bootstrap."""
+        from tarel.graph.selective import read_header
+
+        return read_header(self, name)
+
+    def read_slice(
+        self,
+        name: str,
+        object_ids: tuple[str, ...],
+        *,
+        expected_revision: str | None = None,
+        namespace: str | None = None,
+        include_fields: bool = True,
+    ) -> GraphSlice:
+        from tarel.graph.selective import read_slice
+
+        return read_slice(
+            self,
+            name,
+            object_ids,
+            expected_revision=expected_revision,
+            namespace=namespace,
+            include_fields=include_fields,
+        )
+
+    def list_objects(
+        self,
+        name: str,
+        *,
+        object_ids: tuple[str, ...] | None = None,
+        namespace: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+        expected_revision: str | None = None,
+    ) -> GraphObjectPage:
+        from tarel.graph.selective import list_objects
+
+        return list_objects(
+            self,
+            name,
+            object_ids=object_ids,
+            namespace=namespace,
+            offset=offset,
+            limit=limit,
+            expected_revision=expected_revision,
+        )
+
+    def rebuild_index(self, name: str) -> GraphHeader:
+        """Explicitly replace a damaged or missing optional selective-read cache."""
+        from tarel.graph.selective import rebuild_index
+
+        return rebuild_index(self, name)
+
+    def object_schema_hashes(
+        self,
+        name: str,
+        object_ids: tuple[str, ...],
+        *,
+        expected_revision: str | None = None,
+    ) -> GraphObjectSchemaHashes:
+        from tarel.graph.selective import object_schema_hashes
+
+        return object_schema_hashes(self, name, object_ids, expected_revision=expected_revision)
 
     def path(self, name: str) -> Path:
         if not _GRAPH_NAME.fullmatch(name):

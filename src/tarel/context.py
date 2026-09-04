@@ -8,6 +8,7 @@ from tarel.annotations.states import (
     DEFAULT_CONTEXT_ANNOTATION_STATES,
     annotation_is_visible,
 )
+from tarel.context_hints import LogicalContextHints
 from tarel.context_output import (
     DEFAULT_MAX_CONTEXT_CHARACTERS,
     ContextField,
@@ -413,7 +414,29 @@ def _fit_character_budget(result: ContextResult) -> ContextResult:
     return current
 
 
+def with_logical_context_hints(
+    result: ContextResult, hints: LogicalContextHints
+) -> ContextResult:
+    """Refit the existing total budget after attaching optional, non-traversable hints."""
+    current = _with_character_counts(replace(result, logical_hints=hints))
+    if current.context_characters <= current.max_characters:
+        return current
+    # Find the longest fitting prefix without reserializing every removed tail item.
+    # Hint order and exact canonical character accounting stay the same.
+    lower, upper = 0, len(hints.items)
+    while lower < upper:
+        count = (lower + upper + 1) // 2
+        probe = _with_character_counts(replace(result, logical_hints=hints.keep_first(count)))
+        if probe.context_characters <= probe.max_characters:
+            lower = count
+        else:
+            upper = count - 1
+    return _fit_character_budget(replace(result, logical_hints=hints.keep_first(lower)))
+
+
 def _trim_context(result: ContextResult) -> ContextResult | None:
+    if result.logical_hints is not None and result.logical_hints.items:
+        return replace(result, logical_hints=result.logical_hints.trim_last())
     objects = list(result.objects)
     for index in range(len(objects) - 1, -1, -1):
         item = objects[index]
