@@ -56,20 +56,26 @@ class ObjectFamilyApplicationTests(TestCase):
 
     def test_propose_preserves_physical_graph_index_and_default_context(self) -> None:
         graph_before = self.sdk.graph.load("commerce").to_dict()
-        index = self.sdk.index.build("commerce")
-        index_before = index.path.read_bytes()
-        packet = self.sdk.context.graph("commerce", "sales_2024_01")
-        family = self._propose()
+        model = self.project / "test-embedding.gguf"
+        model.write_bytes(b"deterministic test model")
+        with patch("tarel.application.LlamaCppEmbedding", return_value=_Embedding()):
+            index = self.sdk.index.build("commerce", model_path=model)
+            index_before = index.path.read_bytes()
+            packet = self.sdk.context.graph("commerce", "sales_2024_01", model_path=model)
+            family = self._propose()
+
+            self.assertEqual(
+                self.sdk.context.graph(
+                    "commerce", "sales_2024_01", model_path=model
+                ).canonical_json(),
+                packet.canonical_json(),
+            )
 
         self.assertEqual(family.state, "candidate")
         self.assertEqual(len(family.member_ids), 2)
         self.assertEqual(family.grain, ("sale_id",))
         self.assertEqual(self.sdk.graph.load("commerce").to_dict(), graph_before)
         self.assertEqual(index.path.read_bytes(), index_before)
-        self.assertEqual(
-            self.sdk.context.graph("commerce", "sales_2024_01").canonical_json(),
-            packet.canonical_json(),
-        )
         summary = self.sdk.families.list("commerce")[0]
         self.assertEqual(summary["state"], "candidate")
         self.assertFalse(summary["stale"])
@@ -519,3 +525,17 @@ def _graph() -> GraphDocument:
             ),
         ),
     )
+
+
+class _Embedding:
+    model_id = "deterministic-test-embedding"
+
+    def embed_documents(
+        self, texts: tuple[str, ...], *, batch_size: int
+    ) -> tuple[tuple[float, ...], ...]:
+        del batch_size
+        return tuple((1.0, 0.0) for _text in texts)
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        del text
+        return (1.0, 0.0)

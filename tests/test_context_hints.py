@@ -382,8 +382,8 @@ class LogicalContextHintTests(TestCase):
     def test_bm25_graph_and_workspace_context_include_hints_without_new_index_entries(self) -> None:
         self._save_hints()
         self._workspace()
-        self.sdk.index.build("commerce")
-        index_before = self.sdk.index.status("commerce")
+        index_path = self.sdk.runtime.retrieval_index().path("commerce")
+        self.assertFalse(index_path.exists())
         for scoped, name in ((False, "commerce"), (True, "estate")):
             with self.subTest(workspace=scoped):
                 compile_packet = self.sdk.context.workspace if scoped else self.sdk.context.graph
@@ -401,7 +401,7 @@ class LogicalContextHintTests(TestCase):
                 )
                 self.assertEqual((status, errors), (0, ""))
                 self.assertEqual(json.loads(output), packet.to_dict())
-        self.assertEqual(self.sdk.index.status("commerce"), index_before)
+        self.assertFalse(index_path.exists())
 
     def test_hint_revision_changes_cache_and_roundtrips_without_false_current_claim(self) -> None:
         candidate = self._save_hints()
