@@ -73,6 +73,7 @@ async function load(familyMode = state.familyMode, focusNames = undefined) {
   if (!state.selectedId && state.data.objects.length) state.selectedId = defaultVisibleObject();
   if (!state.reviewId) state.reviewId = nextReview()?.id || null;
   renderAll();
+  if (typeof queryToolsScopeChanged === "function") queryToolsScopeChanged();
   $$('[data-canvas-mode]').forEach(button => button.classList.toggle("is-active", button.dataset.canvasMode === state.canvasMode));
   if (params.get("view") === "review") switchView("review");
   else if ($("#review-view").classList.contains("is-active")) await loadReview();
@@ -129,6 +130,10 @@ function renderFamilyNotices() {
 }
 
 function renderObjectList() {
+  if (typeof projectSearchActive === "function" && projectSearchActive()) {
+    renderProjectSearch();
+    return;
+  }
   const needle = $("#object-search").value.trim().toLowerCase();
   const objects = visibleObjects().filter(item =>
     (state.objectKind === "all" || item.type === state.objectKind) &&
@@ -1207,7 +1212,10 @@ function escapeAttr(value) { return escapeHtml(value); }
 function setFooter(value) { $("#footer-status").textContent = value; }
 function toast(value) { const element = $("#toast"); element.textContent = value; element.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { element.hidden = true; }, 4200); }
 
-$("#object-search").addEventListener("input", renderObjectList);
+$("#object-search").addEventListener("input", () => {
+  if (typeof scheduleProjectSearch === "function") scheduleProjectSearch();
+  else renderObjectList();
+});
 for (const [id, panel] of [["open-objects", "objects"], ["open-inspector", "inspector"], ["open-review-queue", "review-queue"], ["open-evidence", "evidence"]]) {
   $(`#${id}`).addEventListener("click", () => {
     const open = panel === "inspector" ? $("#inspector").getClientRects().length > 0 : document.body.classList.contains(`${panel}-open`);
@@ -1224,6 +1232,7 @@ document.addEventListener("click", event => {
   if (!event.target.closest("#view-options")) $("#view-options").open = false;
 });
 document.addEventListener("keydown", event => {
+  if (document.querySelector("dialog[open]")) return;
   if (event.key === "Escape") {
     const activePanel = document.activeElement?.closest("#object-sidebar, #inspector, #review-queue, #review-evidence")?.id;
     for (const panel of ["objects", "review-queue", "evidence"]) setPanel(panel, false);
@@ -1282,4 +1291,5 @@ $("#zone-form").addEventListener("submit", createZone);
 $("#close-zone").addEventListener("click", () => $("#zone-dialog").close());
 $("#cancel-zone").addEventListener("click", () => $("#zone-dialog").close());
 
+if (typeof initializeQueryTools === "function") initializeQueryTools();
 load().catch(error => { setFooter("Failed"); document.body.innerHTML = `<div class="empty-state"><h1>TAREL UI could not start</h1><p>${escapeHtml(error.message)}</p></div>`; });

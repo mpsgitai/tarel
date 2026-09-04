@@ -18,6 +18,7 @@
         <nav class="view-tabs" aria-label="Views">
           <button class="tab is-active" data-view="graph">Explore</button>
           <button class="tab" data-view="review">Review <span id="review-badge">…</span></button>
+          <button id="open-context" class="context-launch" aria-haspopup="dialog"><span class="context-label-full">Agent context</span><span class="context-label-short">Context</span></button>
         </nav>
         <div class="session-meta"><span id="graph-name">Loading…</span><span id="revision" class="mono"></span><span id="mode" class="mode-badge"></span></div>
       </header>
@@ -26,7 +27,8 @@
         <section id="graph-view" class="view is-active">
           <aside id="object-sidebar" class="sidebar">
             <div class="pane-heading"><div><p class="eyebrow">Estate explorer</p><h1>Objects</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button></div>
-            <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Find an object" type="search" placeholder="Find an object" autocomplete="off" /></label>
+            <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Search names, fields, meaning…" autocomplete="off" /></label>
+            <div id="project-search-status" class="project-search-status" role="status" aria-live="polite" hidden></div>
             <div class="filter-row"><button class="chip is-active" data-kind="all">All</button><button class="chip" data-kind="table">Tables</button><button class="chip" data-kind="view">Views</button></div>
             <details id="scope-panel" class="scope-panel"><summary><span>Source filters</span><small id="scope-count"></small></summary><div id="scope-filters"></div></details>
             <details id="focus-panel" class="focus-panel" hidden>
@@ -138,9 +140,28 @@
       </div>
     </dialog>
 
+    <dialog id="context-dialog" aria-labelledby="context-title">
+      <div class="context-dialog-body">
+        <div class="drawer-heading"><div><p class="eyebrow">Shared CLI / SDK compiler</p><h2 id="context-title">Agent context</h2></div><button id="close-context" type="button" class="icon-button" aria-label="Close agent context">×</button></div>
+        <p class="context-intro">Compile a bounded metadata packet for an agent. No data queries or LLM calls.</p>
+        <div class="query-scope-note"><strong id="context-project">Loading project scope…</strong><p>Project scope: graph display filters, selected objects and report filters do not limit this packet.</p><button id="reload-context-scope" type="button" class="quiet-button">Reload project scope</button></div>
+        <form id="context-form" class="editor-form">
+          <label><span>Question or topic</span><textarea id="context-query" name="query" rows="2" maxlength="2000" required placeholder="Which tables and fields describe sales by month?"></textarea></label>
+          <details class="context-options"><summary>Policies &amp; limits <small id="context-policy-summary">Reviewed annotations · logical hints off</small></summary><div class="context-options-body">
+            <label class="checkbox"><input id="context-reviewed" name="reviewed_annotations_only" type="checkbox" checked /><span>Only reviewed annotations. Physical tables remain discoverable.</span></label>
+            <label><span>Additional logical hints</span><select id="context-logical-hints" name="logical_hints"><option value="">Off</option><option value="confirmed_only">Reviewed logical hints</option><option value="include_candidates">Include exploratory logical hints</option></select></label>
+            <p class="semantic-origin">Logical hints are not executable joins or expanded family members. Entity-resolution candidates are not included by this option.</p>
+            <div class="field-grid"><label><span>Maximum objects</span><input id="context-max-objects" name="max_objects" type="number" value="10" min="1" max="50" required /></label><label><span>Maximum packet characters</span><input id="context-max-characters" name="max_characters" type="number" value="24000" min="1000" max="100000" step="1000" required /></label></div>
+          </div></details>
+          <div class="context-build-actions"><button id="build-context" class="primary-button" disabled>Build project context</button><span id="context-request-status" role="status" aria-live="polite">Load the project scope to start.</span></div>
+        </form>
+        <section id="context-result" hidden></section>
+      </div>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="/cytoscape.min.js"></script>
     <script src="/logical_metadata.js"></script>
+    <script src="/query_tools.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

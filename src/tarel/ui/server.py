@@ -31,6 +31,7 @@ from tarel.application import (
     load_workspace_use_case,
     resolve_workspace_scope_use_case,
 )
+from tarel.context import ContextFailure
 from tarel.discovery.application import list_query_linked_coverages_use_case
 from tarel.entity_resolution.application import (
     find_entity_resolution_candidates_for_graph_use_case,
@@ -63,6 +64,7 @@ from tarel.reference_mapping.application import (
 )
 from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
+from tarel.search import SearchFailure
 from tarel.semantic_concepts.contracts import SemanticConceptFailure
 from tarel.semantics.application import (
     edit_semantic_source_use_case,
@@ -84,6 +86,13 @@ from tarel.ui.presentation import (
     family_view_scope_revision,
     focus_physical_objects,
     workspace_revision,
+)
+from tarel.ui.query_tools import (
+    UIQueryFailure,
+    UIQueryScope,
+    preview_context,
+    query_scope_snapshot,
+    search_metadata,
 )
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 
@@ -320,6 +329,19 @@ class TarelUIBackend:
         } | {"focuses": list(names)}
 
     def mutate(self, route: str, payload: dict[str, Any]) -> dict[str, object]:
+        if route in {"/api/query/scope", "/api/search", "/api/context/preview"}:
+            scope = UIQueryScope(
+                graph=self.config.graph, workspace=self.config.workspace,
+                systems=self.config.systems, graphs=self.config.graphs,
+                areas=self.config.areas, schemas=self.config.schemas, zones=self.config.zones,
+            )
+            if route == "/api/query/scope":
+                if payload:
+                    raise UIFailure("invalid_query_request", "Project scope is server-owned.")
+                return query_scope_snapshot(scope)
+            if route == "/api/search":
+                return search_metadata(scope, payload)
+            return preview_context(scope, payload)
         if route == "/api/review/view":
             names = _strings(payload, "focuses") if "focuses" in payload else self.config.focuses
             return self._review_view(names)
@@ -848,6 +870,7 @@ class _Handler(BaseHTTPRequestHandler):
         name = "index.html" if path in {"", "/"} else path.removeprefix("/")
         if name not in {
             "index.html", "app.js", "styles.css", "cytoscape.min.js", "logical_metadata.js",
+            "query_tools.js",
         }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -941,10 +964,13 @@ def run_ui(
 def _ui_failure(exc: Exception) -> UIFailure:
     if isinstance(exc, UIFailure):
         return exc
+    if isinstance(exc, UIQueryFailure):
+        return UIFailure(exc.code, str(exc), status=exc.status)
     if isinstance(
         exc,
         (
             AnnotationFailure,
+            ContextFailure,
             EntityResolutionFailure,
             FocusFailure,
             GraphFailure,
@@ -959,6 +985,7 @@ def _ui_failure(exc: Exception) -> UIFailure:
             LogicalMetadataFailure,
             ReferenceMappingFailure,
             RelationshipFailure,
+            SearchFailure,
             SemanticFailure,
             WorkspaceFailure,
         ),
