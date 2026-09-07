@@ -181,7 +181,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const elements = new Map();
 class Element {
-  constructor(){this.children=[];this.innerHTML='';this.textContent='';}
+  constructor(){this.children=[];this.innerHTML='';this.textContent='';this.dataset={};}
   append(...items){this.children.push(...items);}
   after(...items){this.afterNodes=items;}
   addEventListener(){}
@@ -200,10 +200,12 @@ const context = vm.createContext({
 const script = fs.readFileSync(process.argv[1], 'utf8');
 vm.runInContext(fs.readFileSync(require('node:path').join(
   require('node:path').dirname(process.argv[1]), 'logical_metadata.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require('node:path').join(
+  require('node:path').dirname(process.argv[1]), 'optional_details.js'), 'utf8'), context);
 vm.runInContext(script.slice(0, script.indexOf('$("#object-search").addEventListener')), context);
 vm.runInContext('state.familyMode = "confirmed_only"; renderFamilyInspector(fixture);', context);
 process.stdout.write(elements.get('#inspector').innerHTML);
-process.stdout.write(JSON.stringify(elements.get('#inspector .inspector-head').afterNodes));
+process.stdout.write(JSON.stringify(elements.get('#inspector').children));
 """
         result = subprocess.run(
             [shutil.which("node"), "-e", renderer, str(script)],
@@ -212,6 +214,8 @@ process.stdout.write(JSON.stringify(elements.get('#inspector .inspector-head').a
         self.assertIn("Scope members", result.stdout)
         self.assertIn("Load members", result.stdout)
         self.assertIn("Load logical metadata", result.stdout)
+        self.assertIn("optional-details logical-metadata-details", result.stdout)
+        self.assertIn("Not loaded", result.stdout)
         self.assertIn("Schema compatibility only", result.stdout)
         self.assertNotIn("undefined", result.stdout)
 

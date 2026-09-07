@@ -126,6 +126,17 @@ def try_lazy_family_graph_view_use_case(
     payload["revision"] = header.revision
     payload["revisions"] = {graph_name: header.revision}
     payload["graphs"][0]["revision"] = header.revision
+    # Hidden fields intentionally stay unhydrated. The review view explicitly loads
+    # the physical scope; a deferred aggregate must not look like an empty queue.
+    payload["review_summary"] = {
+        "known": False,
+        "missing_fields": None,
+        "missing_tables": None,
+        "pending_fields": None,
+        "pending_tables": None,
+        "review_objects": None,
+        "total_objects": header.object_count,
+    }
     payload["object_families"] = {
         "mode": family_mode,
         "scope_revision": family_view_scope_revision_from_revisions({graph_name: header.revision}),
@@ -133,7 +144,8 @@ def try_lazy_family_graph_view_use_case(
         "stale_graphs": [graph_name] if stale else [],
         "notice": "Families summarize compatible schemas, not union or join correctness. "
         "Members load on demand. Disable families to inspect member annotations, "
-        "relationships, derivations, review queues, zones and lineage.",
+        "relationships, derivations, zones and lineage. "
+        "Annotation review loads the physical scope separately.",
     }
     _compact_family_workspace_members(payload, {(graph_name, item) for item in hidden})
     payload["storage"] = {

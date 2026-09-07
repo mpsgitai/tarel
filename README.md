@@ -27,6 +27,9 @@ Create, annotate, and refresh graphs through the CLI or Python SDK.
 evidence. You review and refine them. The graph preserves provenance and separates proposals from
 accepted knowledge.
 
+The browser keeps exploration and review prominent, with optional metadata available on demand.
+See [Focused browser workflows](docs/browser-workflows.md) for scope, review, and layout behavior.
+
 ![TAREL field annotation inspector with semantic descriptions, evidence, and review state](https://raw.githubusercontent.com/mpsgitai/tarel/master/docs/assets/tarel-field-annotation-inspector.png)
 
 *Inspect field meanings and supporting evidence, then review, edit, approve, defer, or reject proposals.*
