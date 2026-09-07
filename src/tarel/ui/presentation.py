@@ -36,6 +36,8 @@ from tarel.topology.contracts import DerivationEvidence, LogicalTopologyDocument
 from tarel.workspaces.contracts import WorkspaceDocument
 from tarel.workspaces.scope import ResolvedScope
 
+_PENDING_ANNOTATION_STATES = frozenset({"draft", "review_required", "deferred"})
+
 
 def browser_graph(
     graph: GraphDocument,
@@ -334,6 +336,9 @@ def _browser_payload(
             if item.graph_name in graph_names
         ],
         "review": _review_queue(object_payloads),
+        # A family is a visual summary, not a decision about its member annotations.
+        # Count the authorized physical scope without serializing hidden member IDs.
+        "review_summary": _review_summary(graphs, allowed_objects),
         "revision": revision,
         "revisions": revisions,
         "scope": scope.to_dict() if scope else None,
@@ -361,7 +366,8 @@ def _browser_payload(
             "notice": (
                 "Families summarize compatible schemas, not union or join correctness. "
                 "Members load on demand. Disable families to inspect member annotations, "
-                "relationships, derivations, review queues, zones and lineage."
+                "relationships, derivations, zones and lineage. "
+                "Annotation review loads the physical scope separately."
             ),
         }
         if scope is not None:
@@ -1336,19 +1342,69 @@ def _review_queue(objects: list[dict[str, object]]) -> list[dict[str, object]]:
             continue
         annotation = item["annotation"]
         state = str(annotation["state"]) if isinstance(annotation, dict) else "missing"
+        fields = item["fields"]
+        pending_fields = sum(
+            isinstance(field.get("annotation"), dict)
+            and field["annotation"].get("state") in _PENDING_ANNOTATION_STATES
+            for field in fields
+        )
+        pending_table = int(state in _PENDING_ANNOTATION_STATES)
         records.append({
             "annotation": annotation,
             "context_documents": item.get("annotation_context_documents", []),
-            "field_count": len(item["fields"]),
+            "field_count": len(fields),
             "graph": item["graph"],
             "grain": item["grain"],
+            "has_pending": bool(pending_table or pending_fields),
             "id": item["id"],
             "label": item["label"],
+            "missing_field_count": sum(field.get("annotation") is None for field in fields),
+            "namespace": item.get("namespace"),
+            "object_id": item["object_id"],
+            "pending_field_count": pending_fields,
+            "pending_table_count": pending_table,
             "review": item["review"],
+            "schema_ref": item.get("schema_ref"),
             "state": state,
             "type": item["type"],
         })
     return sorted(records, key=lambda item: (rank.get(str(item["state"]), 99), str(item["label"])))
+
+
+def _review_summary(
+    graphs: tuple[GraphDocument, ...],
+    allowed_objects: set[tuple[str, str]],
+) -> dict[str, object]:
+    """Aggregate review work before visual collapse, never outside the physical scope."""
+    pending_tables = pending_fields = missing_tables = missing_fields = 0
+    pending_objects: set[tuple[str, str]] = set()
+    for graph in graphs:
+        for node in graph.nodes:
+            if node.type in {"table", "view"}:
+                reference = (graph.name, node.id)
+            elif node.type == "field":
+                reference = (graph.name, str(node.metadata.get("object_id") or ""))
+            else:
+                continue
+            if reference not in allowed_objects:
+                continue
+            is_field = node.type == "field"
+            if node.annotation is None:
+                missing_fields += int(is_field)
+                missing_tables += int(not is_field)
+            elif node.annotation.state in _PENDING_ANNOTATION_STATES:
+                pending_fields += int(is_field)
+                pending_tables += int(not is_field)
+                pending_objects.add(reference)
+    return {
+        "known": True,
+        "missing_fields": missing_fields,
+        "missing_tables": missing_tables,
+        "pending_fields": pending_fields,
+        "pending_tables": pending_tables,
+        "review_objects": len(pending_objects),
+        "total_objects": len(allowed_objects),
+    }
 
 
 def _workspace_payload(workspace: WorkspaceDocument, graph_name: str) -> dict[str, object] | None:
