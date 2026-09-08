@@ -1,182 +1,164 @@
-# Architecture
+# Architecture and reviewed self-modification
 
-TAREL is a local-first context compiler, not an agent framework. Its reusable core maps technical
-metadata, semantic claims, relationships, and lineage into deterministic contracts. The CLI, SDK,
-and browser UI are three adapters over the same application behavior.
+TAREL builds persistent knowledge about information systems and compiles selected knowledge for a
+harness. The TAREL Graph connects technical objects, semantic annotations, relationships, and
+references. A workspace organizes independent source graphs.
 
-```text
-CLI · Python SDK · local browser UI
-                 │
-                 ▼
-       application use cases
-                 │
-                 ▼
- graph · annotation · semantic import · lineage · discovery · workspace · retrieval
-                 │
-                 ▼
- connectors · providers · file stores · optional indexes
-```
+The [CLI and Python SDK](cli-reference.md) and the browser share application use cases, stored state,
+and review rules. The [contract reference](contracts.md) defines formats and invariants.
 
-Dependencies point inward. Domain code does not import the CLI, SDK, or UI. Entry adapters may
-compose application use cases, but they do not own a second implementation of the business rules.
+## Responsibilities
+
+| Component | Responsibility |
+| --- | --- |
+| Connector | Observe catalogs, fields, keys, and supported bounded profiles/samples |
+| Harness | Select tasks, operate authorized tools, execute analyses, assemble model context |
+| Provider | Return structured annotation, lineage, or discovery proposals |
+| TAREL core | Validate contracts, preserve identities/evidence, manage review, compile context |
+| Store | Persist revisioned documents and rebuildable indexes |
+| Browser | Explore existing knowledge and perform explicit review/edit actions |
+
+TAREL does not execute analytical answer queries. Providers receive the requests prepared for them;
+they do not acquire the harness's tool permissions. An execution result and an accepted semantic
+claim are different records.
 
 ## Layers
 
-| Layer | Main paths | Responsibility |
-|---|---|---|
-| Entry adapters | `tarel.cli`, `tarel.sdk`, `tarel.ui` | Parse input, call use cases, render typed results |
-| Application | `tarel.application`, `tarel.grounding_application`, domain `application.py` modules | Coordinate stores, domain transformations, and explicit side effects |
-| Domain | `graph`, `annotations`, `semantics`, `lineage`, `discovery`, `focus`, `relationships`, `workspaces`, `context`, `grounding` | Contracts, validation, revisions, review state, traversal, and deterministic compilation |
-| Infrastructure | `connectors`, `providers`, `retrieval`, domain stores | Observe external systems and persist local rebuildable state |
-| Runtime | `tarel.runtime` | Bind one SDK client to an explicit local state root |
-
-## One implementation, three entry points
-
-The CLI and SDK call the same application functions. A graph built with the CLI can be loaded by
-the SDK; a review performed in the browser changes the same revisioned document. The browser UI is
-served from the standard library and consumes the same graph, workspace, focus, annotation, and
-lineage projections.
-
-```text
-tarel source build ... ─┐
-Tarel(...).source... ───┼─► application use case ─► domain contract ─► .tarel state
-local review UI ────────┘
+```mermaid
+flowchart TD
+    A["CLI, SDK and browser"] --> B["Application use cases"]
+    B --> C["Graph and domain contracts"]
+    B --> D["Connector and provider adapters"]
+    B --> E["Stores and indexes"]
 ```
 
-`import tarel` stays cheap and side-effect free. Source drivers and the local embedding runtime are
-optional and imported only inside their adapters.
+Dependencies point inward. Domain code does not import the entry adapters. Adapters translate
+inputs and outputs rather than implementing separate review or retrieval behavior. Importing
+`tarel` is side-effect free; optional drivers and embedding runtimes load in their adapters.
 
-## Semantic graph path
+## From source to knowledge
 
-```text
-read-only source
-  → connector observations
-  → technical graph
-  → model or coding-agent proposals
-  → human review
-  → BM25 / optional local embeddings
-  → bounded context packet
+1. A connector or caller supplies a canonical catalog.
+2. TAREL creates a technical graph with stable object and field identities.
+3. A harness or provider proposes meanings and relationships with evidence.
+4. Review accepts, defers, rejects, or requires reconsideration of claims.
+5. Search selects anchors; compilation builds bounded graph context.
+6. The harness uses that context and executes analysis through its own tools.
+
+Observed metadata, proposed annotations, imported semantic models, and runtime observations retain
+their separate origins and review semantics. Model success does not approve a proposal.
+
+A graph represents one discovered source/catalog. Workspace systems own graphs; areas group schema
+references. Zones are explicit, overlapping object sets inside one system. They do not duplicate
+or own graphs. See [scope rules](contracts.md#workspaces-and-scopes).
+
+Static lineage distinguishes job order, procedure calls, and physical reads/writes. Importers
+supply report/model links; definition analysis supplies candidate data dependencies. A schedule
+alone cannot establish the complete path from a report to source tables.
+
+[Runtime lineage](contracts.md#runtime-lineage) separately records caller-reported execution,
+including dependencies, hashes, and checks. It does not independently certify an answer or approve
+a relationship.
+
+## Contracts and extension points
+
+| Contract | Purpose |
+| --- | --- |
+| [Connector](../src/tarel/connectors/contracts.py) | Typed catalog/probe/profile observations |
+| [Provider](../src/tarel/providers/contracts.py) | Bounded structured-generation request/response |
+| [Graph](../src/tarel/graph/contracts.py) | Technical and semantic records with stable identity |
+| [Lineage input](../src/tarel/lineage/source.py) | Normalized definitions and observations |
+| [Context](contracts.md#context-packets) | Facts, selection, budgets, and hashes |
+| [Discovery](contracts.md#discovery-protocol) | Revisioned hypotheses, observations, and decisions |
+
+A document format is not automatically a plugin interface. Connectors and providers have package
+entry-point groups. Other integrations normalize external formats into supported input contracts.
+
+## Self-modification through reviewed extensions
+
+When an interface is missing, the harness can generate and implement an adapter against an existing
+contract. The candidate stays inactive until reviewed and installed. This extends TAREL's reach
+without changing the core to accommodate one source.
+
+### Add a source connector
+
+```bash
+tarel connector scaffold example-source --output ./example-source
 ```
 
-Technical observations and semantic claims remain separate. An annotation begins as a draft and
-keeps its evidence, provider identity, confidence, and review state. The source remains
-authoritative; TAREL stores metadata and reviewable knowledge rather than a warehouse copy.
+The scaffold creates `CONNECTOR_TASK.md`, an installable package skeleton, a connector manifest,
+and reference files for dialect and metadata evidence. The package declares a `tarel.connectors`
+entry point.
 
-External semantic models form a third, explicit layer. A `tarel.semantic_import.v0.1` document
-keeps the exact source snapshot, normalized semantic objects, diagnostics, and deterministic
-bindings to graph node or edge IDs. Imported values are not promoted to TAREL annotations. Source
-corrections are overlays that preserve the original snapshot. This experimental boundary is
-documented in [Semantic-model imports](semantic-imports.md).
+The harness implements `probe` first and `discover_catalog` next, returns the declared typed records,
+and documents tested driver/product assumptions. Drivers stay optional. Test the adapter against a
+private source and review both code and results before installing it into TAREL's environment:
 
-Source enrichment is a separate, policy-gated observation path. Each logical source explicitly
-grants `aggregates`, `small_domains`, `raw_samples`, and/or `entity_aliases`; an omitted grant
-denies that operation. `entity_aliases` requires `aggregates` and is limited to protected
-same-object inspection and key groups produced by optional Self-Entity discovery. It does not
-expand the bounded `raw_samples` permission.
-The batch compiler profiles every object in a bound graph and returns an ephemeral workfile. Raw
-samples remain process output. Repeated composite-key patterns may produce aggregate-only draft
-join candidates, but writing those candidates is explicit and never makes them reviewed truth.
-Pattern inference is intentionally conservative: it considers textual key-like fields or clear
-multi-prefix composite keys, rejects temporal and ordinary free-text shapes, requires the literal
-segment cue to match the target object or field, and keeps at most one target per source segment.
-It is therefore normal for enrichment to report useful patterns while persisting no join drafts.
-
-## Lineage path
-
-```text
-report / visual / measure
-  → semantic field
-  → physical mart object
-  → query, model, procedure, or job
-  → upstream tables
-  → source-system origins
+```bash
+python -m pip install ./example-source
+tarel connector check example-source
+tarel connector probe example-source --config config/example-source.toml
+tarel graph build example-graph --connector example-source --config config/example-source.toml
 ```
 
-Workflow importers normalize external exports into one lineage contract. Optional providers may
-analyze complete SQL definitions and propose evidence-backed reads and writes. Job order, procedure
-calls, and physical data flow remain distinct; TAREL never treats execution order alone as data
-lineage. Cross-document traversal is explicit and preserves unresolved references, review state,
-evidence, cycles, and granularity changes.
+The configuration follows the new adapter's documented format. Scaffold does not implement vendor
+behavior, create credentials, or activate the package. Generated code must not alter kernel
+contracts merely to pass validation.
 
-## Grounding and cache boundaries
+### Use or add a provider
 
-Search chooses graph anchors; the context compiler expands them through reviewed relationships and
-reports every omission caused by a budget. `tarel.grounding.v0.1` then adds non-secret source
-identity, SQL dialect, selected lineage revisions, matches, and an optional upstream trace.
+An endpoint compatible with an existing adapter needs configuration:
 
-Agent-facing output has two independently hashed parts:
-
-- `stable`: selected semantic facts, joins, source identities, and lineage document revisions;
-- `dynamic`: the question, retrieval decisions, paths, warnings, omissions, and optional trace.
-
-This lets a harness place reusable context in a provider cache-friendly prefix without making the
-core provider-specific.
-
-## Extension boundaries
-
-TAREL deliberately has a few narrow extension seams:
-
-- **Connectors** normalize read-only probes, catalog discovery, bounded sampling, and relationship
-  evidence. Reviewed external packages register through the `tarel.connectors` entry-point group.
-- **Providers** return schema-validated annotation or lineage workfiles. Provider profiles and
-  metadata-only discovery hypotheses. Provider profiles and credentials stay outside persisted
-  graphs, discovery runs, and context packets. Providers cannot record discovery evidence or make
-  discovery decisions.
-- **Semantic readers** preserve an external semantic model, normalize supported constructs, and
-  bind only exact matches to a TAREL graph. Apache Ossie, SML, and Cube YAML exercise one internal
-  contract. A public plugin ABI waits until that contract has survived broader format coverage and
-  review.
-- **Stores** are file-first today. Shared database-backed stores and authorization can be added as
-  optional adapters without changing domain contracts.
-
-Generated connector or provider candidates are inactive until a human reviews and installs them.
-Self-extension removes repetitive adapter work; it does not grant generated code automatic trust.
-
-## Persistence boundary
-
-The selected state root contains revisioned JSON documents and rebuildable indexes:
-
-```text
-.tarel/
-├── sources/
-├── graphs/
-├── discovery/
-├── semantic-imports/
-├── lineage/
-├── focus/
-├── workspaces/
-├── indexes/
-└── lineage-analysis-cache/
+```bash
+tarel provider configure internal-model \
+  --adapter openai-compatible \
+  --base-url "http://127.0.0.1:8000/v1" \
+  --model "<served-model-ID>" --no-api-key
+tarel provider test internal-model
 ```
 
-Writes are atomic. Documents use canonical ordering and SHA-256 identities and omit timestamps,
-runtime durations, and volatile paths from agent-facing contracts. The first SDK supports
-concurrent reads and one writer per document; coordinated multi-writer storage is intentionally an
-optional future adapter.
+This example assumes an unauthenticated loopback endpoint. Use the supported authentication method
+when the endpoint requires credentials.
 
-Enrichment workfiles are intentionally absent from this tree. A caller may redirect one to a
-private location, but TAREL does not place raw samples in graphs, indexes, or context packets.
+For a new protocol:
 
-Experimental discovery documents retain typed candidate programs, their AVO-style parent and
-generation lineage, aggregate observations, decisions, and step ordering. They omit query/code
-text, raw rows, samples, credentials, connection details, volatile source paths, and free-form
-database errors. Discovery is opt-in and does not alter graph or context behavior unless a caller
-explicitly promotes a selected candidate. Exact joins enter relationship review as drafts. Entity
-programs enter the separate entity-resolution store as unreviewed candidates with versioned
-execution identity and TAREL-computed quality. Explicit Self-Entity programs additionally bind one
-object, a separate technical record key, comparison/guard fields, and canonical unordered-pair
-semantics; external callers still own matching and grouping. Equivalent unreviewed Self-Entity
-evidence advances through an explicit immutable supersede chain. Both bridges leave validation
-human-controlled.
-
-## Public surface
-
-The stable entry points are the `tarel` command and `from tarel.sdk import Tarel`. Domain modules
-remain available for typed integration, but consumers should prefer the SDK unless they are
-implementing or testing a TAREL extension.
-
-The architectural rule is simple:
-
-```text
-contracts define truth; use cases coordinate work; adapters remain replaceable
+```bash
+tarel provider scaffold example-provider --output ./example-provider
 ```
+
+The harness implements `StructuredProvider.generate_structured`, checks valid and invalid responses,
+timeouts and authentication errors, and reviews what data leaves the machine. After review,
+installation exposes its `tarel.providers` entry point; a provider profile selects that adapter.
+
+### Other imports
+
+Knowledge commands attach documentation. Report, scheduler, semantic-model, and custom-script
+metadata can be normalized into supported semantic/lineage inputs. A field accepting a language
+name does not imply a built-in analyzer for every language. Use the versioned contract and record
+unresolved dependencies explicitly.
+
+## Persistence and revisions
+
+The state root contains graph, workspace, lineage, discovery, and other domain documents. JSON
+records are authoritative. Selective graph caches and retrieval indexes are rebuildable.
+
+Domain stores publish atomic writes. Revision-bound operations reject stale input rather than
+mixing graph states. Coordinate writers targeting one document; file-first storage is not a
+distributed multi-writer database.
+
+Schema drift can preserve knowledge while requiring review. Rebuild dependent indexes and context
+when identities change. See [schema changes](contracts.md#schema-changes-and-stale-claims) and
+[selective storage](contracts.md#graph-storage-and-selective-reads).
+
+## Context and data boundaries
+
+Context separates stable selected facts from dynamic questions, rankings, paths, and omissions.
+A question-independent prefix can be reused while scope and revisions remain valid. Token limits,
+message placement, cache headers, and cache lifetime belong to the harness/provider integration.
+
+Raw sample rows are excluded from ordinary graph/context artifacts. Observation workfiles and
+private entity/binding operations are separate data surfaces. Metadata-only context does not
+restrict the harness's other tools; enforce source policy at the execution boundary.
+
+[CLI and SDK](cli-reference.md) · [Contracts](contracts.md) · [Demo](retail-demo.md) ·
+[Workshop](workshop.md)

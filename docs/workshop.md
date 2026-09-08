@@ -9,7 +9,7 @@ CLI; source connections, catalog exports, report definitions, benchmark fixtures
 orchestration must be prepared for your environment.
 
 **Harness** means the agent host that controls tools, model calls, context assembly, and authorized
-execution. It can use TAREL through the CLI or [Python SDK](sdk.md). An optional provider such as
+execution. It can use TAREL through the CLI or [Python SDK](cli-reference.md#python-sdk). An optional provider such as
 DeepSeek through OpenRouter performs structured analysis; TAREL preserves the resulting knowledge
 and review state.
 
@@ -146,7 +146,7 @@ the definition; it does not append another graph or member.
 
 Areas group schemas. Zones are explicit sets of objects within one system, potentially crossing
 graphs and areas. A zone is not a hierarchy level above databases and cannot cross systems.
-Assign member schemas to areas before defining a zone. See [Workspaces](workspaces.md).
+Assign member schemas to areas before defining a zone. See [Workspaces](contracts.md#workspaces-and-scopes).
 
 **Show:** Navigate the full estate, then select a small business zone without losing source identity.
 
@@ -328,14 +328,14 @@ before claiming the complete worker schema is present. Character limits are not 
 `--validated-only` restricts semantic claims; it does not remove every unannotated physical table.
 
 The packet contains graph metadata and selected knowledge, not table rows or all SQL/DAX code.
-Load necessary definitions separately. Use [Grounding](sdk.md#ground-a-bi-agent-turn) for explicit
+Load necessary definitions separately. Use [Grounding](cli-reference.md#python-sdk) for explicit
 source routing, dialects, and selected lineage information.
 
 **Harness integration:** Keep the serialized prefix unchanged early in the request, before changing
 questions and dynamic additions. Use stable hashes to identify reuse and rebuild when revisions
 change. TAREL does not place messages under a system prompt, pin a chat indefinitely, set provider
 cache headers, or guarantee KV/prompt-cache hits. Those are harness/provider responsibilities.
-See [Context contract](context-contract.md).
+See [Context contract](contracts.md#context-packets).
 
 ### 2. Ask several questions without rebuilding the estate
 
@@ -391,7 +391,7 @@ BM25 and embeddings choose anchors; graph compilation selects bounded objects an
 relationships. A semantic match is not evidence that two tables join.
 
 Prepare local vector indexes for the participating graphs using the optional runtime documented in
-[Local retrieval](local-retrieval.md):
+[Local retrieval](contracts.md#local-retrieval):
 
 ```bash
 tarel index build dwh-main --model /absolute/path/model.gguf --resume
@@ -470,7 +470,7 @@ tarel discovery submit benchmark-joins-01 \
   --action propose_candidate --source proposals/join-candidate.json --format json
 ```
 
-Proposal/observation files must follow [Discovery runs](discovery-runs.md). Continue with support
+Proposal/observation files must follow [Discovery runs](contracts.md#discovery-protocol). Continue with support
 and challenge observations; a completed run is not a validated join.
 
 **Show:** Reject a plausible CustomerId join because IDs are only unique within each source system.
@@ -492,8 +492,8 @@ a similar name that does not, and an ambiguous case left unresolved.
 
 Discovery uses the hypothesis/observation protocol; it is not a general automatic customer master
 merge. Entity candidates remain exploratory until separate review. Concrete private mappings stay
-with the caller; see [Reference mappings](reference-mappings.md) for recording value-free mapping
-evidence and [Self-Entity discovery](self-entity-discovery.md) for protected-key workflows.
+with the caller; see [Reference mappings](contracts.md#reference-mappings) for recording value-free mapping
+evidence and [Self-Entity discovery](contracts.md#self-entity-discovery) for protected-key workflows.
 
 ### 4. Validate the analytical grain
 
@@ -539,7 +539,7 @@ tarel lineage trace-runtime benchmark-attempt-04 \
   "<accepted-call-ID>" --format json
 ```
 
-Use a complete [Runtime lineage](runtime-lineage.md) document and an actual call ID. Imports record
+Use a complete [Runtime lineage](contracts.md#runtime-lineage) document and an actual call ID. Imports record
 caller observations, not independent certification. Runtime success does not promote an entity
 candidate or join, and the runtime document does not store raw result rows or executable SQL.
 
@@ -562,15 +562,15 @@ Add images only after capture so the document never contains broken image placeh
 | Benchmark comparison | Actual baseline and accepted-attempt metrics | Improvement is measured |
 
 The last three may require harness or benchmark captures rather than the TAREL browser.
-For GUI capture behavior, see [Focused browser workflows](browser-workflows.md). For repeatable
+For GUI capture behavior, see [Focused browser workflows](contracts.md#browser-scope-and-review). For repeatable
 synthetic animation recording, see [README demo recorder](../tools/readme_demo/README.md).
 Actual workload measurements should accompany any claims about the full 14,000-object scenario.
 
 ## Continue
 
-- [Python SDK](sdk.md)
-- [Workspace organization](workspaces.md)
-- [Context contract](context-contract.md) and [local retrieval](local-retrieval.md)
-- [Discovery runs](discovery-runs.md), [reference mappings](reference-mappings.md),
-  and [runtime lineage](runtime-lineage.md)
+- [Python SDK](cli-reference.md#python-sdk)
+- [Workspace organization](contracts.md#workspaces-and-scopes)
+- [Context contract](contracts.md#context-packets) and [local retrieval](contracts.md#local-retrieval)
+- [Discovery runs](contracts.md#discovery-protocol), [reference mappings](contracts.md#reference-mappings),
+  and [runtime lineage](contracts.md#runtime-lineage)
 - [Back to the project README](../README.md)

@@ -29,6 +29,8 @@ python -m unittest discover -s tests -q
 python -m compileall -q src tests tools
 python -m build
 python tools/check_distribution.py dist
+python tools/generate_cli_reference.py --check
+python tools/check_docs.py
 ```
 
 Pull requests should explain the concrete use case, the evidence behind semantic or connector
@@ -37,3 +39,7 @@ that could regress. Live-system tests must use ignored local configuration and m
 their targets in logs or fixtures.
 
 By submitting a contribution, you agree that it is licensed under the repository's MIT License.
+
+For command or SDK changes, run `python tools/generate_cli_reference.py` and commit the updated
+reference. Update the generator's curated notes when behavior changes. Shared formats and invariants
+belong in `docs/contracts.md`; executable examples belong in the demo or workshop.
