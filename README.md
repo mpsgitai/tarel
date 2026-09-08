@@ -21,14 +21,16 @@ for engineers and agents.
 
 Create, annotate, and refresh graphs through the CLI or Python SDK.
 
+Runs locally. No mandatory third-party runtime dependencies.
+
 ## Let agents build knowledge you can review
 
-**Self-annotation** lets models and agents propose descriptions and relationships from available
-evidence. You review and refine them. The graph preserves provenance and separates proposals from
-accepted knowledge.
+TAREL helps your harness explore schemas, objects, and tables, progressively gathering metadata
+and annotations into a persistent **TAREL Graph**.
 
-The browser keeps exploration and review prominent, with optional metadata available on demand.
-See [Focused browser workflows](docs/browser-workflows.md) for scope, review, and layout behavior.
+**Self-annotation** turns available evidence into proposed descriptions and relationships. Review
+and refine them in the browser, with provenance preserved and proposals clearly distinguished
+from accepted knowledge.
 
 ![TAREL field annotation inspector with semantic descriptions, evidence, and review state](https://raw.githubusercontent.com/mpsgitai/tarel/master/docs/assets/tarel-field-annotation-inspector.png)
 
@@ -47,13 +49,6 @@ behind each connection.
 Real GUI, synthetic demo, original animation speed.*
 
 [View the static Space screenshot](https://raw.githubusercontent.com/mpsgitai/tarel/master/docs/assets/semantic-space.png)
-
-## Give agents the relevant slice
-
-TAREL retrieves focused graph context for each task, with uncertainty visible and credentials and
-raw sample rows excluded.
-
-Runs locally. No mandatory third-party runtime dependencies.
 
 ## Follow a report back to its sources
 
