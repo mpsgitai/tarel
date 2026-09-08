@@ -86,6 +86,7 @@ and internal frameworks.
 
 Try the synthetic [Retail DWH walkthrough](docs/retail-demo.md) without credentials.
 
+- [Three-day enterprise workshop](docs/workshop.md): build, use, and improve graph knowledge
 - [Python SDK](docs/sdk.md)
 - [Graph storage](docs/graph-storage.md) and [architecture](docs/architecture.md)
 - [Local retrieval](docs/local-retrieval.md) and [context contract](docs/context-contract.md)
