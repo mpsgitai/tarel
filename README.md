@@ -86,12 +86,12 @@ and internal frameworks.
 
 Try the synthetic [Retail DWH walkthrough](docs/retail-demo.md) without credentials.
 
-- [Three-day enterprise workshop](docs/workshop.md): build, use, and improve graph knowledge
-- [Python SDK](docs/sdk.md)
-- [Graph storage](docs/graph-storage.md) and [architecture](docs/architecture.md)
-- [Local retrieval](docs/local-retrieval.md) and [context contract](docs/context-contract.md)
-- [Discovery runs](docs/discovery-runs.md) and [runtime lineage](docs/runtime-lineage.md)
-- [All documentation](docs/)
+- [CLI reference](docs/cli-reference.md)
+- [Architecture, contracts, and self-modification](docs/architecture.md)
+- [Demo warehouse](docs/retail-demo.md)
+- [Three-day enterprise workshop](docs/workshop.md)
+- [Python SDK](docs/cli-reference.md#python-sdk)
+- [Documentation index](docs/README.md)
 
 TAREL is pre-alpha. SQLite and SQL Server connectors are included. TAREL does not execute
 analytical answer queries; your harness does.
