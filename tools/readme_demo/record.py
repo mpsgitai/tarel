@@ -105,6 +105,8 @@ def record(url: str, output: Path) -> tuple[Path, float, float]:
             # Close the inspector with the real UI control to give the graph room.
             page.locator("#open-inspector").click()
             page.wait_for_timeout(600)
+            page.locator("#show-all").click()
+            page.wait_for_timeout(300)
             start = max(0, time.monotonic() - video_start)
             page.screenshot(path=str(output / "structure.png"))
             page.wait_for_timeout(2000)
