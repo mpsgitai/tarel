@@ -41,9 +41,12 @@ See [Focused browser workflows](docs/browser-workflows.md) for scope, review, an
 **Lineage** traces reports and measures through transformations to their sources, with evidence
 behind each connection.
 
-![TAREL Space view of an annotated TPC-DS information system](https://raw.githubusercontent.com/mpsgitai/tarel/master/docs/assets/semantic-space.png)
+![TAREL switching from schema structure to data and process lineage](docs/assets/space-to-lineage.gif)
 
-*Navigate an annotated TPC-DS information space in the local browser.*
+*The same information system, organized by schema or traced through data flow.
+Real GUI, synthetic demo, original animation speed.*
+
+[View the static Space screenshot](https://raw.githubusercontent.com/mpsgitai/tarel/master/docs/assets/semantic-space.png)
 
 ## Give agents the relevant slice
 
