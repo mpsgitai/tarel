@@ -41,14 +41,16 @@ class ObjectFamilyPresentationTests(TestCase):
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
 const cytoscape = require(process.argv[1] + '/cytoscape.min.js');
 const source = fs.readFileSync(process.argv[1] + '/app.js', 'utf8');
+const navigation = fs.readFileSync(process.argv[1] + '/estate_navigation.js', 'utf8');
 const cy = cytoscape({headless: true, styleEnabled: true,
   elements: [{data:{id:'parent'}}, {data:{id:'family',parent:'parent'}}],
   style: [{selector:'.hidden',style:{display:'none'}}]});
 try {
   const code = source.slice(source.indexOf('function focusSelected()'),
     source.indexOf('function selectedObject()'));
-  vm.runInNewContext(code + '\nfocusSelected();', {
-    state: {cy,selectedId:'family'}, selectedObject: () => ({name:'Family'}), $: () => ({})});
+  vm.runInNewContext(navigation + '\n' + code + '\nfocusSelected();', {
+    state: {cy,selectedId:'family',canvasMode:'space',structureLevel:'objects'},
+    selectedObject: () => ({name:'Family'}), $: () => ({})});
   assert.equal(cy.$id('family').visible(), true);
   assert.equal(cy.$id('parent').visible(), true);
 } finally {cy.destroy();}

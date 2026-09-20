@@ -8,6 +8,8 @@ const state = {
   objectKind: "all",
   reviewFilter: "pending",
   canvasMode: "space",
+  structureLevel: null,
+  systemOverviewScope: null,
   focusNames: null,
   focusSelection: null,
   focusSelectedOnly: false,
@@ -70,13 +72,22 @@ async function load(familyMode = state.familyMode, focusNames = undefined, deriv
   state.focusSelection = state.data.focus_selection;
   state.focusNames = new Set(state.focusSelection?.focuses || []);
   initializeScopeFilters();
+  if (data.architecture) {
+    const firstArchitecture = !arch.snapshot;
+    acceptArchitecture(data.architecture, firstArchitecture);
+    if (firstArchitecture) state.canvasMode = "architecture";
+  }
   const params = new URLSearchParams(window.location.search);
   if (params.get("mode") === "lineage") state.canvasMode = "lineage";
   const requestedObject = params.get("object");
   const requestedMatch = requestedObject && state.data.objects.find(item =>
     item.id === requestedObject || item.label === requestedObject || item.name === requestedObject
   );
-  if (requestedMatch) state.selectedId = requestedMatch.id;
+  if (requestedMatch) { state.selectedId = requestedMatch.id; state.structureLevel = "objects"; state.canvasMode = "space"; }
+  if (state.structureLevel === null) {
+    state.structureLevel = defaultStructureLevel(visibleObjects());
+    if (state.structureLevel === "systems") setPanel("inspector", false);
+  }
   if (!state.selectedId && state.data.objects.length) state.selectedId = defaultVisibleObject();
   if (!state.reviewId) state.reviewId = nextReview()?.id || null;
   renderAll();
@@ -359,8 +370,15 @@ function graphRelationshipSummary(edges) {
 }
 
 function renderGraph() {
+  toggleArchitectureSurface();
+  if (state.canvasMode === "architecture" && arch.snapshot) { renderArchitecture(); return; }
   const data = state.data;
   const scopedObjects = visibleObjects();
+  updateCanvasNavigation();
+  if (state.canvasMode === "space" && state.structureLevel === "systems") {
+    renderSystemOverview(scopedObjects);
+    return;
+  }
   const connectedObjects = lineageObjectIds();
   const objects = state.canvasMode === "lineage" && connectedObjects.size
     ? scopedObjects.filter(item => connectedObjects.has(item.id))
@@ -386,7 +404,7 @@ function renderGraph() {
   state.cy = cytoscape({
     container: $("#graph-canvas"), elements,
     layout: state.canvasMode === "space" ? {name: "preset", fit: true, padding: 75} : {name: "breadthfirst", directed: true, fit: true, padding: 115, spacingFactor: 1.25, animate: !state.traceOnCanvas, animationDuration: 260},
-    minZoom: .15, maxZoom: 2.3, wheelSensitivity: .18,
+    minZoom: .002, maxZoom: 2.3, wheelSensitivity: .18,
     style: [
       {selector: "node", style: {"background-color": "#181818", "border-color": "#5f5f68", "border-width": 1, "color": "#f4f4f5", "font-family": "Inter, sans-serif", "font-size": 11, "label": "data(label)", "shape": "round-rectangle", "text-max-width": 104, "text-wrap": "ellipsis", "text-valign": "center", "width": 112, "height": 42}},
       {selector: 'node[type = "view"]', style: {"border-color": "#22d3ee"}},
@@ -416,6 +434,7 @@ function renderGraph() {
       {selector: ".trace-focus", style: {"opacity": 1, "border-color": "#10b981", "border-width": 3}},
     ],
   });
+  bindCanvasZoom();
   state.cy.on("tap", 'node[type = "table"], node[type = "view"], node[type = "derived_relation"], node[type = "object_family"]', event => selectObject(event.target.id()));
   state.cy.on("tap", 'node[type = "asset"], node[type = "procedure"], node[type = "query"], node[type = "script"]', event => {
     const reference = event.target.data("reference");
@@ -561,6 +580,7 @@ function selectObject(id) {
 }
 
 function focusSelected() {
+  ensureObjectCanvas();
   const selected = state.cy.$id(state.selectedId);
   if (!selected.length) return;
   const focus = selected.closedNeighborhood();
@@ -885,6 +905,7 @@ function renderZones() {
 }
 
 function highlightZone(zone) {
+  ensureObjectCanvas();
   if (!state.cy) return;
   state.cy.elements().removeClass("hidden dimmed zone-focus");
   state.cy.elements().addClass("dimmed");
@@ -1304,11 +1325,10 @@ $$('.tab').forEach(button => button.addEventListener("click", () => switchView(b
 $$('.review-filter').forEach(button => button.addEventListener("click", () => { state.reviewFilter = button.dataset.reviewFilter; $$('.review-filter').forEach(item => item.classList.toggle("is-active", item === button)); renderReview(); }));
 $("#fit-graph").addEventListener("click", focusSelected);
 $("#show-all").addEventListener("click", () => {
+  if (state.canvasMode === "architecture") state.canvasMode = "space";
   state.traceOnCanvas = false;
-  state.cy.elements().removeClass("hidden dimmed zone-focus trace-focus");
-  state.cy.fit(undefined, 70);
-  $("#canvas-title").textContent = state.canvasMode === "space" ? "Information space · all objects" : "Lineage · all selected documents";
-  $("#canvas-subtitle").textContent = "Full current source / report scope";
+  state.structureLevel = "objects";
+  renderGraph();
 });
 $("#toggle-entity-resolution").addEventListener("change", event => { state.showEntityResolution = event.target.checked; renderGraph(); });
 $("#toggle-derived-relations").addEventListener("change", async event => {
@@ -1340,5 +1360,7 @@ $("#zone-form").addEventListener("submit", createZone);
 $("#close-zone").addEventListener("click", () => $("#zone-dialog").close());
 $("#cancel-zone").addEventListener("click", () => $("#zone-dialog").close());
 
+initializeEstateNavigation();
+initializeArchitectureActions();
 if (typeof initializeQueryTools === "function") initializeQueryTools();
 load().catch(error => { setFooter("Failed"); document.body.innerHTML = `<div class="empty-state"><h1>TAREL UI could not start</h1><p>${escapeHtml(error.message)}</p></div>`; });

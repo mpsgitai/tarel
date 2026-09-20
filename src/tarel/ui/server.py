@@ -75,6 +75,7 @@ from tarel.semantics.contracts import SemanticFailure
 from tarel.topology.application import project_logical_topologies_for_graphs_use_case
 from tarel.topology.contracts import LogicalTopologyFailure
 from tarel.topology.endpoint_contracts import LogicalEndpointFailure
+from tarel.ui.architecture_store import ArchitectureFailure, ArchitectureStore
 from tarel.ui.logical_metadata import LogicalMetadataFailure, logical_metadata_use_case
 from tarel.ui.optional_metadata import OptionalMetadataFailure, optional_object_metadata
 from tarel.ui.presentation import (
@@ -126,15 +127,44 @@ class UIConfig:
     focuses: tuple[str, ...] = ()
     editable: bool = False
     family_mode: str | None = None
+    architecture_file: Path | None = None
+    architecture_edit: bool = False
 
 
 class TarelUIBackend:
     def __init__(self, config: UIConfig) -> None:
         self.config = config
         self._lineages = list(config.lineages)
+        self.architecture = None
+        if config.architecture_edit and not config.architecture_file:
+            raise UIFailure("architecture_required", "--architecture-edit requires a sidecar.")
+        if config.architecture_file:
+            if not config.workspace or any((config.systems, config.graphs, config.areas,
+                                            config.schemas, config.zones, config.focuses)):
+                raise UIFailure(
+                    "architecture_scope", "Architecture requires an unfiltered workspace.",
+                )
+            self.architecture = ArchitectureStore(
+                config.architecture_file, workspace=config.workspace,
+                editable=config.architecture_edit,
+            )
 
     def bootstrap(self) -> dict[str, object]:
-        return self._bootstrap(self.config.family_mode)
+        payload = self._bootstrap(self.config.family_mode)
+        if self.architecture:
+            snapshot = self.architecture.snapshot()
+            workspace = load_workspace_use_case(self.config.workspace)
+            # The object projection intentionally omits empty catalogs. The
+            # authoritative workspace retains them and defines this boundary.
+            observed = {name for system in workspace.systems for name in system.graphs}
+            recorded = {item["graph"] for item in snapshot["document"]["nodes"]}
+            if recorded != observed:
+                raise ArchitectureFailure(
+                    "Architecture source inventory differs from the workspace. "
+                    "Refresh the sidecar before using this view.", 409,
+                )
+            payload["architecture"] = snapshot
+        return payload
 
     def _bootstrap(
         self, family_mode: str | None, focus_names: tuple[str, ...] | None = None,
@@ -408,6 +438,12 @@ class TarelUIBackend:
         } | {"focuses": list(names)}
 
     def mutate(self, route: str, payload: dict[str, Any]) -> dict[str, object]:
+        if route.startswith("/api/architecture/"):
+            if not self.architecture:
+                raise UIFailure(
+                    "architecture_unavailable", "No architecture sidecar configured.", status=404,
+                )
+            return self.architecture.mutate(route.removeprefix("/api/architecture/"), payload)
         if route == "/api/optional/details":
             return self._optional_details(payload)
         if route == "/api/optional/view":
@@ -736,6 +772,8 @@ class TarelUIBackend:
         return stale
 
     def read(self, route: str) -> dict[str, object]:
+        if route == "/api/architecture" and self.architecture:
+            return self.architecture.snapshot()
         if route == "/api/bootstrap":
             return self.bootstrap()
         raise UIFailure("route_not_found", "Unknown UI API route.", status=404)
@@ -975,6 +1013,8 @@ class _Handler(BaseHTTPRequestHandler):
             "index.html", "app.js", "styles.css", "cytoscape.min.js", "logical_metadata.js",
             "query_tools.js",
             "optional_details.js",
+            "estate_navigation.js",
+            "architecture.js", "architecture_actions.js", "architecture.css",
         }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -1023,6 +1063,8 @@ def run_ui(
     focuses: tuple[str, ...] = (),
     editable: bool = False,
     family_mode: str | None = None,
+    architecture_file: Path | None = None,
+    architecture_edit: bool = False,
     port: int = 0,
     open_browser: bool = True,
 ) -> int:
@@ -1046,9 +1088,14 @@ def run_ui(
             focuses=focuses,
             editable=editable,
             family_mode=family_mode,
+            architecture_file=architecture_file,
+            architecture_edit=architecture_edit,
         )
     )
-    backend.bootstrap()
+    try:
+        backend.bootstrap()
+    except ArchitectureFailure as exc:
+        raise _ui_failure(exc) from exc
     server = _Server(("127.0.0.1", port), backend, secrets.token_urlsafe(32))
     address = f"http://127.0.0.1:{server.server_port}/"
     mode = "edit" if editable else "read-only"
@@ -1066,6 +1113,8 @@ def run_ui(
 
 
 def _ui_failure(exc: Exception) -> UIFailure:
+    if isinstance(exc, ArchitectureFailure):
+        return UIFailure(exc.code, str(exc), status=exc.status)
     if isinstance(exc, UIFailure):
         return exc
     if isinstance(exc, UIQueryFailure):
