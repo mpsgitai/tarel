@@ -141,6 +141,10 @@ GROUPS = {
             "Starts a local browser server. --edit enables explicit mutations"
             ". Opening the UI does not itself run a connector or LLM. UI disp"
             "lay filters are not automatically context-packet constraints."
+            " --architecture-file opts an unfiltered workspace into the experimental"
+            " [architecture browser](architecture-ui.md). --architecture-edit enables"
+            " only sidecar edits, independently of --edit; no architecture connections"
+            " become technical lineage."
         ),
         "browser-workflows.md",
         "tarel ui --workspace enterprise --lineage sales-etl",
@@ -878,6 +882,8 @@ def appendices():
                 func.endswith("Failure")
                 and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str)
+                # Some UI exceptions take a prose message, not an error code.
+                and re.fullmatch(r"[a-z][a-z0-9_]*", node.args[0].value)
             ):
                 errors[node.args[0].value].add((str(path.relative_to(ROOT)), node.lineno))
     for code_name, locations in sorted(errors.items()):

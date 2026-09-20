@@ -8,6 +8,7 @@ Start with the [Retail DWH demo](retail-demo.md) for a local, credential-free wa
 | [Architecture and extensions](architecture.md) | Understand the graph, adapter boundaries, and reviewed self-modification |
 | [Demo warehouse](retail-demo.md) | Build and inspect a reproducible source |
 | [Three-day workshop](workshop.md) | Apply TAREL to an enterprise landscape with a harness |
+| [Experimental architecture browser](architecture-ui.md) | Explore layers and collections; edit a separate local architecture map |
 
 The [contract reference](contracts.md) documents formats and shared rules. The
 [Python SDK](cli-reference.md#python-sdk) uses the same application paths as the CLI.

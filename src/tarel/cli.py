@@ -752,6 +752,13 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--port", type=int, default=0, help="Loopback port; 0 selects a free port.")
     ui.add_argument("--no-open", action="store_true", help="Do not open the browser automatically.")
     ui.add_argument("--families", choices=("confirmed_only", "include_candidates"))
+    ui.add_argument(
+        "--architecture-file", type=Path, help="Experimental local architecture sidecar.",
+    )
+    ui.add_argument(
+        "--architecture-edit", action="store_true",
+        help="Edit architecture only, not graph annotations.",
+    )
 
     add_lineage_commands(subcommands)
     add_semantic_commands(subcommands)
@@ -1236,6 +1243,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     lineages=tuple(args.lineages or ()),
                     focuses=tuple(args.focuses or ()),
                     editable=args.edit,
+                    architecture_file=args.architecture_file,
+                    architecture_edit=args.architecture_edit,
                     family_mode=args.families,
                     port=args.port,
                     open_browser=not args.no_open,

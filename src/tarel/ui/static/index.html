@@ -7,6 +7,7 @@
     <meta name="tarel-token" content="__TAREL_TOKEN__" />
     <title>TAREL · Graph &amp; Review</title>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/architecture.css" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">Skip to workspace</a>
@@ -25,6 +26,26 @@
 
       <main id="workspace">
         <section id="graph-view" class="view is-active">
+          <aside id="architecture-sidebar" hidden>
+            <p class="eyebrow">Local architecture · experimental</p><h1>Deine Landschaft</h1>
+            <label>Sammlung<select id="arch-collection"></select></label>
+            <p id="arch-collection-description"></p>
+            <div class="arch-buttons"><button id="arch-add-collection" class="quiet-button">+ Sammlung</button><button id="arch-edit-collection" class="quiet-button">Bearbeiten</button></div>
+            <label>Detailtiefe<select id="arch-level"><option value="area">Systeme / Areas</option><option value="graph">Datenbanken / Quellbereiche</option><option value="system">Systeme kompakt</option></select></label>
+            <label>Architektur durchsuchen<input id="arch-search" type="search" placeholder="WWI, SQL Server, CRM…" /></label>
+            <label>System hervorheben<select id="arch-spotlight"></select></label>
+            <div id="arch-layers"></div>
+            <details><summary>Verbindungsfilter</summary>
+              <label>Status<select id="arch-edge-state"><option value="">Alle Status</option><option value="documented">Dokumentiert</option><option value="planned">Geplant</option><option value="unverified">Ungeprüft</option><option value="confirmed">Manuell bestätigt</option></select></label>
+              <label>Art<select id="arch-edge-kind"><option value="">Alle Arten</option><option value="data_flow">Datenfluss</option><option value="orchestration">Steuerung</option><option value="reference">Referenz</option><option value="replica">Replikation</option></select></label>
+            </details>
+            <div class="arch-buttons"><button id="arch-clear-filters" class="quiet-button">Alle anzeigen</button><button id="arch-reload" class="quiet-button">Neu laden</button></div>
+            <p id="arch-permission"></p><p id="arch-error" hidden role="alert"></p>
+            <section id="arch-selection" aria-live="polite"></section>
+            <details><summary>Karten auswählen</summary><nav id="arch-node-list" aria-label="Architecture cards"></nav></details>
+            <details><summary>Verbindungen auswählen</summary><nav id="arch-edge-list" aria-label="Architecture connections"></nav></details>
+            <div class="arch-legend"><strong>Architektur ≠ technische Lineage</strong><span>Blau: dokumentiert · Gelb gestrichelt: geplant</span><span>Grau gepunktet: ungeprüft · Grün: manuell bestätigt</span><span>Violett gestrichelt: Steuerung</span><span>Dokumentiert bedeutet nicht aktuell ausgeführt.</span></div>
+          </aside>
           <aside id="object-sidebar" class="sidebar">
             <div class="pane-heading"><div><p class="eyebrow">Estate explorer</p><h1>Objects</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button></div>
             <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Search names, fields, meaning…" autocomplete="off" /></label>
@@ -57,8 +78,10 @@
               <div class="canvas-heading"><strong id="canvas-title">Schema topology</strong><span id="canvas-subtitle"></span></div>
               <div class="toolbar-actions">
                 <button id="open-objects" class="quiet-button mobile-only" aria-controls="object-sidebar" aria-expanded="false">Objects</button>
-                <div class="canvas-mode" role="group" aria-label="Canvas mode"><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
-                <button id="show-all" class="quiet-button">All objects</button><button id="fit-graph" class="quiet-button" title="Show the selected object and its immediate neighbours">Neighbours</button>
+                <div class="canvas-mode" role="group" aria-label="Canvas mode"><button id="architecture-mode" class="chip" data-canvas-mode="architecture" hidden>Architektur</button><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
+                <button id="show-systems" class="chip" aria-pressed="false" title="Return to the system overview; preserve other source filters">Systems</button>
+                <select id="system-jump" aria-label="Open a system" hidden></select>
+                <button id="show-all" class="quiet-button" title="Show every object in the current filters">All objects</button><button id="fit-graph" class="quiet-button" title="Show the selected object and its immediate neighbours">Neighbours</button>
                 <details id="view-options" class="view-options"><summary class="quiet-button">View</summary><div class="view-options-menu">
                   <label class="family-mode"><span>Object families</span><select id="family-mode"><option value="">Physical objects</option><option value="confirmed_only">Reviewed families</option><option value="include_candidates">Include exploratory families</option></select></label>
                   <label class="compact-check"><input id="toggle-derived-relations" type="checkbox" /><span>Derived relations · may include exploratory metadata</span></label>
@@ -68,7 +91,19 @@
                 <button id="trace-selected" class="quiet-button">Trace</button><button id="open-inspector" class="quiet-button" aria-controls="inspector" aria-expanded="true">Details</button>
               </div>
             </div>
+            <div id="architecture-toolbar" hidden>
+              <button id="arch-add-edge" class="primary-button">+ Verbindung</button>
+              <button id="arch-arrange" class="quiet-button">Anordnen</button><button id="arch-undo" class="quiet-button" title="Ctrl+Z">Rückgängig</button>
+              <button id="arch-fit-selected" class="quiet-button" title="F">Auswahl einpassen</button>
+              <button id="arch-save-layout" class="quiet-button">Layout speichern</button><button id="arch-wide" class="quiet-button" aria-pressed="false">Mehr Platz</button><span id="arch-layout-state"></span>
+            </div>
             <div id="graph-canvas" role="application" aria-label="Interactive schema graph"></div>
+            <div class="canvas-zoom" role="group" aria-label="Graph zoom">
+              <button id="zoom-out" class="quiet-button" aria-label="Zoom out">−</button>
+              <output id="zoom-level" aria-label="Zoom level">100%</output>
+              <button id="zoom-in" class="quiet-button" aria-label="Zoom in">+</button>
+              <button id="zoom-fit" class="quiet-button" title="Fit the visible graph into the window">Fit</button>
+            </div>
             <section id="lineage-drawer" class="lineage-drawer" hidden>
               <div class="drawer-heading"><div><p class="eyebrow">Resolved lineage</p><h2 id="lineage-title">Upstream path</h2></div><button id="close-lineage" class="icon-button" aria-label="Close lineage">×</button></div>
               <form id="lineage-form" class="lineage-form"><input id="lineage-reference" required placeholder="Report, measure, table or field reference" /><button class="primary-button">Trace</button></form>
@@ -170,10 +205,42 @@
       </div>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <dialog id="arch-connection-dialog" class="arch-dialog" aria-labelledby="arch-connection-title">
+      <form id="arch-connection-form">
+        <header><h2 id="arch-connection-title">Verbindung</h2><button type="button" class="icon-button" data-arch-close="#arch-connection-dialog" aria-label="Schließen">×</button></header>
+        <p>Manuelle Architekturbeziehung. Keine Tabellen-Lineage und kein Ausführungsnachweis. Systeme, Areas oder Quellen sind mögliche Endpunkte.</p>
+        <input type="hidden" name="id" />
+        <div class="field-grid">
+          <label>Von<select name="source" required></select></label><label>Nach<select name="target" required></select></label>
+          <label class="span-two">Beschriftung<input name="label" required maxlength="200" /></label>
+          <label>Art<select name="kind"><option value="data_flow">Datenfluss</option><option value="orchestration">Steuerung</option><option value="reference">Referenz / Lookup</option><option value="replica">Replikation</option></select></label>
+          <label>Status<select name="state"><option value="planned">Geplant</option><option value="unverified">Ungeprüft</option><option value="documented">Dokumentiert</option><option value="confirmed">Manuell bestätigt</option></select></label>
+          <label>Verfahren / Werkzeug<input name="mechanism" maxlength="300" placeholder="Airflow, SQL-Prozedur, CSV…" /></label><label>Häufigkeit<input name="frequency" maxlength="300" placeholder="manuell, täglich, unbekannt…" /></label>
+          <label class="span-two">Begründung / Bedeutung<textarea name="reason" required maxlength="2000"></textarea></label>
+          <label class="span-two">Beleg / Planungsreferenz<input name="evidence" required maxlength="2000" placeholder="Pfad zur Dokumentation oder explizite Planung" /></label>
+        </div>
+        <p class="arch-form-error" hidden role="alert"></p>
+        <div class="dialog-actions"><button type="button" id="arch-connection-delete" class="quiet-button arch-danger" hidden>Löschen</button><button type="button" class="quiet-button" data-arch-close="#arch-connection-dialog">Abbrechen</button><button id="arch-connection-save" class="primary-button">Speichern</button></div>
+      </form>
+    </dialog>
+    <dialog id="arch-collection-dialog" class="arch-dialog" aria-labelledby="arch-collection-title">
+      <form id="arch-collection-form">
+        <header><h2 id="arch-collection-title">Landschaftssammlung</h2><button type="button" class="icon-button" data-arch-close="#arch-collection-dialog" aria-label="Schließen">×</button></header>
+        <p>Überlappende Gruppen aus Systemen, Areas und Quellen. Keine Datenkopie, keine Behauptung eines Datenflusses.</p>
+        <input type="hidden" name="id" />
+        <div class="field-grid"><label>Name<input name="label" required maxlength="100" /></label><label>Beschreibung<input name="description" required maxlength="2000" /></label></div>
+        <input id="arch-member-search" type="search" aria-label="Mitglieder suchen" placeholder="Systeme, Areas, Quellen suchen…" />
+        <div id="arch-collection-members"></div><p class="arch-form-error" hidden role="alert"></p>
+        <div class="dialog-actions"><button type="button" id="arch-collection-delete" class="quiet-button arch-danger" hidden>Sammlung löschen</button><button type="button" class="quiet-button" data-arch-close="#arch-collection-dialog">Abbrechen</button><button class="primary-button">Sammlung speichern</button></div>
+      </form>
+    </dialog>
     <script src="/cytoscape.min.js"></script>
     <script src="/logical_metadata.js"></script>
     <script src="/optional_details.js"></script>
     <script src="/query_tools.js"></script>
+    <script src="/estate_navigation.js"></script>
+    <script src="/architecture.js"></script>
+    <script src="/architecture_actions.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>
