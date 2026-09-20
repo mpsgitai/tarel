@@ -240,8 +240,10 @@ function architectureSelection() {
   $("#arch-connect-from").onclick=()=>{arch.connecting=card.endpoint;toast("Zielkarte anklicken (Esc bricht ab).");};
 }
 
-function openArchitectureObjects(members) {
+async function openArchitectureObjects(members) {
   if (!members.some(n=>n.objects)) return toast("Leere Quelle: keine Tabellen im gespeicherten Katalog.");
+  // A saved report can also restrict a family payload, so await its full reset.
+  if (state.focusSelection?.focuses.length && !(await clearFocuses())) return;
   state.canvasMode="space";state.structureLevel="objects";
   state.scopeFilters=null;initializeScopeFilters();
   state.scopeFilters.systems=new Set(members.map(n=>n.system));

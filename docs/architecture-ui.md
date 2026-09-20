@@ -26,7 +26,9 @@ file outside technical graph storage and exclude your real landscape from public
 
 Architecture requires an unfiltered workspace. Launch-time system, graph, area, schema,
 zone, and report-focus restrictions are rejected rather than silently broadened. The
-sidecar's graph inventory must exactly match the workspace, including empty catalogs.
+sidecar's graph inventory and graph-to-system assignments must exactly match the workspace,
+including empty catalogs. Missing/unreadable files and invalid UTF-8 JSON produce a
+structured CLI error rather than a startup traceback.
 
 ## Prepare the sidecar
 
@@ -83,6 +85,8 @@ the UI additionally performs that comparison at bootstrap.
 - Global layers group cards independently of collections. Collapse a layer, search
   architecture labels, or highlight a system. Existing workspace zones are not redefined.
 - Select a card to see its metadata; **Objekte öffnen** opens the technical object view.
+  It first clears any active report focus, reloading focused family views when needed.
+  If that reset fails, navigation stops and the error remains visible.
   Drag cards or a layer frame to rearrange them. Shift supports multiple selection.
 - **Anordnen** computes a layout; **Rückgängig** undoes layout changes. **Auswahl einpassen**
   fits the selection; **Fit** fits the visible canvas. Zoom buttons and the mouse wheel
@@ -117,7 +121,9 @@ stop all UI writers and inspect the file before removing a stale lock or restori
 backup. Back up your sidecar separately and keep it when rebuilding technical graphs.
 
 The implementation is bounded to 4 MiB per sidecar, 2,000 source-area cards and connections,
-30 layers, and 200 collections. The prototype does not migrate sidecars, infer new
+30 layers, and 200 collections. Layout POST requests permit 4 MiB plus 1 KiB for the revision
+and JSON envelope; other UI requests retain their 256 KiB cap. Saved sidecars still cannot
+exceed 4 MiB. The prototype does not migrate sidecars, infer new
 connections, or automatically reconcile changed inventories. It adds no GUI embedding
 search; project search retains its existing lexical behavior.
 

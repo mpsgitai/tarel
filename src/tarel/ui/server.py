@@ -75,7 +75,7 @@ from tarel.semantics.contracts import SemanticFailure
 from tarel.topology.application import project_logical_topologies_for_graphs_use_case
 from tarel.topology.contracts import LogicalTopologyFailure
 from tarel.topology.endpoint_contracts import LogicalEndpointFailure
-from tarel.ui.architecture_store import ArchitectureFailure, ArchitectureStore
+from tarel.ui.architecture_store import MAX_SIDECAR_BYTES, ArchitectureFailure, ArchitectureStore
 from tarel.ui.logical_metadata import LogicalMetadataFailure, logical_metadata_use_case
 from tarel.ui.optional_metadata import OptionalMetadataFailure, optional_object_metadata
 from tarel.ui.presentation import (
@@ -99,6 +99,8 @@ from tarel.ui.query_tools import (
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 
 _MAX_REQUEST_BYTES = 256 * 1024
+# A full positions map fits within the sidecar cap, plus the JSON/revision envelope.
+_MAX_LAYOUT_REQUEST_BYTES = MAX_SIDECAR_BYTES + 1024
 _OPTIONAL_KINDS = ("identity", "mappings", "coverage", "imports")
 _STATIC_TYPES = {
     ".css": "text/css; charset=utf-8",
@@ -156,11 +158,14 @@ class TarelUIBackend:
             workspace = load_workspace_use_case(self.config.workspace)
             # The object projection intentionally omits empty catalogs. The
             # authoritative workspace retains them and defines this boundary.
-            observed = {name for system in workspace.systems for name in system.graphs}
-            recorded = {item["graph"] for item in snapshot["document"]["nodes"]}
+            observed = {
+                (system.name, name) for system in workspace.systems for name in system.graphs
+            }
+            recorded = {(item["system"], item["graph"]) for item in snapshot["document"]["nodes"]}
             if recorded != observed:
                 raise ArchitectureFailure(
-                    "Architecture source inventory differs from the workspace. "
+                    "Architecture source inventory or graph/system assignments differ "
+                    "from the workspace. "
                     "Refresh the sidecar before using this view.", 409,
                 )
             payload["architecture"] = snapshot
@@ -989,7 +994,12 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length < 0 or length > _MAX_REQUEST_BYTES:
+            limit = (
+                _MAX_LAYOUT_REQUEST_BYTES
+                if path == "/api/architecture/layout" and self.server.backend.architecture
+                else _MAX_REQUEST_BYTES
+            )
+            if length < 0 or length > limit:
                 raise UIFailure("request_too_large", "UI request is too large.", status=413)
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):

@@ -244,12 +244,12 @@ async function clearFocuses() {
       state.trace = null;
       state.traceOnCanvas = false;
       await load(state.familyMode, []);
-    } catch (error) { toast(error.message); setFooter("View unchanged"); }
-    return;
+      return true;
+    } catch (error) { toast(error.message); setFooter("View unchanged"); return false; }
   }
   let selection;
   try { selection = await api("/api/focus/select", {focuses: []}); }
-  catch (error) { toast(error.message); setFooter("View unchanged"); return; }
+  catch (error) { toast(error.message); setFooter("View unchanged"); return false; }
   state.data.scope_revision = selection.scope_revision;
   state.viewRequest += 1;
   clearLoadedHintEdges();
@@ -263,6 +263,7 @@ async function clearFocuses() {
   state.traceOnCanvas = false;
   state.selectedId = mostConnectedObject();
   renderAll();
+  return true;
 }
 
 function focusMembership(id) {

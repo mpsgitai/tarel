@@ -193,7 +193,10 @@ class ArchitectureTests(TestCase):
                 "graphs": [{"name": name} for name in ("a", "b")],
             }),
             patch("tarel.ui.server.load_workspace_use_case", return_value=WorkspaceDocument(
-                name="demo", systems=(WorkspaceSystem(name="one", graphs=("a", "b", "empty")),),
+                name="demo", systems=(
+                    WorkspaceSystem(name="one", graphs=("a",)),
+                    WorkspaceSystem(name="two", graphs=("b", "empty")),
+                ),
             )),
         ):
             self.assertEqual(len(backend.bootstrap()["architecture"]["document"]["nodes"]), 3)

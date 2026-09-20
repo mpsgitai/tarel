@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 FORMAT = "tarel.local-architecture.experimental.v1"
+MAX_SIDECAR_BYTES = 4 * 1024 * 1024
 STATES = {"planned", "unverified", "documented", "confirmed"}
 KINDS = {"data_flow", "orchestration", "reference", "replica"}
 
@@ -162,9 +163,18 @@ class ArchitectureStore:
         self._lock = threading.Lock()
 
     def snapshot(self) -> dict[str, Any]:
-        if self.path.stat().st_size > 4 * 1024 * 1024:
-            raise ArchitectureFailure("Architecture sidecar exceeds 4 MiB.")
-        document = json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            if self.path.stat().st_size > MAX_SIDECAR_BYTES:
+                raise ArchitectureFailure("Architecture sidecar exceeds 4 MiB.")
+            document = json.loads(self.path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise ArchitectureFailure(
+                "Could not read architecture sidecar. Check the file path and permissions.",
+            ) from exc
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ArchitectureFailure(
+                "Architecture sidecar must contain valid UTF-8 JSON.",
+            ) from exc
         validate_document(document)
         if document["workspace"] != self.workspace:
             raise ArchitectureFailure("Architecture belongs to a different workspace.")
@@ -195,7 +205,7 @@ class ArchitectureStore:
                 _apply(document, action, payload)
                 validate_document(document)
                 body = _encoded(document)
-                if len(body) > 4 * 1024 * 1024:
+                if len(body) > MAX_SIDECAR_BYTES:
                     raise ArchitectureFailure("Architecture sidecar exceeds 4 MiB.")
                 _atomic_write(self.path.with_suffix(".previous.json"), before)
                 _atomic_write(self.path, body)
