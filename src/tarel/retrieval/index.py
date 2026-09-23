@@ -34,6 +34,7 @@ from tarel.search import FieldSearchHit, SearchHit, SearchResults
 _CONTRACT_VERSION = "tarel.retrieval.v0.1"
 _GRAPH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _RRF_K = 60
+DEFAULT_BM25_WEIGHT = 1.0
 _MAX_FIELDS = 8
 
 
@@ -301,11 +302,13 @@ def search_retrieval(
     model_path: Path | None = None,
     store: FileRetrievalIndex | None = None,
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    bm25_weight: float | None = None,
 ) -> SearchResults:
     if mode not in {"bm25", "vector", "hybrid"}:
         raise RetrievalFailure("invalid_retrieval_mode", "Mode must be bm25, vector, or hybrid.")
     if not 1 <= limit <= 100:
         raise RetrievalFailure("invalid_limit", "Search limit must be between 1 and 100.")
+    weight = validate_bm25_weight(mode, bm25_weight)
     if mode in {"vector", "hybrid"} and annotation_states != DEFAULT_CONTEXT_ANNOTATION_STATES:
         raise RetrievalFailure(
             "unsupported_annotation_filter",
@@ -344,8 +347,29 @@ def search_retrieval(
     elif mode == "vector":
         ranked = vector_results
     else:
-        ranked = _reciprocal_rank_fusion(bm25_results, vector_results, limit=candidate_limit)
+        ranked = _reciprocal_rank_fusion(
+            bm25_results, vector_results, limit=candidate_limit, bm25_weight=weight,
+        )
     return _object_results(graph, query, mode=mode, ranked=ranked, limit=limit)
+
+
+def validate_bm25_weight(mode: str, weight: float | None) -> float:
+    if weight is None:
+        return DEFAULT_BM25_WEIGHT
+    if mode != "hybrid":
+        raise RetrievalFailure(
+            "invalid_bm25_weight", "BM25 weight is only available in hybrid mode."
+        )
+    if (
+        isinstance(weight, bool)
+        or not isinstance(weight, (int, float))
+        or not math.isfinite(weight)
+        or weight < 0
+    ):
+        raise RetrievalFailure(
+            "invalid_bm25_weight", "BM25 weight must be a finite nonnegative number."
+        )
+    return float(weight)
 
 
 def _rank_vectors(
@@ -374,15 +398,18 @@ def _reciprocal_rank_fusion(
     right: tuple[RankedDocument, ...],
     *,
     limit: int,
+    bm25_weight: float = DEFAULT_BM25_WEIGHT,
 ) -> tuple[RankedDocument, ...]:
     scores: defaultdict[str, float] = defaultdict(float)
     sources: defaultdict[str, set[str]] = defaultdict(set)
     documents: dict[str, RetrievalDocument] = {}
-    for results in (left, right):
+    for results, weight in ((left, bm25_weight), (right, 1.0)):
+        if weight == 0:
+            continue
         for rank, result in enumerate(results, start=1):
             document_id = result.document.id
             documents[document_id] = result.document
-            scores[document_id] += 1.0 / (_RRF_K + rank)
+            scores[document_id] += weight / (_RRF_K + rank)
             sources[document_id].update(result.sources)
     return tuple(
         sorted(

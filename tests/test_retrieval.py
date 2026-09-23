@@ -21,9 +21,14 @@ from tarel.connectors.contracts import (
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import AnnotationEvidence, GraphAnnotation
 from tarel.retrieval.bm25 import rank_bm25
-from tarel.retrieval.contracts import RetrievalFailure
+from tarel.retrieval.contracts import RankedDocument, RetrievalDocument, RetrievalFailure
 from tarel.retrieval.documents import build_retrieval_documents
-from tarel.retrieval.index import FileRetrievalIndex, search_retrieval
+from tarel.retrieval.index import (
+    DEFAULT_BM25_WEIGHT,
+    FileRetrievalIndex,
+    _reciprocal_rank_fusion,
+    search_retrieval,
+)
 from tarel.retrieval.local import (
     MODEL_SPECS,
     LlamaCppEmbedding,
@@ -34,6 +39,80 @@ from tarel.sdk import Tarel
 
 
 class RetrievalTests(TestCase):
+    def test_hybrid_weight_favors_dense_without_dropping_lexical_evidence(self) -> None:
+        documents = tuple(
+            RetrievalDocument(name, name, None, "dbo", name, name)
+            for name in ("a", "b", "c")
+        )
+        bm25 = tuple(
+            RankedDocument(document, 1.0, ("bm25",))
+            for document in documents[:2]
+        )
+        vector = tuple(
+            RankedDocument(document, 1.0, ("vector",))
+            for document in documents[1:]
+        )
+        default = _reciprocal_rank_fusion(bm25, vector, limit=3)
+        weighted = _reciprocal_rank_fusion(bm25, vector, limit=3, bm25_weight=0.08)
+        dense = _reciprocal_rank_fusion(bm25, vector, limit=3, bm25_weight=0.0)
+        self.assertEqual(DEFAULT_BM25_WEIGHT, 1.0)
+        self.assertEqual(default, _reciprocal_rank_fusion(bm25, vector, limit=3, bm25_weight=1.0))
+        self.assertEqual([item.document.id for item in default], ["b", "a", "c"])
+        self.assertEqual([item.document.id for item in weighted], ["b", "c", "a"])
+        self.assertEqual([item.document.id for item in dense], ["b", "c"])
+        self.assertEqual(weighted[0].sources, ("bm25", "vector"))
+        self.assertEqual(dense[0].sources, ("vector",))
+
+    def test_bm25_weight_rejects_invalid_or_nonhybrid_use(self) -> None:
+        for weight in (-1.0, float("nan"), float("inf"), True):
+            with self.assertRaises(RetrievalFailure) as raised:
+                search_retrieval(_retrieval_graph(), "sales", mode="hybrid", limit=5,
+                                 bm25_weight=weight)
+            self.assertEqual(raised.exception.code, "invalid_bm25_weight")
+        with self.assertRaises(RetrievalFailure) as raised:
+            search_retrieval(_retrieval_graph(), "sales", mode="bm25", limit=5,
+                             bm25_weight=0.08)
+        self.assertEqual(raised.exception.code, "invalid_bm25_weight")
+
+    def test_hybrid_weight_reaches_search_and_context_through_sdk_and_cli(self) -> None:
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            model = project / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(project / ".tarel")
+            sdk.runtime.graph_store().save(_retrieval_graph())
+            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+                sdk.index.build("retrieval_demo", model_path=model)
+                sdk_search = sdk.search.graph(
+                    "retrieval_demo", "Internet Umsatz pro Jahr", mode="hybrid",
+                    model_path=model, bm25_weight=0.08,
+                )
+                sdk_context = sdk.context.graph(
+                    "retrieval_demo", "Internet Umsatz pro Jahr", mode="hybrid",
+                    model_path=model, bm25_weight=0.08,
+                )
+                try:
+                    os.chdir(project)
+                    outputs = []
+                    for command in ("search", "context"):
+                        output = StringIO()
+                        arguments = [command]
+                        if command == "context":
+                            arguments.append("build")
+                        arguments.extend([
+                            "retrieval_demo", "Internet Umsatz pro Jahr", "--mode", "hybrid",
+                            "--model", str(model), "--bm25-weight", "0.08", "--format", "json",
+                        ])
+                        with redirect_stdout(output):
+                            self.assertEqual(main(arguments), 0)
+                        outputs.append(json.loads(output.getvalue()))
+                finally:
+                    os.chdir(previous)
+
+        self.assertEqual(outputs[0], sdk_search.to_dict())
+        self.assertEqual(outputs[1], sdk_context.to_dict())
+
     def test_documents_use_an_allowlist_and_never_copy_samples_or_evidence(self) -> None:
         graph = _retrieval_graph()
         fact = next(node for node in graph.nodes if node.label == "dbo.FactInternetSales")
