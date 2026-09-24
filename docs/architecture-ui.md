@@ -9,6 +9,11 @@ This is a UI prototype with an experimental sidecar format, not a stable graph o
 contract. No real landscape, predefined business connections, or database configuration
 is shipped. The new architecture controls currently use German labels.
 
+Embedded applications should use the normal graph, workspace, context, and lineage SDK
+surfaces. The sidecar deliberately has no public SDK read/write facade: adding one would
+stabilize an experimental UI persistence format before its inventory and migration rules
+have been proven.
+
 ## Open a landscape
 
 Start with an existing workspace and a separately prepared sidecar file. These commands

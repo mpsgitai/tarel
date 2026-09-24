@@ -57,6 +57,7 @@ from tarel.reference_mapping.contracts import (
 )
 from tarel.runtime import TarelRuntime
 from tarel.sdk.client import Tarel
+from tarel.sdk.setup import create_demo, install_agent_skill, scaffold_connector, scaffold_provider
 from tarel.semantic_concepts.contracts import (
     ConceptBinding,
     SemanticConcept,
@@ -160,5 +161,9 @@ __all__ = [
     "StepOutput",
     "Tarel",
     "TarelRuntime",
+    "create_demo",
+    "install_agent_skill",
+    "scaffold_connector",
+    "scaffold_provider",
     "WorkspaceScope",
 ]

@@ -909,6 +909,33 @@ def appendices():
         'tarel = Tarel("/srv/my-harness/.tarel")',
         "```",
         "",
+        "### Provider and direct connector administration",
+        "",
+        (
+            "Provider profiles are private user-level configuration, independ"
+            "ent of the client's state root. `provider.test` makes one explic"
+            "it network/model request and may incur provider cost. Checks and"
+            " returned paths never contain the configured API key."
+        ),
+        "",
+        (
+            "Direct connector methods require an explicit configuration path."
+            " They are a lower-level read-only surface and do not apply a name"
+            "d source's enrichment permissions. Prefer `tarel.source` when so"
+            "urce-specific aggregate, small-domain, or raw-sample policy must"
+            " be enforced. Samples returned here are ephemeral and are not pe"
+            "rsisted by the SDK."
+        ),
+        "",
+        "```python",
+        'status = tarel.provider.check("local")',
+        'probe = tarel.connector.probe("sqlite", config="./private/source.toml")',
+        "sample = tarel.connector.sample(",
+        '    "sqlite", config="./private/source.toml",',
+        '    namespace="main", object="orders", limit=10,',
+        ")",
+        "```",
+        "",
         "### Graph and context example",
         "",
         (
@@ -972,6 +999,30 @@ def appendices():
             result += ["```python", f"tarel.{namespace}.{name}{inspect.signature(method)}", "```"]
         result += [""]
     result += [
+        "### Explicit setup helpers",
+        "",
+        (
+            "Development setup writes to explicit paths and stays separate f"
+            "rom the state-bound client. These helpers share the CLI applica"
+            "tion paths. They do not install or activate generated adapters."
+        ),
+        "",
+        "```python",
+        "from tarel.sdk import (",
+        "    create_demo, install_agent_skill, scaffold_connector, scaffold_provider,",
+        ")",
+        "",
+        'demo = create_demo("retail-dwh", path="./private/retail.sqlite")',
+        'connector = scaffold_connector("example", output="./candidates/example-connector")',
+        'provider = scaffold_provider("example", output="./candidates/example-provider")',
+        'skill = install_agent_skill("codex", target="./agent-project")',
+        "```",
+        "",
+        (
+            "The experimental architecture sidecar remains a UI-local protot"
+            "ype and has no stable SDK read/write contract."
+        ),
+        "",
         "### Errors and concurrency",
         "",
         (
