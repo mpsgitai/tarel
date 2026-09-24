@@ -42,6 +42,12 @@ def combine_workspace_search(
                         for field in hit.fields
                     ),
                     source_graph=graph_name,
+                    namespace=hit.namespace,
+                    description=hit.description,
+                    role=hit.role,
+                    grain=hit.grain,
+                    annotation_state=hit.annotation_state,
+                    reference=f"{graph_name}:{hit.id}",
                 )
             )
     ranked = tuple(

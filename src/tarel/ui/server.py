@@ -37,6 +37,7 @@ from tarel.entity_resolution.application import (
     find_entity_resolution_candidates_for_graph_use_case,
 )
 from tarel.entity_resolution.contracts import EntityResolutionFailure
+from tarel.expansion.contracts import ContextExpansionFailure
 from tarel.focus.contracts import FocusDocument, FocusFailure
 from tarel.focus.core import require_current_focus
 from tarel.graph.contracts import GraphDocument, GraphFailure
@@ -93,6 +94,7 @@ from tarel.ui.query_tools import (
     UIQueryFailure,
     UIQueryScope,
     preview_context,
+    preview_expansion,
     query_scope_snapshot,
     search_metadata,
 )
@@ -131,6 +133,9 @@ class UIConfig:
     family_mode: str | None = None
     architecture_file: Path | None = None
     architecture_edit: bool = False
+    search_mode: str = "lexical"
+    model_path: Path | None = None
+    n_threads: int | None = None
 
 
 class TarelUIBackend:
@@ -462,19 +467,28 @@ class TarelUIBackend:
                 raise UIFailure("invalid_optional_request", "Unsupported family policy.")
             names = _strings(payload, "focuses") if "focuses" in payload else None
             return self._bootstrap(mode, names, derived=payload["enabled"])
-        if route in {"/api/query/scope", "/api/search", "/api/context/preview"}:
+        if route in {
+            "/api/query/scope", "/api/search", "/api/context/preview",
+            "/api/context/expand",
+        }:
             scope = UIQueryScope(
                 graph=self.config.graph, workspace=self.config.workspace,
                 systems=self.config.systems, graphs=self.config.graphs,
                 areas=self.config.areas, schemas=self.config.schemas, zones=self.config.zones,
+                focuses=self.config.focuses, search_mode=self.config.search_mode,
+                model_path=self.config.model_path,
+                n_threads=self.config.n_threads,
             )
             if route == "/api/query/scope":
-                if payload:
+                if set(payload) - {"scope_objects"}:
                     raise UIFailure("invalid_query_request", "Project scope is server-owned.")
-                return query_scope_snapshot(scope)
+                objects = _strings(payload, "scope_objects") if "scope_objects" in payload else ()
+                return query_scope_snapshot(scope, scope_objects=objects)
             if route == "/api/search":
                 return search_metadata(scope, payload)
-            return preview_context(scope, payload)
+            if route == "/api/context/preview":
+                return preview_context(scope, payload)
+            return preview_expansion(scope, payload)
         if route == "/api/review/view":
             names = _strings(payload, "focuses") if "focuses" in payload else self.config.focuses
             return self._review_view(names)
@@ -1077,6 +1091,9 @@ def run_ui(
     architecture_edit: bool = False,
     port: int = 0,
     open_browser: bool = True,
+    search_mode: str = "lexical",
+    model_path: Path | None = None,
+    n_threads: int | None = None,
 ) -> int:
     if port < 0 or port > 65535:
         raise UIFailure("invalid_port", "Port must be between 0 and 65535.")
@@ -1100,6 +1117,9 @@ def run_ui(
             family_mode=family_mode,
             architecture_file=architecture_file,
             architecture_edit=architecture_edit,
+            search_mode=search_mode,
+            model_path=model_path,
+            n_threads=n_threads,
         )
     )
     try:
@@ -1134,6 +1154,7 @@ def _ui_failure(exc: Exception) -> UIFailure:
         (
             AnnotationFailure,
             ContextFailure,
+            ContextExpansionFailure,
             EntityResolutionFailure,
             FocusFailure,
             GraphFailure,

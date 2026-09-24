@@ -19,15 +19,22 @@ class ScopeSelection:
     areas: tuple[str, ...] = ()
     schemas: tuple[str, ...] = ()
     zones: tuple[str, ...] = ()
+    focuses: tuple[str, ...] = ()
+    objects: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, list[str]]:
-        return {
+        payload = {
             "areas": sorted(set(self.areas)),
             "graphs": sorted(set(self.graphs)),
             "schemas": sorted(set(self.schemas)),
             "systems": sorted(set(self.systems)),
             "zones": sorted(set(self.zones)),
         }
+        if self.focuses:
+            payload["focuses"] = sorted(set(self.focuses))
+        if self.objects:
+            payload["objects"] = sorted(set(self.objects))
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,15 +68,19 @@ class ResolvedScope:
     graph_names: tuple[str, ...]
     objects: tuple[ResolvedScopeObject, ...]
     scope_hash: str
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "graphs": list(self.graph_names),
             "objects": [item.to_dict() for item in self.objects],
             "scope_hash": self.scope_hash,
             "selection": self.selection.to_dict(),
             "workspace": self.workspace,
         }
+        if self.warnings:
+            payload["warnings"] = list(self.warnings)
+        return payload
 
 
 def resolve_scope(
@@ -160,15 +171,29 @@ def resolve_scope(
     ordered_objects = tuple(
         sorted(objects, key=lambda item: (item.system, item.area or "", item.graph, item.label))
     )
-    payload = {
-        "graphs": list(resolved_graphs),
-        "objects": [item.to_dict() for item in ordered_objects],
-        "selection": selection.to_dict(),
-        "workspace": workspace.name,
-    }
-    scope_hash = hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
-    ).hexdigest()
+    if selection.objects:
+        selected_objects: set[tuple[str, str]] = set()
+        for reference in selection.objects:
+            graph_name, separator, object_id = reference.partition(":")
+            if not separator or not graph_name or not object_id:
+                raise WorkspaceFailure(
+                    "invalid_object_reference",
+                    f"Workspace object must use GRAPH:OBJECT_ID: {reference}",
+                )
+            selected_objects.add((graph_name, object_id))
+        known_objects = {(item.graph, item.object_id) for item in ordered_objects}
+        unknown_objects = selected_objects - known_objects
+        if unknown_objects:
+            graph_name, object_id = sorted(unknown_objects)[0]
+            raise WorkspaceFailure(
+                "object_outside_scope",
+                f"Object is outside the selected workspace scope: {graph_name}:{object_id}",
+            )
+        ordered_objects = tuple(
+            item for item in ordered_objects if (item.graph, item.object_id) in selected_objects
+        )
+        resolved_graphs = tuple(sorted({item.graph for item in ordered_objects}))
+    scope_hash = _scope_hash(workspace.name, selection, resolved_graphs, ordered_objects)
     return ResolvedScope(
         workspace=workspace.name,
         selection=selection,
@@ -176,6 +201,46 @@ def resolve_scope(
         objects=ordered_objects,
         scope_hash=scope_hash,
     )
+
+
+def intersect_scope_objects(
+    scope: ResolvedScope,
+    allowed_by_graph: Mapping[str, frozenset[str]],
+    *,
+    warnings: tuple[str, ...] = (),
+) -> ResolvedScope:
+    """Apply one explicit object boundary without treating an empty set as unrestricted."""
+    objects = tuple(
+        item for item in scope.objects
+        if item.object_id in allowed_by_graph.get(item.graph, frozenset())
+    )
+    return ResolvedScope(
+        workspace=scope.workspace,
+        selection=scope.selection,
+        graph_names=scope.graph_names,
+        objects=objects,
+        scope_hash=_scope_hash(
+            scope.workspace, scope.selection, scope.graph_names, objects,
+        ),
+        warnings=tuple(sorted(set((*scope.warnings, *warnings)))),
+    )
+
+
+def _scope_hash(
+    workspace: str,
+    selection: ScopeSelection,
+    graph_names: tuple[str, ...],
+    objects: tuple[ResolvedScopeObject, ...],
+) -> str:
+    payload = {
+        "graphs": list(graph_names),
+        "objects": [item.to_dict() for item in objects],
+        "selection": selection.to_dict(),
+        "workspace": workspace,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
 
 
 def _selected_systems(

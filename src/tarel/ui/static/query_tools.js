@@ -11,6 +11,9 @@ const queryTools = {
   previewRequest: 0,
   scope: null,
   packet: null,
+  expansion: null,
+  scopeObjects: [],
+  selectedObjects: new Set(),
 };
 
 function projectSearchActive() { return Boolean($("#object-search").value.trim()); }
@@ -34,7 +37,15 @@ async function runProjectSearch() {
   if (!query) return;
   const request = ++queryTools.searchRequest;
   try {
-    const result = await api("/api/search", {query, limit: 20, family_mode: "confirmed_only"});
+    const type = $("#search-object-type").value;
+    const role = $("#search-role").value.trim();
+    const field = $("#search-required-field").value.trim();
+    const result = await api("/api/search", {
+      query, limit: 20, family_mode: "confirmed_only",
+      types: type ? [type] : [], roles: role ? [role] : [],
+      required_fields: field ? [field] : [], scope_objects: queryTools.scopeObjects,
+      reviewed_annotations_only: $("#search-reviewed").checked,
+    });
     if (request !== queryTools.searchRequest || $("#object-search").value.trim() !== query) return;
     queryTools.searchResult = result;
   } catch (error) {
@@ -69,19 +80,68 @@ function renderProjectSearch() {
     return;
   }
   const hits = queryTools.searchResult?.results.hits || [];
-  status.textContent = `${hits.length} project result${hits.length === 1 ? "" : "s"} · up to 20 · display / report filters not applied`;
+  const inventory = queryTools.searchResult?.results.inventory;
+  const mode = queryTools.searchResult?.results.mode || "metadata";
+  status.textContent = `${hits.length} result${hits.length === 1 ? "" : "s"} · ${mode}${inventory ? ` · ${inventory.objects_after_filters}/${inventory.objects_in_scope} objects after filters` : ""}`;
   $("#object-list").innerHTML = hits.map((hit, index) => {
     const object = searchHitObject(hit);
     const outside = !object || !visibleObjects().some(item => item.id === object.id);
     const action = hit.family ? (outside ? "Show family · clear display filters" : "Show reviewed family") : outside ? "Inspect · clear display filters" : "Inspect object";
+    const metadata = hit.metadata || {};
     return `<article class="search-hit"><div class="search-hit-heading"><span class="kind-icon">${hit.family ? "F" : hit.type === "view" ? "V" : "T"}</span><strong>${escapeHtml(hit.label)}</strong></div>
-      <p>Graph: ${escapeHtml(hit.source_graph || queryTools.searchResult.results.graph)}</p>
+      <p>Graph: ${[hit.source_graph || queryTools.searchResult.results.graph, metadata.namespace].filter(Boolean).map(escapeHtml).join(" · ")}</p>
+      ${metadata.description ? `<p>${escapeHtml(metadata.description)}</p>` : '<p>Meaning not documented.</p>'}
+      ${metadata.role || metadata.grain || metadata.annotation_state ? `<p>${metadata.role ? `Role: ${escapeHtml(metadata.role)}` : "Role: unknown"}${metadata.grain ? ` · Grain: ${escapeHtml(metadata.grain)}` : ""}${metadata.annotation_state ? ` · ${escapeHtml(metadata.annotation_state)}` : ""}</p>` : ""}
       ${hit.family ? `<p>${hit.family.member_count} members · ${escapeHtml(hit.family.usage)} · metadata only</p>` : ""}
       ${hit.fields?.length ? `<p class="search-match">Fields: ${hit.fields.slice(0, 4).map(field => escapeHtml(field.label)).join(", ")}${hit.fields.length > 4 ? " …" : ""}</p>` : ""}
       ${hit.reasons?.length ? `<details class="search-reasons"><summary>Why this match</summary><p>${hit.reasons.slice(0, 2).map(escapeHtml).join(" · ")}</p></details>` : ""}
-      <button class="quiet-button" data-search-hit="${index}">${action}</button></article>`;
+      <div class="search-hit-actions"><button class="quiet-button" data-search-hit="${index}">${action}</button>${hit.family ? "" : `<button class="quiet-button" data-context-hit="${index}">${queryTools.selectedObjects.has(contextObjectReference(hit)) ? "Selected for context" : "Use for context"}</button>`}</div></article>`;
   }).join("") || '<div class="empty-state compact"><h2>No metadata matches</h2><p>Try a field name, synonym or a shorter topic. Clear search to return to the object list.</p></div>';
   $$('[data-search-hit]').forEach(button => button.addEventListener("click", () => inspectSearchHit(hits[Number(button.dataset.searchHit)], button)));
+  $$('[data-context-hit]').forEach(button => button.addEventListener("click", () => selectSearchHitForContext(hits[Number(button.dataset.contextHit)])));
+}
+
+function contextObjectReference(hit) {
+  const result = queryTools.searchResult?.results;
+  const graph = hit.source_graph || result?.graph;
+  const prefix = `scope::${graph}::`;
+  const physicalId = hit.id.startsWith(prefix) ? hit.id.slice(prefix.length) : hit.id;
+  return result?.workspace ? `${graph}:${physicalId}` : physicalId;
+}
+
+function selectSearchHitForContext(hit) {
+  const reference = contextObjectReference(hit);
+  queryTools.selectedObjects.has(reference)
+    ? queryTools.selectedObjects.delete(reference)
+    : queryTools.selectedObjects.add(reference);
+  $("#context-kind").value = "selected";
+  updateContextKind();
+  renderProjectSearch();
+}
+
+function currentWorkingScopeObjects() {
+  return visibleObjects()
+    .filter(item => ["table", "view"].includes(item.type))
+    .map(item => `${item.graph}:${item.object_id}`)
+    .sort();
+}
+
+function applySearchHere() {
+  const objects = currentWorkingScopeObjects();
+  if (!objects.length) { toast("The visible selection contains no physical objects."); return; }
+  queryTools.scopeObjects = objects;
+  queryTools.selectedObjects.clear();
+  $("#retrieval-workspace-label").textContent = `Working scope: ${objects.length} visible objects`;
+  $("#search-project").hidden = false;
+  queryToolsScopeChanged();
+}
+
+function searchWholeProject() {
+  queryTools.scopeObjects = [];
+  queryTools.selectedObjects.clear();
+  $("#retrieval-workspace-label").textContent = "Working scope: project";
+  $("#search-project").hidden = true;
+  queryToolsScopeChanged();
 }
 
 async function inspectSearchHit(hit, button) {
@@ -110,6 +170,7 @@ async function inspectSearchHit(hit, button) {
 function clearContextPreview(message = "Options changed. Build a new project context.") {
   queryTools.previewRequest += 1;
   queryTools.packet = null;
+  queryTools.expansion = null;
   $("#context-result").hidden = true;
   $("#context-result").replaceChildren();
   $("#context-request-status").textContent = message;
@@ -140,13 +201,13 @@ async function loadContextScope() {
   clearContextPreview("Loading the project scope and revisions…");
   $("#context-project").textContent = "Loading project scope…";
   try {
-    const result = await api("/api/query/scope", {});
+    const result = await api("/api/query/scope", {scope_objects: queryTools.scopeObjects});
     if (request !== queryTools.scopeRequest || !$("#context-dialog").open) return;
     queryTools.scope = result;
     const name = result.scope.workspace || result.scope.graph;
     const selectors = Object.entries(result.scope.selection || {}).filter(([, values]) => Array.isArray(values) && values.length).map(([kind, values]) => `${kind}: ${values.join(", ")}`);
     $("#context-project").textContent = `${name} · ${Object.keys(result.revisions).length} graph revision${Object.keys(result.revisions).length === 1 ? "" : "s"} pinned${selectors.length ? ` · ${selectors.join(" · ")}` : ""}`;
-    $("#context-request-status").textContent = "Ready. The packet uses project scope, not the canvas selection.";
+    $("#context-request-status").textContent = "Ready. Context uses the displayed working scope.";
     $("#build-context").disabled = false;
   } catch (error) {
     if (request !== queryTools.scopeRequest) return;
@@ -157,8 +218,9 @@ async function loadContextScope() {
 
 function contextRequestPayload() {
   const maxObjects = Number($("#context-max-objects").value);
-  return {
+  const payload = {
     query: $("#context-query").value.trim(),
+    kind: $("#context-kind").value,
     expected_revisions: queryTools.scope.revisions,
     expected_scope_identity: queryTools.scope.scope_identity,
     reviewed_annotations_only: $("#context-reviewed").checked,
@@ -167,6 +229,23 @@ function contextRequestPayload() {
     seed_limit: Math.min(3, maxObjects),
     max_characters: Number($("#context-max-characters").value),
   };
+  if ($("#context-kind").value === "selected") payload.object_ids = [...queryTools.selectedObjects];
+  if (queryTools.scopeObjects.length) payload.scope_objects = queryTools.scopeObjects;
+  return payload;
+}
+
+function updateContextKind() {
+  const kind = $("#context-kind").value;
+  const query = $("#context-query");
+  query.required = kind !== "prefix";
+  query.disabled = kind === "prefix";
+  $("#context-selection-summary").textContent = queryTools.selectedObjects.size
+    ? `${queryTools.selectedObjects.size} exact object${queryTools.selectedObjects.size === 1 ? "" : "s"} selected.`
+    : "No search results selected.";
+  if (kind === "selected" && !queryTools.selectedObjects.size) {
+    $("#context-request-status").textContent = "Select at least one physical search result.";
+  }
+  clearContextPreview();
 }
 
 async function buildContextPreview(event) {
@@ -200,20 +279,60 @@ function renderContextPreview(packet) {
   const hints = stable.logical_hints?.items || [];
   const hintOmissions = Object.entries(dynamic.logical_hints?.omissions || {}).filter(([, count]) => count > 0);
   const hintWarnings = dynamic.logical_hints?.warnings || [];
+  const selections = new Map((dynamic.selection || []).map(item => [item.id, item]));
   const container = $("#context-result");
   container.hidden = false;
   container.innerHTML = `<div class="context-result-heading"><h3>Compiled context</h3><div><button id="copy-context" class="quiet-button">Copy JSON</button><button id="download-context" class="quiet-button">Download JSON</button></div></div>
-    <div class="context-counts">${fact("Objects", stable.objects.length)}${fact("Fields", fieldCount)}${fact("Joins", stable.joins.length)}${fact("Characters", `${dynamic.budgets.context_characters} / ${dynamic.budgets.max_characters}`)}</div>
+    <div class="context-counts">${fact("Objects", stable.objects.length)}${fact("Fields", fieldCount)}${fact("Joins", stable.joins.length)}${fact("Characters", `${dynamic.budgets.context_characters} / ${dynamic.budgets.max_characters}`)}${fact("Stable token estimate", `≈ ${Math.ceil(dynamic.budgets.stable_characters / 4)}`)}</div>
     <p class="semantic-origin">Annotations: ${stable.annotation_states.map(escapeHtml).join(", ") || "none"}. Physical structure is independent of annotation approval. Packet ${escapeHtml(packet.identity.packet_hash.slice(0, 12))}.</p>
     ${stable.logical_hints ? `<p class="semantic-origin">Logical hints: ${hints.length} · ${escapeHtml(stable.logical_hints.mode)}. Metadata only; no entity-resolution candidates or executable family expansion.</p>` : ""}
     ${hints.some(item => item.usage === "exploratory_only") ? '<p class="logical-warning">This packet contains exploratory logical hints. Validate them before analytical use.</p>' : ""}
     ${!stable.objects.length ? '<p class="logical-warning">No physical objects were selected. This packet is not a sufficient basis for a data query.</p>' : ""}
     <section class="context-omissions"><strong>${omitted.length || hintOmissions.length ? "Bounded context · omissions" : "No omissions reported by the compiler"}</strong><p>${omitted.map(([name, count]) => `${escapeHtml(name)}: ${count}`).join(" · ")}</p>${omissions.reasons.length ? `<ul>${omissions.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${hintOmissions.length ? `<p>Logical hints omitted: ${hintOmissions.map(([reason, count]) => `${escapeHtml(reason)}: ${count}`).join(" · ")}</p>` : ""}${hintWarnings.map(warning => `<p class="logical-warning">${escapeHtml(warning)}</p>`).join("")}</section>
-    <details class="optional-details" open><summary><span>Selected objects · ${stable.objects.length}</span></summary><div class="optional-body context-object-list">${stable.objects.map(item => `<article><strong>${escapeHtml(item.label)}</strong><small>${item.fields.length} fields · Source review state: ${escapeHtml(item.annotation_state || "not recorded")}</small>${item.description ? `<p>${escapeHtml(item.description)}</p>` : '<p>Semantic text not included.</p>'}</article>`).join("")}</div></details>
+    <details class="optional-details" open><summary><span>Selected objects · ${stable.objects.length}</span></summary><div class="optional-body context-object-list">${stable.objects.map(item => { const omittedFields = selections.get(item.id)?.omitted_fields || 0; return `<article><strong>${escapeHtml(item.label)}</strong><small>${item.fields.length} fields · Source review state: ${escapeHtml(item.annotation_state || "not recorded")}</small>${item.description ? `<p>${escapeHtml(item.description)}</p>` : '<p>Semantic text not included.</p>'}${omittedFields ? `<button class="quiet-button" data-expand-context-object="${escapeHtml(item.id)}">Load fuller field list · ${omittedFields} omitted</button>` : ""}</article>`; }).join("")}</div></details>
+    <section id="context-expansion" hidden></section>
     <details class="optional-details"><summary><span>Exact CLI / SDK packet</span><small>${escapeHtml(packet.contract_version)}</small></summary><div class="optional-body"><pre id="context-json" tabindex="0"></pre></div></details>`;
   $("#context-json").textContent = JSON.stringify(packet, null, 2);
   $("#copy-context").addEventListener("click", copyContextPacket);
   $("#download-context").addEventListener("click", downloadContextPacket);
+  $$('[data-expand-context-object]').forEach(button => button.addEventListener("click", () => expandContextObject(button.dataset.expandContextObject, button)));
+}
+
+async function expandContextObject(objectId, button) {
+  if (!queryTools.packet || !queryTools.scope) return;
+  button.disabled = true;
+  $("#context-request-status").textContent = "Loading a bounded metadata delta…";
+  try {
+    const result = await api("/api/context/expand", {
+      packet: queryTools.packet,
+      object_ids: [objectId],
+      scope_objects: queryTools.scopeObjects,
+      expected_revisions: queryTools.scope.revisions,
+      expected_scope_identity: queryTools.scope.scope_identity,
+      max_characters: Number($("#context-max-characters").value),
+    });
+    queryTools.expansion = result.expansion;
+    renderContextExpansion(result.expansion);
+    $("#context-request-status").textContent = "Metadata delta ready. The stable base packet is unchanged.";
+  } catch (error) {
+    $("#context-request-status").textContent = error.message;
+  } finally { if (button.isConnected) button.disabled = false; }
+}
+
+function renderContextExpansion(expansion) {
+  const container = $("#context-expansion");
+  const fields = expansion.items.flatMap(item => (item.metadata.objects || []).flatMap(object => object.fields || []));
+  container.hidden = false;
+  container.innerHTML = `<div class="context-result-heading"><h3>Targeted metadata delta</h3><button id="copy-context-expansion" class="quiet-button">Copy delta JSON</button></div>
+    <p class="semantic-origin">Base packet ${escapeHtml(expansion.base_packet_hash.slice(0, 12))} stays cacheable. ${fields.length} fields are available in this delta.</p>
+    ${fields.length ? `<div class="context-expanded-fields">${fields.map(field => `<span><strong>${escapeHtml(field.name)}</strong><small>${escapeHtml(field.data_type || "unknown type")}${field.role ? ` · ${escapeHtml(field.role)}` : ""}</small></span>`).join("")}</div>` : '<p class="logical-warning">No additional fields were returned.</p>'}
+    ${expansion.omissions.length ? `<p class="logical-warning">Omissions: ${expansion.omissions.map(item => escapeHtml(item.code)).join(", ")}</p>` : ""}`;
+  $("#copy-context-expansion").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(expansion, null, 2));
+      $("#context-request-status").textContent = "Metadata delta JSON copied.";
+    } catch (error) { $("#context-request-status").textContent = error.message; }
+  });
 }
 
 async function copyContextPacket() {
@@ -246,4 +365,15 @@ function initializeQueryTools() {
   $("#context-form").addEventListener("submit", buildContextPreview);
   $("#context-form").addEventListener("input", () => clearContextPreview());
   $("#reload-context-scope").addEventListener("click", loadContextScope);
+  $("#search-here").addEventListener("click", applySearchHere);
+  $("#search-project").addEventListener("click", searchWholeProject);
+  $("#context-kind").addEventListener("change", updateContextKind);
+  for (const id of ["#search-object-type", "#search-role", "#search-required-field", "#search-reviewed"]) {
+    $(id).addEventListener("change", () => {
+      const values = [$("#search-object-type").value, $("#search-role").value.trim(), $("#search-required-field").value.trim()].filter(Boolean);
+      $("#search-filter-summary").textContent = values.length ? `${values.length} active` : "No filters";
+      if (projectSearchActive()) scheduleProjectSearch();
+    });
+  }
+  updateContextKind();
 }

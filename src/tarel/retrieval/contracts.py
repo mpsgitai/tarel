@@ -57,6 +57,7 @@ class IndexMetadata:
     model_path: str
     model_sha256: str
     normalized: bool
+    annotation_states: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -69,6 +70,7 @@ class IndexMetadata:
             "model_path": self.model_path,
             "model_sha256": self.model_sha256,
             "normalized": self.normalized,
+            "annotation_states": list(self.annotation_states),
         }
 
 

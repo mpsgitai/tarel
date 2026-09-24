@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from tarel.annotations.states import (
     DEFAULT_CONTEXT_ANNOTATION_STATES,
@@ -40,6 +40,52 @@ class SearchFailure(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True, slots=True)
+class SearchFilters:
+    """Small, mode-independent filters applied before retrieval ranking."""
+
+    types: tuple[str, ...] = ()
+    roles: tuple[str, ...] = ()
+    required_fields: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for values in (self.types, self.roles, self.required_fields):
+            if not isinstance(values, tuple) or any(
+                not isinstance(item, str) or not item.strip() for item in values
+            ):
+                raise SearchFailure(
+                    "invalid_search_filter", "Search filters must be tuples of non-empty strings."
+                )
+        invalid_types = {item.casefold() for item in self.types} - {"table", "view"}
+        if invalid_types:
+            raise SearchFailure(
+                "invalid_search_filter", f"Unsupported object type: {sorted(invalid_types)[0]}"
+            )
+
+    def to_dict(self) -> dict[str, list[str]]:
+        return {
+            "required_fields": sorted(set(self.required_fields), key=str.casefold),
+            "roles": sorted(set(self.roles), key=str.casefold),
+            "types": sorted(set(self.types), key=str.casefold),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SearchInventory:
+    objects_in_scope: int
+    objects_after_filters: int
+    types: tuple[tuple[str, int], ...]
+    roles: tuple[tuple[str, int], ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "objects_after_filters": self.objects_after_filters,
+            "objects_in_scope": self.objects_in_scope,
+            "roles": {key: value for key, value in self.roles},
+            "types": {key: value for key, value in self.types},
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +133,12 @@ class SearchHit:
     fields: tuple[FieldSearchHit, ...]
     source_graph: str | None = None
     family: FamilySearchReference | None = None
+    namespace: str | None = None
+    description: str | None = None
+    role: str | None = None
+    grain: str | None = None
+    annotation_state: str | None = None
+    reference: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -102,6 +154,14 @@ class SearchHit:
             payload["source_graph"] = self.source_graph
         if self.family is not None:
             payload["family"] = self.family.to_dict()
+        payload["metadata"] = {
+            "annotation_state": self.annotation_state,
+            "description": self.description,
+            "grain": self.grain,
+            "namespace": self.namespace,
+            "reference": self.reference,
+            "role": self.role,
+        }
         return payload
 
 
@@ -115,6 +175,9 @@ class SearchResults:
     workspace: str | None = None
     graphs: tuple[str, ...] = ()
     scope_hash: str | None = None
+    filters: SearchFilters = SearchFilters()
+    inventory: SearchInventory | None = None
+    annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -123,7 +186,11 @@ class SearchResults:
             "mode": self.mode,
             "query": self.query,
             "terms": list(self.terms),
+            "filters": self.filters.to_dict(),
+            "annotation_states": sorted(self.annotation_states),
         }
+        if self.inventory is not None:
+            payload["inventory"] = self.inventory.to_dict()
         if self.workspace is not None:
             payload.update(
                 {
@@ -177,6 +244,114 @@ def search_graph(
 
     ranked = sorted(hits, key=lambda hit: (-hit.score, hit.label.casefold(), hit.id))[:limit]
     return SearchResults(graph=graph.name, query=query, terms=terms, hits=tuple(ranked))
+
+
+def filter_search_objects(
+    graph: GraphDocument,
+    *,
+    object_ids: frozenset[str] | None = None,
+    filters: SearchFilters | None = None,
+    annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+) -> tuple[frozenset[str] | None, SearchInventory]:
+    """Resolve physical candidates once so every retrieval mode sees the same inputs."""
+    selected = filters or SearchFilters()
+    fields_by_object: dict[str, set[str]] = {}
+    for node in graph.nodes:
+        parent = node.metadata.get("object_id")
+        if node.type == "field" and isinstance(parent, str):
+            fields_by_object.setdefault(parent, set()).add(node.label.casefold())
+
+    scope_nodes = tuple(
+        node for node in graph.nodes
+        if node.type in {"table", "view"} and (object_ids is None or node.id in object_ids)
+    )
+    allowed_types = {item.strip().casefold() for item in selected.types}
+    allowed_roles = {item.strip().casefold() for item in selected.roles}
+    required_fields = {item.strip().casefold() for item in selected.required_fields}
+    filtered: list[GraphNode] = []
+    for node in scope_nodes:
+        annotation = (
+            node.annotation if annotation_is_visible(node.annotation, annotation_states) else None
+        )
+        role = annotation.role.casefold() if annotation and annotation.role else None
+        if allowed_types and node.type.casefold() not in allowed_types:
+            continue
+        if allowed_roles and role not in allowed_roles:
+            continue
+        if required_fields and not required_fields.issubset(fields_by_object.get(node.id, set())):
+            continue
+        filtered.append(node)
+
+    type_counts: dict[str, int] = {}
+    role_counts: dict[str, int] = {}
+    for node in scope_nodes:
+        type_counts[node.type] = type_counts.get(node.type, 0) + 1
+        annotation = (
+            node.annotation if annotation_is_visible(node.annotation, annotation_states) else None
+        )
+        role = annotation.role if annotation and annotation.role else "unknown"
+        role_counts[role] = role_counts.get(role, 0) + 1
+    inventory = SearchInventory(
+        objects_in_scope=len(scope_nodes),
+        objects_after_filters=len(filtered),
+        types=tuple(sorted(type_counts.items(), key=lambda item: item[0].casefold())),
+        roles=tuple(sorted(role_counts.items(), key=lambda item: item[0].casefold())),
+    )
+    if object_ids is None and not any(selected.to_dict().values()):
+        return None, inventory
+    return frozenset(node.id for node in filtered), inventory
+
+
+def describe_search_results(
+    graph: GraphDocument,
+    results: SearchResults,
+    *,
+    annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    source_graph: str | None = None,
+    filters: SearchFilters | None = None,
+    inventory: SearchInventory | None = None,
+) -> SearchResults:
+    """Attach decision metadata without changing ranking or inventing explanations."""
+    nodes = graph.node_by_id()
+    described: list[SearchHit] = []
+    for hit in results.hits:
+        node = nodes.get(hit.id)
+        if node is None or node.type not in {"table", "view"}:
+            described.append(hit)
+            continue
+        annotation = (
+            node.annotation if annotation_is_visible(node.annotation, annotation_states) else None
+        )
+        graph_name = source_graph or graph.name
+        namespace = str(node.metadata.get("namespace") or "") or None
+        described.append(replace(
+            hit,
+            source_graph=source_graph or hit.source_graph,
+            namespace=namespace,
+            description=(
+                annotation.description if annotation else _optional_text(
+                    node.metadata.get("technical_description")
+                )
+            ),
+            role=annotation.role if annotation else None,
+            grain=(
+                _optional_text(node.metadata.get("grain"))
+                if node.annotation is None or annotation is not None else None
+            ),
+            annotation_state=node.annotation.state if node.annotation else None,
+            reference=f"{graph_name}:{node.id}",
+        ))
+    return replace(
+        results,
+        hits=tuple(described),
+        filters=filters or SearchFilters(),
+        inventory=inventory,
+        annotation_states=annotation_states,
+    )
+
+
+def _optional_text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _score_object(

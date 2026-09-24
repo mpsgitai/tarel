@@ -53,6 +53,7 @@ def compile_context(
     max_fields_per_object: int = 12,
     max_characters: int = DEFAULT_MAX_CONTEXT_CHARACTERS,
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    scope: ContextScope | None = None,
 ) -> ContextResult:
     """Build context without querying source data or invoking an LLM."""
     search = search_graph(
@@ -73,6 +74,7 @@ def compile_context(
         max_fields_per_object=max_fields_per_object,
         max_characters=max_characters,
         annotation_states=annotation_states,
+        scope=scope,
     )
 
 
@@ -89,6 +91,7 @@ def compile_context_from_search(
     max_characters: int = DEFAULT_MAX_CONTEXT_CHARACTERS,
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
     scope: ContextScope | None = None,
+    selection_kind: str = "search",
 ) -> ContextResult:
     """Expand caller-supplied retrieval anchors through reviewed graph relationships."""
     _validate_budgets(
@@ -109,7 +112,7 @@ def compile_context_from_search(
 
     selected: dict[str, _Selection] = {
         hit.id: _Selection(
-            kind="search",
+            kind=selection_kind,
             distance=0,
             seed_id=hit.id,
             object_ids=(hit.id,),
@@ -213,6 +216,80 @@ def compile_context_from_search(
         annotation_states=annotation_states,
     )
     return _fit_character_budget(result)
+
+
+def compile_context_from_objects(
+    graph: GraphDocument,
+    object_ids: tuple[str, ...],
+    *,
+    query: str = "",
+    max_objects: int = 10,
+    max_joins: int = 12,
+    max_hops: int = 2,
+    max_fields_per_object: int = 12,
+    max_characters: int = DEFAULT_MAX_CONTEXT_CHARACTERS,
+    annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    scope: ContextScope | None = None,
+) -> ContextResult:
+    """Compile context from exact physical objects without another fuzzy search."""
+    unique = tuple(dict.fromkeys(object_ids))
+    if not unique:
+        raise ContextFailure("empty_context_selection", "Select at least one context object.")
+    if len(unique) > max_objects:
+        raise ContextFailure(
+            "selected_objects_exceed_budget",
+            "Selected context objects exceed the object budget.",
+        )
+    if len(unique) > 20:
+        raise ContextFailure(
+            "selected_objects_exceed_budget",
+            "At most 20 exact context anchors can be selected.",
+        )
+    nodes = graph.node_by_id()
+    invalid = [
+        object_id for object_id in unique
+        if object_id not in nodes or nodes[object_id].type not in {"table", "view"}
+    ]
+    if invalid:
+        raise ContextFailure(
+            "context_object_not_found", f"Context object not found: {invalid[0]}"
+        )
+    hits = tuple(
+        SearchHit(
+            id=object_id,
+            label=nodes[object_id].label,
+            type=nodes[object_id].type,
+            score=len(unique) - index,
+            matched_terms=(),
+            reasons=("explicit_selection",),
+            fields=(),
+        )
+        for index, object_id in enumerate(unique)
+    )
+    result = compile_context_from_search(
+        graph,
+        SearchResults(
+            graph=graph.name, query=query, terms=(), hits=hits, mode="selected",
+            annotation_states=annotation_states,
+        ),
+        seed_limit=len(hits),
+        max_objects=max_objects,
+        max_joins=max_joins,
+        max_hops=max_hops,
+        max_fields_per_object=max_fields_per_object,
+        max_characters=max_characters,
+        annotation_states=annotation_states,
+        scope=scope,
+        selection_kind="selected",
+    )
+    included = {item.id for item in result.objects}
+    missing = [object_id for object_id in unique if object_id not in included]
+    if missing:
+        raise ContextFailure(
+            "selected_objects_exceed_budget",
+            "Selected context objects do not fit the context character budget.",
+        )
+    return result
 
 
 def compile_context_prefix(

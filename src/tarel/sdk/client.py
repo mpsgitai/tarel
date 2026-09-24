@@ -228,7 +228,7 @@ from tarel.retrieval.local import DEFAULT_MODEL_NAME, ModelDownloadResult
 from tarel.runtime import TarelRuntime
 from tarel.sdk.connectors import ConnectorAPI
 from tarel.sdk.providers import ProviderAPI
-from tarel.search import SearchResults
+from tarel.search import SearchFilters, SearchResults
 from tarel.semantic_concepts.application import (
     SemanticConceptMatch,
     find_semantic_concepts_use_case,
@@ -903,6 +903,8 @@ class WorkspaceAPI(_RuntimeAPI):
         areas: tuple[str, ...] = (),
         schemas: tuple[str, ...] = (),
         zones: tuple[str, ...] = (),
+        focuses: tuple[str, ...] = (),
+        objects: tuple[str, ...] = (),
     ) -> ResolvedScope:
         systems, graphs, areas, schemas, zones = _workspace_scope_arguments(
             selection,
@@ -919,6 +921,8 @@ class WorkspaceAPI(_RuntimeAPI):
             areas=areas,
             schemas=schemas,
             zones=zones,
+            focuses=_workspace_focuses(selection, focuses),
+            objects=_workspace_objects(selection, objects),
             runtime=self._runtime,
         )
 
@@ -938,6 +942,9 @@ class SearchAPI(_RuntimeAPI):
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
         family_mode: str | None = "confirmed_only",
+        filters: SearchFilters | None = None,
+        focuses: tuple[str, ...] = (),
+        scope_object_ids: tuple[str, ...] = (),
     ) -> SearchResults:
         return search_graph_use_case(
             name,
@@ -951,6 +958,9 @@ class SearchAPI(_RuntimeAPI):
             annotation_states=annotation_states,
             validated_only=validated_only,
             family_mode=family_mode,
+            filters=filters,
+            focuses=focuses,
+            scope_object_ids=scope_object_ids,
             runtime=self._runtime,
         )
 
@@ -965,6 +975,8 @@ class SearchAPI(_RuntimeAPI):
         areas: tuple[str, ...] = (),
         schemas: tuple[str, ...] = (),
         zones: tuple[str, ...] = (),
+        focuses: tuple[str, ...] = (),
+        scope_objects: tuple[str, ...] = (),
         limit: int = 20,
         mode: str = "lexical",
         model_path: str | Path | None = None,
@@ -973,7 +985,9 @@ class SearchAPI(_RuntimeAPI):
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
         family_mode: str | None = "confirmed_only",
+        filters: SearchFilters | None = None,
     ) -> SearchResults:
+        focus_names = _workspace_focuses(selection, focuses)
         systems, graphs, areas, schemas, zones = _workspace_scope_arguments(
             selection,
             systems=systems,
@@ -990,6 +1004,8 @@ class SearchAPI(_RuntimeAPI):
             areas=areas,
             schemas=schemas,
             zones=zones,
+            focuses=focus_names,
+            scope_objects=_workspace_objects(selection, scope_objects),
             limit=limit,
             mode=mode,
             model_path=_optional_path(model_path),
@@ -998,6 +1014,7 @@ class SearchAPI(_RuntimeAPI):
             annotation_states=annotation_states,
             validated_only=validated_only,
             family_mode=family_mode,
+            filters=filters,
             runtime=self._runtime,
         )
 
@@ -1025,6 +1042,8 @@ class ContextAPI(_RuntimeAPI):
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
         logical_hints: str | None = None,
+        scope_object_ids: tuple[str, ...] = (),
+        focuses: tuple[str, ...] = (),
     ) -> ContextResult:
         return compile_context_prefix_use_case(
             name,
@@ -1036,6 +1055,8 @@ class ContextAPI(_RuntimeAPI):
             annotation_states=annotation_states,
             validated_only=validated_only,
             logical_hints=logical_hints,
+            scope_object_ids=scope_object_ids,
+            focuses=focuses,
             runtime=self._runtime,
         )
 
@@ -1049,6 +1070,8 @@ class ContextAPI(_RuntimeAPI):
         areas: tuple[str, ...] = (),
         schemas: tuple[str, ...] = (),
         zones: tuple[str, ...] = (),
+        focuses: tuple[str, ...] = (),
+        scope_objects: tuple[str, ...] = (),
         max_objects: int = 250,
         max_joins: int = 500,
         max_fields_per_object: int = 50,
@@ -1057,6 +1080,7 @@ class ContextAPI(_RuntimeAPI):
         validated_only: bool = False,
         logical_hints: str | None = None,
     ) -> ContextResult:
+        focus_names = _workspace_focuses(selection, focuses)
         systems, graphs, areas, schemas, zones = _workspace_scope_arguments(
             selection,
             systems=systems,
@@ -1072,6 +1096,8 @@ class ContextAPI(_RuntimeAPI):
             areas=areas,
             schemas=schemas,
             zones=zones,
+            focuses=focus_names,
+            scope_objects=_workspace_objects(selection, scope_objects),
             max_objects=max_objects,
             max_joins=max_joins,
             max_fields_per_object=max_fields_per_object,
@@ -1114,6 +1140,9 @@ class ContextAPI(_RuntimeAPI):
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
         logical_hints: str | None = None,
+        object_ids: tuple[str, ...] = (),
+        scope_object_ids: tuple[str, ...] = (),
+        focuses: tuple[str, ...] = (),
     ) -> ContextResult:
         return compile_context_use_case(
             name,
@@ -1132,6 +1161,9 @@ class ContextAPI(_RuntimeAPI):
             annotation_states=annotation_states,
             validated_only=validated_only,
             logical_hints=logical_hints,
+            object_ids=object_ids,
+            scope_object_ids=scope_object_ids,
+            focuses=focuses,
             runtime=self._runtime,
         )
 
@@ -1146,6 +1178,8 @@ class ContextAPI(_RuntimeAPI):
         areas: tuple[str, ...] = (),
         schemas: tuple[str, ...] = (),
         zones: tuple[str, ...] = (),
+        focuses: tuple[str, ...] = (),
+        scope_objects: tuple[str, ...] = (),
         seed_limit: int = 3,
         max_objects: int = 10,
         max_joins: int = 12,
@@ -1159,7 +1193,9 @@ class ContextAPI(_RuntimeAPI):
         annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
         logical_hints: str | None = None,
+        object_ids: tuple[str, ...] = (),
     ) -> ContextResult:
+        focus_names = _workspace_focuses(selection, focuses)
         systems, graphs, areas, schemas, zones = _workspace_scope_arguments(
             selection,
             systems=systems,
@@ -1176,6 +1212,8 @@ class ContextAPI(_RuntimeAPI):
             areas=areas,
             schemas=schemas,
             zones=zones,
+            focuses=focus_names,
+            scope_objects=_workspace_objects(selection, scope_objects),
             seed_limit=seed_limit,
             max_objects=max_objects,
             max_joins=max_joins,
@@ -1189,6 +1227,7 @@ class ContextAPI(_RuntimeAPI):
             annotation_states=annotation_states,
             validated_only=validated_only,
             logical_hints=logical_hints,
+            object_ids=object_ids,
             runtime=self._runtime,
         )
 
@@ -2560,6 +2599,8 @@ class IndexAPI(_RuntimeAPI):
         n_threads: int | None = None,
         resume: bool = False,
         progress: Callable[[int, int, str], None] | None = None,
+        annotation_states: frozenset[str] | None = None,
+        validated_only: bool = False,
     ) -> IndexBuildResult:
         return build_retrieval_index_use_case(
             graph,
@@ -2568,11 +2609,19 @@ class IndexAPI(_RuntimeAPI):
             n_threads=n_threads,
             resume=resume,
             progress=progress,
+            annotation_states=annotation_states,
+            validated_only=validated_only,
             runtime=self._runtime,
         )
 
-    def status(self, graph: str) -> dict[str, object]:
-        return retrieval_index_status_use_case(graph, runtime=self._runtime)
+    def status(
+        self, graph: str, *, annotation_states: frozenset[str] | None = None,
+        validated_only: bool = False,
+    ) -> dict[str, object]:
+        return retrieval_index_status_use_case(
+            graph, annotation_states=annotation_states, validated_only=validated_only,
+            runtime=self._runtime,
+        )
 
 
 def _optional_path(value: str | Path | None) -> Path | None:
@@ -2638,3 +2687,31 @@ def _workspace_scope_arguments(
         selection.schemas,
         selection.zones,
     )
+
+
+def _workspace_focuses(
+    selection: ScopeSelection | None,
+    focuses: tuple[str, ...],
+) -> tuple[str, ...]:
+    if selection is None:
+        return focuses
+    if focuses:
+        raise WorkspaceFailure(
+            "conflicting_workspace_scope",
+            "Pass focus names either in WorkspaceScope or as individual workspace filters.",
+        )
+    return selection.focuses
+
+
+def _workspace_objects(
+    selection: ScopeSelection | None,
+    objects: tuple[str, ...],
+) -> tuple[str, ...]:
+    if selection is None:
+        return objects
+    if objects:
+        raise WorkspaceFailure(
+            "conflicting_workspace_scope",
+            "Pass object scope either in WorkspaceScope or as individual workspace filters.",
+        )
+    return selection.objects

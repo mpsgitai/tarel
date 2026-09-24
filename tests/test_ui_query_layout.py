@@ -10,6 +10,16 @@ STATIC = Path(__file__).parents[1] / "src/tarel/ui/static"
 
 @skipUnless(shutil.which("node"), "Node.js is needed for optional browser regressions")
 class ProjectQueryLayoutTests(TestCase):
+    def test_search_here_builds_qualified_scope_for_a_single_graph(self) -> None:
+        self._script(r"""
+visibleObjects = () => [
+  {type:'table',graph:'sales',object_id:'object:Demo/sales/fact'},
+  {type:'field',graph:'sales',object_id:'field:Demo/sales/fact/id'}
+];
+assert.equal(JSON.stringify(currentWorkingScopeObjects()),
+  JSON.stringify(['sales:object:Demo/sales/fact']));
+""")
+
     def test_context_payload_uses_safe_defaults_and_server_owned_scope(self) -> None:
         self._script(r"""
 queryTools.scope = {revisions:{sales:'revision'},scope_identity:'pinned'};

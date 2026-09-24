@@ -122,6 +122,26 @@ tarel context build enterprise "customer revenue" \
   --workspace --system commercial --zone revenue --mode bm25
 ```
 
+An agent or browser can narrow that resolved scope to exact physical objects without inventing a
+second search path. Repeat `--scope-object GRAPH:OBJECT_ID` to create a hard working boundary.
+Search filters are then applied before every ranking mode:
+
+```bash
+tarel search enterprise "monthly revenue" --workspace \
+  --scope-object warehouse:object:Warehouse/dbo/FactSales \
+  --type table --role fact --has-field SalesAmount --mode bm25
+tarel context build enterprise "monthly revenue" --workspace \
+  --scope-object warehouse:object:Warehouse/dbo/FactSales \
+  --object warehouse:object:Warehouse/dbo/FactSales
+```
+
+`--scope-object` changes the candidate universe and is recorded in scope identity. `--type`,
+`--role`, and `--has-field` only refine search candidates; they do not silently change a later
+context request. Search results include the pre-ranking inventory, active filters, namespace,
+description, role, grain, review state, qualified reference, matched fields, and actual ranking
+reasons. The SDK exposes the same behavior through `SearchFilters`, `scope_object_ids` for one
+graph, and `scope_objects` for a workspace.
+
 The positional name remains a graph unless `--workspace` is present. `--scope-schema` accepts
 qualified `GRAPH:NAMESPACE` values; `--namespace` remains the single-graph filter. Workspace search
 qualifies every hit with its owning graph. The resulting context packet records the workspace,
@@ -522,6 +542,18 @@ Consumers must validate hashes before trusting a serialized v0.2 packet. A query
 reuse the stable prefix when `stable_hash` remains equal. A graph, semantic review, or stable scope
 change produces a new stable identity.
 
+The additive experimental `tarel.context.v0.3` is emitted when an exact object or saved-focus
+boundary is applied. Its stable scope records `objects` and, when present, `focuses`; the graph
+revision still identifies the complete authoritative source graph. An empty explicit boundary is
+preserved as empty rather than interpreted as unrestricted. Unscoped packets remain v0.2.
+
+`context build --object OBJECT_ID` (or `GRAPH:OBJECT_ID` for a workspace) turns chosen physical
+search results into exact context anchors. It validates every ID against the active working scope,
+then applies the ordinary field, join, hop, object, and character budgets. It does not rerank or
+substitute another object. `context prefix` compiles a query-independent base for the same hard
+scope. A harness can keep that stable block in its provider prefix and attach smaller question or
+expansion deltas later.
+
 With logical hints enabled, their projected metadata and artifact revisions also contribute to
 `stable_hash` and the split cache key. Recompile to observe current sidecar reviews or evidence;
 the physical graph revision alone does not establish hint freshness. `context impact` therefore
@@ -699,11 +731,18 @@ only rebuildable documents, normalized float32 vectors, and compatibility metada
 - graph content hash;
 - retrieval contract version;
 - model identifier, path, and SHA-256;
-- document count and vector dimensions.
+- document count and vector dimensions;
+- the exact annotation-state policy used to construct retrieval text.
 
 Any graph or model mismatch is an error requiring an explicit index rebuild. The first version uses
 a transparent linear cosine scan because DWH metadata corpora contain hundreds or a few thousand
 documents, not millions. A specialized vector extension is deferred until measurements justify it.
+
+The broad default policy continues to use `.tarel/indexes/<graph>/index.sqlite`. A narrower
+annotation policy, such as `index build GRAPH --validated-only`, gets a deterministic policy
+suffix and can coexist with the broad index. Vector and hybrid search load only the matching
+policy; TAREL never falls back to an index built from semantic text the caller excluded. BM25 and
+lexical modes apply the same policy in memory and require no vector index.
 
 #### Resume an interrupted build
 
@@ -3664,19 +3703,31 @@ missing field proposals are not silently treated as rejected or approved.
 
 ### Project search and agent context
 
-The browser's project search uses the same lexical search application path as `tarel search` and
-`Tarel.search`. Field names and reviewed family names are searchable; a family hit remains a
-metadata reference, not an executable table or an automatic expansion of its members.
+The browser's project search uses the same search application path as `tarel search` and
+`Tarel.search`. The launch command selects local lexical, BM25, vector, or hybrid mode; the browser
+request cannot replace that server-owned mode or model. Field names and reviewed family names are
+searchable; a family hit remains a metadata reference, not an executable table or an automatic
+expansion of its members. Result cards show the metadata and evidence needed to decide before an
+object is opened. Optional type, documented-role, required-field, and reviewed-annotation filters
+are applied before ranking.
 
 Agent context is compiled by the existing CLI/SDK context use case. The preview's JSON is the
 unchanged context packet, including stable/dynamic identities, budgets and visible omissions.
 Copy and download act on that packet in the browser; the server does not save a query history or
 write a new context artifact. There is no provider, embedding-model download or source query.
 
-**Scope is the launched graph or configured workspace scope.** Report filters, selected graph
-nodes, neighbourhoods and display filters are not additional context constraints. The dialog names
-this boundary explicitly; it does not trim packets after compilation or invent an object-selection
-contract. A workspace launch restriction cannot be overridden by the browser request.
+**The launch scope is the outer boundary.** Report filters, graph neighbourhoods, and display
+filters remain visual until the user chooses **Search here**. That explicit action snapshots the
+currently visible physical objects as a hard working scope for both search and context; **Search
+project** returns to the launch boundary. The server validates every qualified object ID and a
+workspace launch restriction cannot be overridden by the browser request.
+
+A physical search result can be marked **Use for context**. The dialog can then build exact selected
+context, question-based context, or a query-independent stable base. The result shows characters,
+an approximate stable token count, omissions, selected objects, review policy, and exact packet
+identity. When field budgets omit metadata, **Load fuller field list** calls the existing typed context
+expansion path and returns a bounded delta bound to the base packet hash. The base packet remains
+unchanged and cacheable.
 
 The default preview uses reviewed annotations only. This filters semantic claims, not physical
 tables. Optional logical hints are off by default and can be enabled for reviewed hints or explicit

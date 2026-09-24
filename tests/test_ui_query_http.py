@@ -66,10 +66,33 @@ class QueryHTTPTests(TestCase):
         self.assertFalse((self.sdk.root / "sources").exists())
         self.assertFalse((self.sdk.root / "context").exists())
 
+    def test_selected_context_can_expand_one_packet_object_over_http(self) -> None:
+        scope = self._post("/api/query/scope", {})
+        fact = next(node for node in self.graph.nodes if node.label == "mart.FactSales")
+        preview = self._post("/api/context/preview", {
+            "query": "sales amount", "kind": "selected", "object_ids": [fact.id],
+            "max_objects": 1, "seed_limit": 1, "max_fields_per_object": 1,
+            "expected_revisions": scope["revisions"],
+            "expected_scope_identity": scope["scope_identity"],
+        })
+
+        expanded = self._post("/api/context/expand", {
+            "packet": preview["packet"], "object_ids": [fact.id],
+            "expected_revisions": scope["revisions"],
+            "expected_scope_identity": scope["scope_identity"],
+        })["expansion"]
+
+        self.assertEqual(
+            expanded["base_packet_hash"], preview["packet"]["identity"]["packet_hash"]
+        )
+        self.assertEqual(expanded["items"][0]["target"]["id"], fact.id)
+        self.assertEqual(len(expanded["items"][0]["metadata"]["objects"][0]["fields"]), 2)
+
     def test_every_query_route_requires_the_session_token(self) -> None:
         for route, payload in (
             ("/api/query/scope", {}), ("/api/search", {"query": "DateKey"}),
             ("/api/context/preview", {"query": "DateKey"}),
+            ("/api/context/expand", {}),
         ):
             with self.subTest(route=route), self.assertRaises(HTTPError) as raised:
                 self._post(route, payload, token=False)
