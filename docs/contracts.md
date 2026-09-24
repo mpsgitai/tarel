@@ -651,6 +651,13 @@ question -> BM25 + local vectors -> reciprocal-rank fusion
          -> object anchors -> reviewed graph expansion -> TAREL context
 ```
 
+Hybrid fusion weights Dense and BM25 equally by default. `--bm25-weight` changes the
+BM25 share for `search` and `context build` in hybrid mode. For example, `0.08` favors
+Dense while retaining lexical evidence; `0` uses only vector ranks within the hybrid
+pipeline. This setting is query- and search-space-dependent, so equal weighting remains
+the default. Lexical, BM25-only, and vector-only search keep their separate modes.
+The CLI and SDK reject non-finite, negative, or non-hybrid weight overrides.
+
 ### Model and runtime
 
 The recommended model is Qwen3-Embedding-0.6B in Q4_K_M GGUF form. TAREL's model registry pins the
@@ -676,6 +683,8 @@ tarel index build adventureworks_dw --model /absolute/path/model.gguf --resume
 tarel context adventureworks_dw "sales per year" \
   --mode hybrid \
   --model /absolute/path/model.gguf
+tarel search adventureworks_dw "sales per year" \
+  --mode hybrid --bm25-weight 0.08 --model /absolute/path/model.gguf
 ```
 
 `TAREL_EMBEDDING_MODEL` can provide the same path for repeated commands. `TAREL_CACHE_DIR` changes

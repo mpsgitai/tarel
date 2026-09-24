@@ -113,7 +113,7 @@ from tarel.relationships.core import (
     relationship_pair,
 )
 from tarel.retrieval.contracts import IndexBuildResult, RetrievalFailure
-from tarel.retrieval.index import FileRetrievalIndex, search_retrieval
+from tarel.retrieval.index import FileRetrievalIndex, search_retrieval, validate_bm25_weight
 from tarel.retrieval.local import (
     DEFAULT_MODEL_NAME,
     LlamaCppEmbedding,
@@ -882,11 +882,13 @@ def search_graph_use_case(
     mode: str = "lexical",
     model_path: Path | None = None,
     n_threads: int | None = None,
+    bm25_weight: float | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     family_mode: str | None = "confirmed_only",
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
+    validate_bm25_weight(mode, bm25_weight)
     graph = _graph_store(runtime).load(name)
     selected_states = selected_annotation_states(
         annotation_states,
@@ -900,6 +902,7 @@ def search_graph_use_case(
         mode=mode,
         model_path=model_path,
         n_threads=n_threads,
+        bm25_weight=bm25_weight,
         annotation_states=selected_states,
         runtime=runtime,
     )
@@ -923,11 +926,13 @@ def search_workspace_use_case(
     mode: str = "lexical",
     model_path: Path | None = None,
     n_threads: int | None = None,
+    bm25_weight: float | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     family_mode: str | None = "confirmed_only",
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
+    validate_bm25_weight(mode, bm25_weight)
     if not 1 <= limit <= 100:
         raise SearchFailure("invalid_limit", "Search limit must be between 1 and 100.")
     _workspace, loaded, scope = _load_workspace_scope(
@@ -956,6 +961,7 @@ def search_workspace_use_case(
             limit=100,
             object_ids=frozenset(item.object_id for item in scope.objects if item.graph == name),
             mode=mode,
+            bm25_weight=bm25_weight,
             resolved_model=resolved_model,
             embedder=embedder,
             annotation_states=selected_states,
@@ -990,6 +996,7 @@ def _search_loaded_graph(
     resolved_model: Path | None = None,
     embedder: LlamaCppEmbedding | None = None,
     n_threads: int | None = None,
+    bm25_weight: float | None = None,
     annotation_states: frozenset[str],
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
@@ -1011,6 +1018,7 @@ def _search_loaded_graph(
             namespace=namespace,
             object_ids=object_ids,
             annotation_states=annotation_states,
+            bm25_weight=bm25_weight,
         )
     selected_model = resolved_model or resolve_model_path(model_path)
     selected_embedder = embedder or LlamaCppEmbedding(selected_model, n_threads=n_threads)
@@ -1024,6 +1032,7 @@ def _search_loaded_graph(
         embedder=selected_embedder,
         model_path=selected_model,
         annotation_states=annotation_states,
+        bm25_weight=bm25_weight,
         store=_retrieval_index(runtime),
     )
 
@@ -1042,11 +1051,13 @@ def compile_context_use_case(
     mode: str = "lexical",
     model_path: Path | None = None,
     n_threads: int | None = None,
+    bm25_weight: float | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
+    validate_bm25_weight(mode, bm25_weight)
     graph = _graph_store(runtime).load(name)
     selected_states = selected_annotation_states(
         annotation_states,
@@ -1074,6 +1085,7 @@ def compile_context_use_case(
             mode=mode,
             model_path=model_path,
             n_threads=n_threads,
+            bm25_weight=bm25_weight,
             annotation_states=selected_states,
             family_mode=None,
             runtime=runtime,
@@ -1113,11 +1125,13 @@ def compile_workspace_context_use_case(
     mode: str = "lexical",
     model_path: Path | None = None,
     n_threads: int | None = None,
+    bm25_weight: float | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     logical_hints: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
+    validate_bm25_weight(mode, bm25_weight)
     workspace, loaded, scope = _load_workspace_scope(
         workspace_name,
         systems=systems,
@@ -1143,6 +1157,7 @@ def compile_workspace_context_use_case(
         mode=mode,
         model_path=model_path,
         n_threads=n_threads,
+        bm25_weight=bm25_weight,
         annotation_states=selected_states,
         family_mode=None,
         runtime=runtime,

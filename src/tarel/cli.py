@@ -818,6 +818,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search.add_argument("--model", type=Path, dest="model_path")
     search.add_argument("--threads", type=int, dest="n_threads")
+    search.add_argument("--bm25-weight", type=float, help="Hybrid BM25 weight; default 1.0.")
     _add_workspace_retrieval_scope_arguments(search)
     _add_annotation_state_arguments(search)
     _add_format_argument(search)
@@ -856,6 +857,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     context_build.add_argument("--model", type=Path, dest="model_path")
     context_build.add_argument("--threads", type=int, dest="n_threads")
+    context_build.add_argument(
+        "--bm25-weight", type=float, help="Hybrid BM25 weight; default 1.0."
+    )
     _add_workspace_retrieval_scope_arguments(context_build)
     _add_annotation_state_arguments(context_build)
     _add_logical_hint_arguments(context_build)
@@ -1836,6 +1840,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "mode": args.mode,
                 "model_path": args.model_path,
                 "n_threads": args.n_threads,
+                "bm25_weight": args.bm25_weight,
                 "annotation_states": (
                     frozenset(args.annotation_states) if args.annotation_states else None
                 ),
@@ -1931,6 +1936,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "mode": args.mode,
                 "model_path": args.model_path,
                 "n_threads": args.n_threads,
+                "bm25_weight": args.bm25_weight,
                 "annotation_states": (
                     frozenset(args.annotation_states) if args.annotation_states else None
                 ),
