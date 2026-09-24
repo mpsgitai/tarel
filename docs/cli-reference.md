@@ -4656,7 +4656,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `config_not_found` | [tarel/application.py](../src/tarel/application.py#L2088) |
 | `conflicting_annotation_filter` | [annotations/states.py](../src/tarel/annotations/states.py#L19) |
 | `conflicting_annotation_samples` | [tarel/application.py](../src/tarel/application.py#L1886) |
-| `conflicting_workspace_scope` | [sdk/client.py](../src/tarel/sdk/client.py#L2624) |
+| `conflicting_workspace_scope` | [sdk/client.py](../src/tarel/sdk/client.py#L2630) |
 | `connection_failed` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L48), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L249) |
 | `context_character_budget_too_small` | [tarel/context.py](../src/tarel/context.py#L409) |
 | `context_graph_mismatch` | [tarel/context_packets.py](../src/tarel/context_packets.py#L209) |
@@ -4812,8 +4812,8 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_graph_page` | [graph/selective.py](../src/tarel/graph/selective.py#L244) |
 | `invalid_graph_revision` | [graph/change_store.py](../src/tarel/graph/change_store.py#L87) |
 | `invalid_graph_selection` | [graph/selective.py](../src/tarel/graph/selective.py#L127), [graph/selective.py](../src/tarel/graph/selective.py#L163), [graph/selective.py](../src/tarel/graph/selective.py#L168), [graph/selective.py](../src/tarel/graph/selective.py#L474), [graph/selective.py](../src/tarel/graph/selective.py#L476) |
-| `invalid_grounding_limit` | [sdk/client.py](../src/tarel/sdk/client.py#L1316) |
-| `invalid_grounding_scope` | [sdk/client.py](../src/tarel/sdk/client.py#L1227), [sdk/client.py](../src/tarel/sdk/client.py#L1255), [sdk/client.py](../src/tarel/sdk/client.py#L1266), [sdk/client.py](../src/tarel/sdk/client.py#L1377), [sdk/client.py](../src/tarel/sdk/client.py#L1383) |
+| `invalid_grounding_limit` | [sdk/client.py](../src/tarel/sdk/client.py#L1322) |
+| `invalid_grounding_scope` | [sdk/client.py](../src/tarel/sdk/client.py#L1233), [sdk/client.py](../src/tarel/sdk/client.py#L1261), [sdk/client.py](../src/tarel/sdk/client.py#L1272), [sdk/client.py](../src/tarel/sdk/client.py#L1383), [sdk/client.py](../src/tarel/sdk/client.py#L1389) |
 | `invalid_identity_candidate` | [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1728), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1733), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1744) |
 | `invalid_identity_inspection` | [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1198), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1207), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1222), [discovery/identity.py](../src/tarel/discovery/identity.py#L385), [discovery/identity.py](../src/tarel/discovery/identity.py#L525), [discovery/identity.py](../src/tarel/discovery/identity.py#L532), [discovery/identity.py](../src/tarel/discovery/identity.py#L540), [discovery/identity.py](../src/tarel/discovery/identity.py#L556), [discovery/identity.py](../src/tarel/discovery/identity.py#L564), [discovery/identity.py](../src/tarel/discovery/identity.py#L572), [discovery/identity.py](../src/tarel/discovery/identity.py#L580), [discovery/identity.py](../src/tarel/discovery/identity.py#L591), [discovery/identity.py](../src/tarel/discovery/identity.py#L599), [discovery/identity.py](../src/tarel/discovery/identity.py#L604), [discovery/identity.py](../src/tarel/discovery/identity.py#L629), [discovery/identity.py](../src/tarel/discovery/identity.py#L634), [discovery/identity.py](../src/tarel/discovery/identity.py#L642), [discovery/identity.py](../src/tarel/discovery/identity.py#L647), [discovery/identity.py](../src/tarel/discovery/identity.py#L655) |
 | `invalid_identity_inventory` | [discovery/application.py](../src/tarel/discovery/application.py#L942), [discovery/identity.py](../src/tarel/discovery/identity.py#L106), [discovery/identity.py](../src/tarel/discovery/identity.py#L131), [discovery/identity.py](../src/tarel/discovery/identity.py#L136) |
@@ -5178,6 +5178,21 @@ from tarel.sdk import Tarel
 tarel = Tarel("/srv/my-harness/.tarel")
 ```
 
+### Provider and direct connector administration
+
+Provider profiles are private user-level configuration, independent of the client's state root. `provider.test` makes one explicit network/model request and may incur provider cost. Checks and returned paths never contain the configured API key.
+
+Direct connector methods require an explicit configuration path. They are a lower-level read-only surface and do not apply a named source's enrichment permissions. Prefer `tarel.source` when source-specific aggregate, small-domain, or raw-sample policy must be enforced. Samples returned here are ephemeral and are not persisted by the SDK.
+
+```python
+status = tarel.provider.check("local")
+probe = tarel.connector.probe("sqlite", config="./private/source.toml")
+sample = tarel.connector.sample(
+    "sqlite", config="./private/source.toml",
+    namespace="main", object="orders", limit=10,
+)
+```
+
 ### Graph and context example
 
 Assumes `warehouse` already exists under that root. Returned records expose their typed fields; use their supported serializers rather than assuming every SDK result is a JSON dictionary.
@@ -5293,6 +5308,24 @@ tarel.concepts.load(graph: 'str') -> 'SemanticConceptDocument'
 ```
 ```python
 tarel.concepts.review(graph: 'str', concept_id: 'str', *, expected_revision: 'str', decision: 'str', reason: 'str') -> 'SemanticConceptDocument'
+```
+
+#### SDK connector
+
+```python
+tarel.connector.check(name: 'str') -> 'ConnectorCheck'
+```
+```python
+tarel.connector.discover(name: 'str', *, config: 'str | Path', database: 'str | None' = None, namespace: 'str | None' = None) -> 'CatalogResult'
+```
+```python
+tarel.connector.probe(name: 'str', *, config: 'str | Path', database: 'str | None' = None) -> 'ProbeResult'
+```
+```python
+tarel.connector.profile(name: 'str', *, config: 'str | Path', namespace: 'str', object: 'str', row_limit: 'int', database: 'str | None' = None, small_domain_limit: 'int' = 20, include_values: 'bool' = False) -> 'ObjectProfileResult'
+```
+```python
+tarel.connector.sample(name: 'str', *, config: 'str | Path', namespace: 'str', object: 'str', limit: 'int', database: 'str | None' = None) -> 'SampleResult'
 ```
 
 #### SDK discovery
@@ -5550,6 +5583,21 @@ tarel.model.download(*, name: 'str' = 'qwen3-embedding-0.6b-q4-k-m', target: 'st
 tarel.model.status(*, name: 'str' = 'qwen3-embedding-0.6b-q4-k-m', model_path: 'str | Path | None' = None) -> 'dict[str, object]'
 ```
 
+#### SDK provider
+
+```python
+tarel.provider.check(name: 'str') -> 'ProviderCheck'
+```
+```python
+tarel.provider.configure(name: 'str', *, adapter: 'str | None' = None, api_key: 'str | None' = None, model: 'str | None' = None, base_url: 'str | None' = None, reasoning_effort: 'str | None' = None, structured_mode: 'str | None' = None, allow_no_api_key: 'bool' = False) -> 'Path'
+```
+```python
+tarel.provider.list() -> 'tuple[str, ...]'
+```
+```python
+tarel.provider.test(name: 'str', *, timeout: 'float' = 120.0) -> 'dict[str, object]'
+```
+
 #### SDK reference_mapping
 
 ```python
@@ -5702,6 +5750,23 @@ tarel.workspace.scope(name: 'str', *, selection: 'ScopeSelection | None' = None,
 ```python
 tarel.workspace.zone(name: 'str', system: 'str', zone: 'str') -> 'ResolvedZone'
 ```
+
+### Explicit setup helpers
+
+Development setup writes to explicit paths and stays separate from the state-bound client. These helpers share the CLI application paths. They do not install or activate generated adapters.
+
+```python
+from tarel.sdk import (
+    create_demo, install_agent_skill, scaffold_connector, scaffold_provider,
+)
+
+demo = create_demo("retail-dwh", path="./private/retail.sqlite")
+connector = scaffold_connector("example", output="./candidates/example-connector")
+provider = scaffold_provider("example", output="./candidates/example-provider")
+skill = install_agent_skill("codex", target="./agent-project")
+```
+
+The experimental architecture sidecar remains a UI-local prototype and has no stable SDK read/write contract.
 
 ### Errors and concurrency
 

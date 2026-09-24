@@ -226,6 +226,8 @@ from tarel.reference_mapping.contracts import (
 from tarel.retrieval.contracts import IndexBuildResult
 from tarel.retrieval.local import DEFAULT_MODEL_NAME, ModelDownloadResult
 from tarel.runtime import TarelRuntime
+from tarel.sdk.connectors import ConnectorAPI
+from tarel.sdk.providers import ProviderAPI
 from tarel.search import SearchResults
 from tarel.semantic_concepts.application import (
     SemanticConceptMatch,
@@ -286,6 +288,7 @@ class Tarel:
         "bindings",
         "context",
         "concepts",
+        "connector",
         "discovery",
         "entity_resolution",
         "families",
@@ -297,6 +300,7 @@ class Tarel:
         "lineage",
         "logical_joins",
         "model",
+        "provider",
         "reference_mapping",
         "relationship",
         "runtime",
@@ -317,6 +321,7 @@ class Tarel:
         self.semantic = SemanticAPI(self.runtime)
         self.context = ContextAPI(self.runtime)
         self.concepts = ConceptsAPI(self.runtime)
+        self.connector = ConnectorAPI()
         self.discovery = DiscoveryAPI(self.runtime)
         self.entity_resolution = EntityResolutionAPI(self.runtime)
         self.reference_mapping = ReferenceMappingAPI(self.runtime)
@@ -330,6 +335,7 @@ class Tarel:
         self.bindings = BindingsAPI(self.runtime)
         self.relationship = RelationshipAPI(self.runtime)
         self.model = ModelAPI(self.runtime)
+        self.provider = ProviderAPI()
         self.index = IndexAPI(self.runtime)
         self.knowledge = KnowledgeAPI(self.runtime)
         self.view = ViewAPI(self.runtime)
