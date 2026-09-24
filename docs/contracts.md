@@ -656,7 +656,8 @@ BM25 share for `search` and `context build` in hybrid mode. For example, `0.08` 
 Dense while retaining lexical evidence; `0` uses only vector ranks within the hybrid
 pipeline. This setting is query- and search-space-dependent, so equal weighting remains
 the default. Lexical, BM25-only, and vector-only search keep their separate modes.
-The CLI and SDK reject non-finite, negative, or non-hybrid weight overrides.
+The CLI and SDK reject non-finite, negative, non-hybrid, or values beyond the supported score
+range.
 
 ### Model and runtime
 

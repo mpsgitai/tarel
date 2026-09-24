@@ -64,7 +64,7 @@ class RetrievalTests(TestCase):
         self.assertEqual(dense[0].sources, ("vector",))
 
     def test_bm25_weight_rejects_invalid_or_nonhybrid_use(self) -> None:
-        for weight in (-1.0, float("nan"), float("inf"), True):
+        for weight in (-1.0, float("nan"), float("inf"), 1e308, 10**1000, True):
             with self.assertRaises(RetrievalFailure) as raised:
                 search_retrieval(_retrieval_graph(), "sales", mode="hybrid", limit=5,
                                  bm25_weight=weight)

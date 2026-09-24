@@ -34,6 +34,8 @@ from tarel.search import FieldSearchHit, SearchHit, SearchResults
 _CONTRACT_VERSION = "tarel.retrieval.v0.1"
 _GRAPH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _RRF_K = 60
+_RESULT_SCORE_SCALE = 1_000_000
+_MAX_SAFE_BM25_WEIGHT = sys.float_info.max / _RESULT_SCORE_SCALE
 DEFAULT_BM25_WEIGHT = 1.0
 _MAX_FIELDS = 8
 
@@ -363,11 +365,13 @@ def validate_bm25_weight(mode: str, weight: float | None) -> float:
     if (
         isinstance(weight, bool)
         or not isinstance(weight, (int, float))
-        or not math.isfinite(weight)
         or weight < 0
+        or weight > _MAX_SAFE_BM25_WEIGHT
+        or not math.isfinite(weight)
     ):
         raise RetrievalFailure(
-            "invalid_bm25_weight", "BM25 weight must be a finite nonnegative number."
+            "invalid_bm25_weight",
+            "BM25 weight must be a finite nonnegative number within the supported score range.",
         )
     return float(weight)
 
@@ -450,7 +454,7 @@ def _object_results(
             FieldSearchHit(
                 id=result.document.field_id or "",
                 label=result.document.label.rsplit(".", 1)[-1],
-                score=max(1, round(result.score * 1_000_000)),
+                score=max(1, round(result.score * _RESULT_SCORE_SCALE)),
                 reasons=tuple(f"retrieval:{source}" for source in result.sources),
             )
             for result in ordered
@@ -464,7 +468,7 @@ def _object_results(
                 id=object_id,
                 label=node.label,
                 type=node.type,
-                score=max(1, round(best.score * 1_000_000)),
+                score=max(1, round(best.score * _RESULT_SCORE_SCALE)),
                 matched_terms=matched_terms,
                 reasons=tuple(f"retrieval:{source}" for source in source_names),
                 fields=fields,
