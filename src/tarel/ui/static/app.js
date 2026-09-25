@@ -440,10 +440,14 @@ function renderGraph() {
   state.cy.on("tap", 'node[type = "asset"], node[type = "procedure"], node[type = "query"], node[type = "script"]', event => {
     const reference = event.target.data("reference");
     if (!reference) return;
+    const analyzer = event.target.data("analyzer");
+    const dialect = event.target.data("dialect");
     $("#lineage-drawer").hidden = false;
     $("#lineage-reference").value = reference;
     $("#lineage-status").className = "notice";
-    $("#lineage-status").textContent = "Trace this lineage asset to show its upstream path.";
+    $("#lineage-status").textContent = analyzer
+      ? `Analysis: ${analyzer}${dialect ? ` · ${dialect}` : ""} · review state remains separate. Trace this asset to show its upstream path.`
+      : "Trace this lineage asset to show its upstream path.";
   });
   if (state.selectedId && state.cy.$id(state.selectedId).length) state.cy.$id(state.selectedId).select();
   if (state.traceOnCanvas && state.trace) setTimeout(focusTrace, 0);
@@ -510,7 +514,7 @@ function lineageElements(visibleObjectIds) {
     .filter((item, index, values) => values.findIndex(candidate => candidate.id === item.id) === index)
     .filter(item => connected.has(item.id))
     .filter(item => !visibleObjectIds.has(item.id))
-    .map(item => ({data: {id: item.id, label: item.label || item.reference, reference: item.reference, type: item.kind || "asset", state: item.state || "observed"}}));
+    .map(item => ({data: {id: item.id, label: item.label || item.reference, reference: item.reference, type: item.kind || "asset", state: item.state || "observed", analyzer: item.analyzer || null, dialect: item.dialect || null}}));
   const known = new Set([...visibleObjectIds, ...nodes.map(item => item.data.id)]);
   const edges = allEdges
     .filter(item => known.has(item.source) && known.has(item.target))

@@ -47,6 +47,9 @@ semantic = [
 local-rag = [
   "llama-cpp-python>=0.3.16,<0.4",
 ]
+sql-lineage = [
+  "sqlglot>=30.19,<30.20",
+]
 dev = [
   "build>=1.2,<2",
   "ruff>=0.11",

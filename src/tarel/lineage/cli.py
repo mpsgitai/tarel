@@ -24,7 +24,7 @@ from tarel.lineage.application import (
     load_runtime_lineage_use_case,
     next_lineage_task_use_case,
     process_lineage_view_use_case,
-    run_lineage_provider_use_case,
+    run_lineage_analysis_use_case,
     table_lineage_view_use_case,
     trace_runtime_lineage_use_case,
     trace_upstream_use_case,
@@ -106,11 +106,21 @@ def add_lineage_commands(subcommands: argparse._SubParsersAction[argparse.Argume
 
     analyze = commands.add_parser(
         "analyze",
-        help="Send complete definitions to an optional provider and apply draft workfiles.",
+        help="Analyze complete definitions with a provider or optional local SQLGlot.",
     )
     analyze.add_argument("name")
     analyze.add_argument("--source", required=True, type=Path)
-    analyze.add_argument("--provider", required=True)
+    analyze.add_argument(
+        "--analyzer",
+        choices=("auto", "llm", "sqlglot"),
+        default="llm",
+        help="Use the provider, optional SQLGlot, or SQLGlot with provider fallback.",
+    )
+    analyze.add_argument("--provider")
+    analyze.add_argument(
+        "--dialect",
+        help="Explicit SQLGlot dialect for definitions whose language is ambiguous.",
+    )
     analyze.add_argument("--model")
     analyze.add_argument("--timeout", type=float, default=180.0)
     analyze.add_argument("--retry", type=int, default=1)
@@ -292,15 +302,18 @@ def dispatch_lineage(args: argparse.Namespace) -> int | None:
         _render_document_change(payload, output_format=args.format)
         return 0
     if command == "analyze":
-        print(
-            f"warning: complete source definitions will be sent to provider profile "
-            f"{args.provider}",
-            file=sys.stderr,
-        )
-        result = run_lineage_provider_use_case(
+        if args.analyzer in {"auto", "llm"} and args.provider:
+            print(
+                f"warning: unresolved complete source definitions will be sent to provider "
+                f"profile {args.provider}",
+                file=sys.stderr,
+            )
+        result = run_lineage_analysis_use_case(
             args.name,
             source_path=args.source,
+            analyzer=args.analyzer,
             provider_name=args.provider,
+            dialect=args.dialect,
             model=args.model,
             timeout=args.timeout,
             retry=args.retry,
@@ -312,21 +325,32 @@ def dispatch_lineage(args: argparse.Namespace) -> int | None:
             progress=lambda message: print(message, file=sys.stderr),
         )
         payload = {
+            "analyzer": result.analyzer,
             "applied": result.applied,
             "cache_hits": result.cache_hits,
+            "fallback_definitions": list(result.fallback_definitions),
             "lineage": result.document.name,
             "model": result.model,
             "path": str(result.path),
             "planned": result.planned,
             "provider": result.provider,
             "provider_requests": result.provider_requests,
+            "sqlglot_applied": result.sqlglot_applied,
+            "unresolved_definitions": list(result.unresolved_definitions),
             "write_units": len(result.document.write_units),
         }
         if args.format == "json":
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:
             print(f"Analyzed {result.applied}/{result.planned} definitions.")
-            print(f"Provider: {result.provider}; model: {result.model}")
+            print(f"Analyzer: {result.analyzer}")
+            if result.provider is not None:
+                print(f"Provider: {result.provider}; model: {result.model}")
+            print(
+                f"SQLGlot: {result.sqlglot_applied}; provider fallback: "
+                f"{len(result.fallback_definitions)}; unresolved: "
+                f"{len(result.unresolved_definitions)}"
+            )
             print(
                 f"Cache hits: {result.cache_hits}; provider requests: "
                 f"{result.provider_requests}"

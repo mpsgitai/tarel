@@ -321,7 +321,25 @@ class LineageOperationsTests(TestCase):
         migrated = LineageDocument.from_dict(payload)
 
         self.assertEqual(migrated.analysis_failures, ())
-        self.assertEqual(migrated.contract_version, "tarel.lineage.v0.4")
+        self.assertEqual(migrated.contract_version, "tarel.lineage.v0.5")
+
+    def test_version_four_analyses_migrate_with_legacy_provenance(self) -> None:
+        source = _source()
+        document = build_lineage("orders", source)
+        analyzed = apply_lineage_proposal(document, source, _proposal(document, source))
+        payload = analyzed.to_dict()
+        payload["contract_version"] = "tarel.lineage.v0.4"
+        for analysis in payload["analyses"]:
+            analysis.pop("analyzer")
+            analysis.pop("analyzer_version")
+            analysis.pop("dialect")
+
+        migrated = LineageDocument.from_dict(payload)
+
+        self.assertEqual(migrated.analyses[0].analyzer, "coding_agent")
+        self.assertIsNone(migrated.analyses[0].analyzer_version)
+        self.assertIsNone(migrated.analyses[0].dialect)
+        self.assertEqual(migrated.contract_version, "tarel.lineage.v0.5")
 
 
 def _source(content: str | None = None) -> LineageInput:

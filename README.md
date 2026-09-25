@@ -43,6 +43,11 @@ from accepted knowledge.
 **Lineage** traces reports and measures through transformations to their sources, with evidence
 behind each connection.
 
+SQL definitions can be analyzed by a configured provider or, after installing the optional
+`tarel[sql-lineage]` extra, locally with SQLGlot first and provider fallback only for unresolved
+definitions. The base installation does not include or import SQLGlot. See
+[static lineage analysis](docs/static-lineage.md).
+
 ![TAREL switching from schema structure to data and process lineage](docs/assets/space-to-lineage.gif)
 
 *The same information system, organized by schema or traced through data flow.

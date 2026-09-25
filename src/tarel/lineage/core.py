@@ -217,6 +217,10 @@ def apply_lineage_proposal(
     document: LineageDocument,
     source: LineageInput,
     payload: dict[str, Any],
+    *,
+    analyzer: str = "coding_agent",
+    analyzer_version: str | None = None,
+    dialect: str | None = None,
 ) -> LineageDocument:
     require_current_source(document, source)
     _fields(payload, {"analysis", "definition_id", "task_id"}, "proposal")
@@ -240,15 +244,15 @@ def apply_lineage_proposal(
     )
     warnings = _strings(analysis_data.get("warnings"), "warnings")
     proposed_claims = tuple(
-        _proposal_claim(definition, item)
+        _proposal_claim(definition, item, evidence_source=analyzer)
         for item in _mappings(analysis_data.get("observations"), "observations")
     )
     proposed_units = tuple(
-        _proposal_write_unit(definition, item)
+        _proposal_write_unit(definition, item, evidence_source=analyzer)
         for item in _mappings(analysis_data.get("writes"), "writes")
     )
     excluded = tuple(
-        _proposal_excluded_write(definition, item)
+        _proposal_excluded_write(definition, item, evidence_source=analyzer)
         for item in _mappings(analysis_data.get("excluded_writes"), "excluded_writes")
     )
     _reject_duplicates(proposed_claims, proposed_units, excluded)
@@ -275,6 +279,9 @@ def apply_lineage_proposal(
             summary=_text(analysis_data.get("summary"), "summary"),
             warnings=tuple(item.strip() for item in warnings if item.strip()),
             excluded_writes=excluded,
+            analyzer=analyzer,
+            analyzer_version=analyzer_version,
+            dialect=dialect,
         )
     )
     claims = [
@@ -423,7 +430,12 @@ def table_lineage(document: LineageDocument) -> tuple[TableLineage, ...]:
     )
 
 
-def _proposal_claim(definition: SourceDefinition, data: dict[str, Any]) -> LineageClaim:
+def _proposal_claim(
+    definition: SourceDefinition,
+    data: dict[str, Any],
+    *,
+    evidence_source: str,
+) -> LineageClaim:
     _fields(data, {"line_end", "line_start", "operation", "reason", "target"}, "observation")
     operation = _text(data.get("operation"), "operation")
     if operation not in {"call", "read"}:
@@ -433,7 +445,7 @@ def _proposal_claim(definition: SourceDefinition, data: dict[str, Any]) -> Linea
         )
     target = _text(data.get("target"), "target")
     _reject_placeholder_target(target)
-    evidence = _proposal_evidence(definition, data, target)
+    evidence = _proposal_evidence(definition, data, target, source=evidence_source)
     return LineageClaim(
         id=stable_id(
             "claim",
@@ -494,6 +506,8 @@ def _is_local_read_symbol(reference: str, content: str) -> bool:
 def _proposal_write_unit(
     definition: SourceDefinition,
     data: dict[str, Any],
+    *,
+    evidence_source: str,
 ) -> LineageWriteUnit:
     _fields(
         data,
@@ -513,9 +527,9 @@ def _proposal_write_unit(
         raise LineageFailure("invalid_lineage_proposal", f"Unsupported write: {operation}")
     target = _text(data.get("target"), "write target")
     _reject_placeholder_target(target)
-    evidence = _proposal_evidence(definition, data, target)
+    evidence = _proposal_evidence(definition, data, target, source=evidence_source)
     sources = tuple(
-        _proposal_write_source(definition, item)
+        _proposal_write_source(definition, item, evidence_source=evidence_source)
         for item in _mappings(data.get("sources"), "write sources")
     )
     warnings = _strings(data.get("warnings"), "write warnings")
@@ -539,6 +553,8 @@ def _proposal_write_unit(
 def _proposal_write_source(
     definition: SourceDefinition,
     data: dict[str, Any],
+    *,
+    evidence_source: str,
 ) -> LineageWriteSource:
     _fields(
         data,
@@ -554,13 +570,15 @@ def _proposal_write_source(
         target=target,
         role=role,
         via=_strings(data.get("via"), "write source via"),
-        evidence=_proposal_evidence(definition, data, target),
+        evidence=_proposal_evidence(definition, data, target, source=evidence_source),
     )
 
 
 def _proposal_excluded_write(
     definition: SourceDefinition,
     data: dict[str, Any],
+    *,
+    evidence_source: str,
 ) -> LineageExcludedWrite:
     _fields(
         data,
@@ -576,7 +594,7 @@ def _proposal_excluded_write(
         operation=operation,
         target=target,
         disposition=disposition,
-        evidence=_proposal_evidence(definition, data, target),
+        evidence=_proposal_evidence(definition, data, target, source=evidence_source),
     )
 
 
@@ -584,6 +602,8 @@ def _proposal_evidence(
     definition: SourceDefinition,
     data: dict[str, Any],
     target: str,
+    *,
+    source: str,
 ) -> LineageEvidence:
     start = data.get("line_start")
     end = data.get("line_end")
@@ -608,7 +628,7 @@ def _proposal_evidence(
             f"Lineage target is not present in the cited source lines: {target}",
         )
     return LineageEvidence(
-        source="coding_agent",
+        source=source,
         reference=f"{definition.source_reference}:{start}-{end}",
         reason=_text(data.get("reason"), "reason"),
         line_start=start,
