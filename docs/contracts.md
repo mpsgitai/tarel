@@ -545,7 +545,9 @@ change produces a new stable identity.
 The additive experimental `tarel.context.v0.3` is emitted when an exact object or saved-focus
 boundary is applied. Its stable scope records `objects` and, when present, `focuses`; the graph
 revision still identifies the complete authoritative source graph. An empty explicit boundary is
-preserved as empty rather than interpreted as unrestricted. Unscoped packets remain v0.2.
+preserved as empty rather than interpreted as unrestricted. Focus traversal warnings and
+truncation are also stable scope data: they remain visible to consumers and change the scope
+identity. Unscoped packets remain v0.2.
 
 `context build --object OBJECT_ID` (or `GRAPH:OBJECT_ID` for a workspace) turns chosen physical
 search results into exact context anchors. It validates every ID against the active working scope,
@@ -3705,11 +3707,12 @@ missing field proposals are not silently treated as rejected or approved.
 
 The browser's project search uses the same search application path as `tarel search` and
 `Tarel.search`. The launch command selects local lexical, BM25, vector, or hybrid mode; the browser
-request cannot replace that server-owned mode or model. Field names and reviewed family names are
-searchable; a family hit remains a metadata reference, not an executable table or an automatic
-expansion of its members. Result cards show the metadata and evidence needed to decide before an
-object is opened. Optional type, documented-role, required-field, and reviewed-annotation filters
-are applied before ranking.
+request cannot replace that server-owned mode or model. Question-based context preview uses the
+same launch mode and model. Field names and reviewed family names are searchable; a family hit
+remains a metadata reference, not an executable table or an automatic expansion of its members.
+Result cards show the metadata and evidence needed to decide before an object is opened. Optional
+namespace, type, documented-role, required-field, and reviewed-annotation filters are applied
+before candidate inventory and ranking.
 
 Agent context is compiled by the existing CLI/SDK context use case. The preview's JSON is the
 unchanged context packet, including stable/dynamic identities, budgets and visible omissions.
@@ -3720,7 +3723,8 @@ write a new context artifact. There is no provider, embedding-model download or 
 filters remain visual until the user chooses **Search here**. That explicit action snapshots the
 currently visible physical objects as a hard working scope for both search and context; **Search
 project** returns to the launch boundary. The server validates every qualified object ID and a
-workspace launch restriction cannot be overridden by the browser request.
+workspace launch restriction cannot be overridden by the browser request. A working-scope request
+accepts up to 5,000 object IDs and remains subject to the browser API's request-size limit.
 
 A physical search result can be marked **Use for context**. The dialog can then build exact selected
 context, question-based context, or a query-independent stable base. The result shows characters,

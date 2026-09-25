@@ -178,6 +178,7 @@ class SearchResults:
     filters: SearchFilters = SearchFilters()
     inventory: SearchInventory | None = None
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -191,6 +192,8 @@ class SearchResults:
         }
         if self.inventory is not None:
             payload["inventory"] = self.inventory.to_dict()
+        if self.warnings:
+            payload["warnings"] = list(self.warnings)
         if self.workspace is not None:
             payload.update(
                 {
@@ -249,6 +252,7 @@ def search_graph(
 def filter_search_objects(
     graph: GraphDocument,
     *,
+    namespace: str | None = None,
     object_ids: frozenset[str] | None = None,
     filters: SearchFilters | None = None,
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
@@ -263,7 +267,12 @@ def filter_search_objects(
 
     scope_nodes = tuple(
         node for node in graph.nodes
-        if node.type in {"table", "view"} and (object_ids is None or node.id in object_ids)
+        if node.type in {"table", "view"}
+        and (object_ids is None or node.id in object_ids)
+        and (
+            namespace is None
+            or str(node.metadata.get("namespace") or "").casefold() == namespace.casefold()
+        )
     )
     allowed_types = {item.strip().casefold() for item in selected.types}
     allowed_roles = {item.strip().casefold() for item in selected.roles}

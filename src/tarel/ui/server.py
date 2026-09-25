@@ -65,6 +65,7 @@ from tarel.reference_mapping.application import (
 )
 from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
+from tarel.retrieval.contracts import RetrievalFailure
 from tarel.search import SearchFailure
 from tarel.semantic_concepts.contracts import SemanticConceptFailure
 from tarel.semantics.application import (
@@ -1170,6 +1171,7 @@ def _ui_failure(exc: Exception) -> UIFailure:
             OptionalMetadataFailure,
             ReferenceMappingFailure,
             RelationshipFailure,
+            RetrievalFailure,
             SearchFailure,
             SemanticFailure,
             WorkspaceFailure,
@@ -1190,6 +1192,9 @@ def _ui_failure(exc: Exception) -> UIFailure:
             "reference_mapping_review_conflict",
             "object_family_graph_revision_mismatch",
             "stale_object_family",
+            "stale_index",
+            "index_policy_mismatch",
+            "model_index_mismatch",
         } else 400
         if code.endswith("_not_found"):
             status = 404

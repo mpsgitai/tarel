@@ -5,6 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
+from tarel.connectors.contracts import CatalogObject, CatalogResult
+from tarel.focus.contracts import FocusDocument, FocusMember, FocusSource
+from tarel.focus.core import focus_graph_revision
+from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphAnnotation
 from tarel.sdk import SearchFilters, Tarel
 from tarel.search import SearchFailure
@@ -14,6 +18,7 @@ from tarel.ui.query_tools import (
     preview_context,
     preview_expansion,
     query_scope_snapshot,
+    search_metadata,
 )
 from tarel.workspaces.core import create_workspace, define_system
 from tests.test_search import _sales_graph
@@ -82,6 +87,27 @@ class RetrievalWorkflowTests(TestCase):
             with self.subTest(values=values), self.assertRaises(SearchFailure):
                 SearchFilters(**values)
 
+    def test_namespace_is_applied_before_inventory_is_counted(self) -> None:
+        graph = self.sdk.graph.load("sales_demo")
+        graph = replace(
+            graph,
+            nodes=tuple(
+                replace(node, metadata={**node.metadata, "namespace": "reference"})
+                if node.id == self.dim_id else node
+                for node in graph.nodes
+            ),
+        )
+        self.sdk.runtime.graph_store().save(graph)
+
+        result = self.sdk.search.graph(
+            "sales_demo", "currency", namespace="reference", mode="bm25",
+        )
+
+        self.assertEqual([hit.id for hit in result.hits], [self.dim_id])
+        self.assertEqual(result.inventory.objects_in_scope, 1)
+        self.assertEqual(result.inventory.objects_after_filters, 1)
+        self.assertEqual(result.inventory.types, (("table", 1),))
+
     def test_working_scope_is_a_hard_search_and_context_boundary(self) -> None:
         search = self.sdk.search.graph(
             "sales_demo", "currency", scope_object_ids=(self.dim_id,),
@@ -118,6 +144,99 @@ class RetrievalWorkflowTests(TestCase):
         self.assertEqual([(item.graph, item.object_id) for item in scope.objects], [
             ("sales_demo", self.fact_id),
         ])
+
+    def test_focus_drops_empty_graphs_and_preserves_truncation_warnings(self) -> None:
+        graph = self.sdk.graph.load("sales_demo")
+        other = replace(graph, name="other")
+        self.sdk.runtime.graph_store().save(other)
+        workspace = define_system(
+            create_workspace("estate"), "analytics",
+            graph_names=(graph.name, other.name),
+            graphs={graph.name: graph, other.name: other},
+        )
+        self.sdk.runtime.workspace_store().save(workspace)
+        focus = _focus(
+            "sales-slice", graph, self.fact_id,
+            warnings=("Traversal reached its configured boundary.",), truncated=True,
+        )
+        self.sdk.runtime.focus_store().save(replace(focus, warnings=(), truncated=False))
+        complete_scope = self.sdk.workspace.scope("estate", focuses=(focus.name,))
+        self.sdk.runtime.focus_store().save(focus)
+
+        scope = self.sdk.workspace.scope("estate", focuses=(focus.name,))
+        search = self.sdk.search.graph(
+            graph.name, "internet revenue", focuses=(focus.name,),
+        )
+        context = self.sdk.context.graph(
+            graph.name, "internet revenue", focuses=(focus.name,),
+        )
+
+        expected_warnings = (
+            "sales-slice: Traversal reached its configured boundary.",
+            "sales-slice: focus traversal was truncated",
+        )
+        self.assertEqual(scope.graph_names, (graph.name,))
+        self.assertNotEqual(scope.scope_hash, complete_scope.scope_hash)
+        self.assertEqual(scope.warnings, expected_warnings)
+        self.assertEqual(search.warnings, expected_warnings)
+        self.assertEqual(context.scope.warnings, expected_warnings)
+        self.assertEqual(context.stable_dict()["scope"]["warnings"], list(expected_warnings))
+        self.assertIn("warnings", scope.to_dict())
+
+    def test_context_preview_uses_server_owned_bm25_mode(self) -> None:
+        graph = self.sdk.graph.load("sales_demo")
+        workspace = define_system(
+            create_workspace("estate"), "analytics",
+            graph_names=(graph.name,), graphs={graph.name: graph},
+        )
+        self.sdk.runtime.workspace_store().save(workspace)
+
+        for scope in (
+            UIQueryScope(graph=graph.name, search_mode="bm25"),
+            UIQueryScope(workspace=workspace.name, search_mode="bm25"),
+        ):
+            with self.subTest(scope=scope):
+                snapshot = query_scope_snapshot(scope, runtime=self.sdk.runtime)
+                response = preview_context(
+                    scope,
+                    {
+                        "query": "internet revenue",
+                        "expected_revisions": snapshot["revisions"],
+                        "expected_scope_identity": snapshot["scope_identity"],
+                    },
+                    runtime=self.sdk.runtime,
+                )
+                self.assertEqual(response["packet"]["dynamic"]["retrieval"]["mode"], "bm25")
+
+    def test_search_here_accepts_more_than_one_hundred_visible_objects(self) -> None:
+        graph = build_graph_from_catalog(
+            "large",
+            CatalogResult(
+                connector="test", source_type="database", catalog="Large",
+                dialect="ansi",
+                objects=tuple(
+                    CatalogObject(
+                        namespace="dbo", name=f"Object{index:03d}", kind="table", fields=(),
+                    )
+                    for index in range(101)
+                ),
+            ),
+        )
+        self.sdk.runtime.graph_store().save(graph)
+        references = [
+            f"{graph.name}:{node.id}" for node in graph.nodes
+            if node.type in {"table", "view"}
+        ]
+        scope = UIQueryScope(graph=graph.name, search_mode="bm25")
+
+        result = search_metadata(
+            scope,
+            {"query": "Object", "scope_objects": references, "limit": 1},
+            runtime=self.sdk.runtime,
+        )["results"]
+
+        self.assertEqual(len(references), 101)
+        self.assertEqual(result["inventory"]["objects_in_scope"], 101)
 
     def test_selected_result_becomes_exact_context_then_bounded_delta(self) -> None:
         scope = UIQueryScope(graph="sales_demo")
@@ -212,3 +331,37 @@ class RetrievalWorkflowTests(TestCase):
             )
 
         self.assertEqual(error.exception.code, "invalid_context_expansion")
+
+
+def _focus(
+    name: str,
+    graph,
+    object_id: str,
+    *,
+    warnings: tuple[str, ...] = (),
+    truncated: bool = False,
+) -> FocusDocument:
+    node = graph.node_by_id()[object_id]
+    member = FocusMember(
+        id=f"graph:{graph.name}:{node.id}",
+        reference=f"{graph.catalog}.{node.label}",
+        name=str(node.metadata.get("name") or node.label),
+        kind=node.type,
+        source=f"graph:{graph.name}",
+        depth=0,
+        reasons=("seed",),
+        origin=True,
+        annotation_state=node.annotation.state if node.annotation else None,
+    )
+    return FocusDocument(
+        name=name,
+        seed=member.reference,
+        seed_id=member.id,
+        max_hops=2,
+        states=("validated",),
+        sources=(FocusSource("graph", graph.name, focus_graph_revision(graph)),),
+        members=(member,),
+        hops=(),
+        warnings=warnings,
+        truncated=truncated,
+    )

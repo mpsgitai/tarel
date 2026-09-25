@@ -31,6 +31,7 @@ _SCOPE_NOTICE = (
     "No source queries or LLM calls."
 )
 _EXPECTED_KEYS = frozenset({"expected_revisions", "expected_scope_identity"})
+_MAX_SCOPE_OBJECTS = 5_000
 _BUDGETS = {
     "seed_limit": (3, 1, 20),
     "max_objects": (10, 1, 50),
@@ -155,7 +156,7 @@ def search_metadata(
     reviewed = payload.get("reviewed_annotations_only", False)
     if not isinstance(reviewed, bool):
         raise UIQueryFailure("invalid_query_policy", "Reviewed annotations must be a boolean.")
-    scope_objects = _strings(payload, "scope_objects")
+    scope_objects = _scope_objects(payload)
     before = query_scope_snapshot(scope, scope_objects=scope_objects, runtime=runtime)
     _check_expected(payload, before, required=False)
     if scope.workspace:
@@ -203,7 +204,7 @@ def preview_context(
             "invalid_query_request", "Object IDs require explicit selected context mode."
         )
     object_ids = _strings(payload, "object_ids")
-    scope_objects = _strings(payload, "scope_objects")
+    scope_objects = _scope_objects(payload)
     if kind == "selected" and not object_ids:
         raise UIQueryFailure("invalid_context_selection", "Select at least one object.")
     if kind != "selected" and object_ids:
@@ -249,15 +250,18 @@ def preview_context(
         )
     elif scope.workspace:
         result = compile_workspace_context_use_case(
-            scope.workspace, query, **scope.selectors(), **budgets, mode="lexical",
+            scope.workspace, query, **scope.selectors(), **budgets, mode=scope.search_mode,
             scope_objects=scope_objects,
+            model_path=scope.model_path, n_threads=scope.n_threads,
             validated_only=reviewed, logical_hints=logical_hints,
             object_ids=object_ids, runtime=runtime,
         )
     else:
         assert scope.graph is not None
         result = compile_context_use_case(
-            scope.graph, query, **budgets, mode="lexical", validated_only=reviewed,
+            scope.graph, query, **budgets, mode=scope.search_mode,
+            model_path=scope.model_path, n_threads=scope.n_threads,
+            validated_only=reviewed,
             logical_hints=logical_hints, object_ids=object_ids,
             focuses=scope.focuses, runtime=runtime,
             scope_object_ids=_graph_scope_ids(
@@ -282,7 +286,7 @@ def preview_expansion(
     object_ids = _strings(payload, "object_ids")
     if not object_ids:
         raise UIQueryFailure("invalid_context_expansion", "Select at least one packet object.")
-    scope_objects = _strings(payload, "scope_objects")
+    scope_objects = _scope_objects(payload)
     max_characters = _integer(
         payload, "max_characters", default=24_000, minimum=1_000, maximum=100_000,
     )
@@ -377,15 +381,21 @@ def _integer(
     return value
 
 
-def _strings(payload: dict[str, Any], key: str) -> tuple[str, ...]:
+def _strings(
+    payload: dict[str, Any], key: str, *, maximum: int = 100,
+) -> tuple[str, ...]:
     value = payload.get(key, [])
     if not isinstance(value, list) or any(
         not isinstance(item, str) or not item.strip() for item in value
     ):
         raise UIQueryFailure("invalid_query_request", f"Invalid {key} selection.")
-    if len(value) > 100:
+    if len(value) > maximum:
         raise UIQueryFailure("invalid_query_request", f"Too many {key} values.")
     return tuple(value)
+
+
+def _scope_objects(payload: dict[str, Any]) -> tuple[str, ...]:
+    return _strings(payload, "scope_objects", maximum=_MAX_SCOPE_OBJECTS)
 
 
 def _graph_scope_ids(

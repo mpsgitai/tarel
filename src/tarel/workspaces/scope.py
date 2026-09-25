@@ -214,15 +214,18 @@ def intersect_scope_objects(
         item for item in scope.objects
         if item.object_id in allowed_by_graph.get(item.graph, frozenset())
     )
+    graph_names = tuple(sorted({item.graph for item in objects}))
+    combined_warnings = tuple(sorted(set((*scope.warnings, *warnings))))
     return ResolvedScope(
         workspace=scope.workspace,
         selection=scope.selection,
-        graph_names=scope.graph_names,
+        graph_names=graph_names,
         objects=objects,
         scope_hash=_scope_hash(
-            scope.workspace, scope.selection, scope.graph_names, objects,
+            scope.workspace, scope.selection, graph_names, objects,
+            warnings=combined_warnings,
         ),
-        warnings=tuple(sorted(set((*scope.warnings, *warnings)))),
+        warnings=combined_warnings,
     )
 
 
@@ -231,6 +234,8 @@ def _scope_hash(
     selection: ScopeSelection,
     graph_names: tuple[str, ...],
     objects: tuple[ResolvedScopeObject, ...],
+    *,
+    warnings: tuple[str, ...] = (),
 ) -> str:
     payload = {
         "graphs": list(graph_names),
@@ -238,6 +243,8 @@ def _scope_hash(
         "selection": selection.to_dict(),
         "workspace": workspace,
     }
+    if warnings:
+        payload["warnings"] = list(warnings)
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()

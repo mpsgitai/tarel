@@ -43,6 +43,7 @@ class ContextScope:
     zones: tuple[str, ...] = ()
     focuses: tuple[str, ...] = ()
     objects: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"mode": self.mode, "namespace": self.namespace}
@@ -62,6 +63,8 @@ class ContextScope:
             payload["focuses"] = list(self.focuses)
         if self.objects or self.mode.startswith("graph_scope"):
             payload["objects"] = list(self.objects)
+        if self.warnings:
+            payload["warnings"] = list(self.warnings)
         return payload
 
 

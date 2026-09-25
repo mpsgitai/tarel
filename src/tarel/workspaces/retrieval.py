@@ -65,4 +65,5 @@ def combine_workspace_search(
         workspace=scope.workspace,
         graphs=scope.graph_names,
         scope_hash=scope.scope_hash,
+        warnings=scope.warnings,
     )

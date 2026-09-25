@@ -945,11 +945,12 @@ def search_graph_use_case(
         annotation_states,
         validated_only=validated_only,
     )
-    selected_ids, scoped = _resolve_graph_object_scope(
+    selected_ids, scoped, scope_warnings = _resolve_graph_object_scope(
         source=graph, focuses=focuses, object_ids=scope_object_ids, runtime=runtime,
     )
     object_ids, inventory = filter_search_objects(
         graph,
+        namespace=namespace,
         object_ids=frozenset(selected_ids) if scoped else None,
         filters=filters,
         annotation_states=selected_states,
@@ -973,6 +974,7 @@ def search_graph_use_case(
         graph, results, annotation_states=selected_states,
         filters=filters, inventory=inventory,
     )
+    results = replace(results, warnings=scope_warnings)
     return with_family_hits(results, family_name_hits(
         graph, results, mode=family_mode, namespace=namespace,
         object_ids=object_ids, runtime=runtime,
@@ -1073,6 +1075,7 @@ def search_workspace_use_case(
             types=tuple(sorted(type_counts.items())), roles=tuple(sorted(role_counts.items())),
         ),
         annotation_states=selected_states,
+        warnings=combined.warnings,
     )
     families = tuple(
         hit for graph_name in scope.graph_names
@@ -1177,7 +1180,7 @@ def _resolve_graph_object_scope(
     focuses: tuple[str, ...] = (),
     object_ids: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
-) -> tuple[tuple[str, ...], bool]:
+) -> tuple[tuple[str, ...], bool, tuple[str, ...]]:
     """Resolve explicit graph boundaries while preserving an intentionally empty scope."""
     known = {node.id for node in source.nodes if node.type in {"table", "view"}}
     requested = set(object_ids)
@@ -1187,7 +1190,7 @@ def _resolve_graph_object_scope(
             "object_outside_scope", f"Object is outside the graph scope: {sorted(unknown)[0]}"
         )
     if focuses:
-        allowed, _warnings = _focus_object_allowlist(
+        allowed, warnings = _focus_object_allowlist(
             focuses, graph_names=(source.name,), runtime=runtime,
         )
         selected = set(allowed[source.name])
@@ -1195,7 +1198,8 @@ def _resolve_graph_object_scope(
             selected.intersection_update(requested)
     else:
         selected = requested
-    return tuple(sorted(selected)), bool(focuses or object_ids)
+        warnings = ()
+    return tuple(sorted(selected)), bool(focuses or object_ids), warnings
 
 
 def resolve_graph_object_scope_use_case(
@@ -1207,7 +1211,7 @@ def resolve_graph_object_scope_use_case(
 ) -> tuple[str, ...]:
     """Return every physical object allowed by one graph working scope."""
     graph = _graph_store(runtime).load(name)
-    selected, scoped = _resolve_graph_object_scope(
+    selected, scoped, _warnings = _resolve_graph_object_scope(
         source=graph, focuses=focuses, object_ids=object_ids, runtime=runtime,
     )
     if scoped:
@@ -1242,7 +1246,7 @@ def compile_context_use_case(
 ) -> ContextResult:
     validate_bm25_weight(mode, bm25_weight)
     source_graph = _graph_store(runtime).load(name)
-    effective_scope, scoped = _resolve_graph_object_scope(
+    effective_scope, scoped, scope_warnings = _resolve_graph_object_scope(
         source=source_graph, focuses=focuses, object_ids=scope_object_ids, runtime=runtime,
     )
     graph = (
@@ -1253,6 +1257,7 @@ def compile_context_use_case(
         ContextScope(
             mode="graph_scope", namespace=namespace,
             focuses=tuple(sorted(set(focuses))), objects=effective_scope,
+            warnings=scope_warnings,
         )
         if scoped else None
     )
@@ -1368,17 +1373,18 @@ def compile_workspace_context_use_case(
     projection = project_workspace_scope(workspace, loaded, scope)
     selection = scope.selection
     context_scope = ContextScope(
-            mode="workspace_retrieval",
-            workspace=workspace_name,
-            scope_hash=scope.scope_hash,
-            systems=tuple(sorted(set(selection.systems))),
-            graphs=scope.graph_names,
-            areas=tuple(sorted(set(selection.areas))),
-            schemas=tuple(sorted(set(selection.schemas))),
-            zones=tuple(sorted(set(selection.zones))),
-            focuses=tuple(sorted(set(selection.focuses))),
-            objects=tuple(sorted(set(selection.objects))),
-        )
+        mode="workspace_retrieval",
+        workspace=workspace_name,
+        scope_hash=scope.scope_hash,
+        systems=tuple(sorted(set(selection.systems))),
+        graphs=scope.graph_names,
+        areas=tuple(sorted(set(selection.areas))),
+        schemas=tuple(sorted(set(selection.schemas))),
+        zones=tuple(sorted(set(selection.zones))),
+        focuses=tuple(sorted(set(selection.focuses))),
+        objects=tuple(sorted(set(selection.objects))),
+        warnings=scope.warnings,
+    )
     if object_ids:
         selected = _workspace_context_object_ids(scope, object_ids)
         result = compile_context_from_objects(
@@ -1429,7 +1435,7 @@ def compile_context_prefix_use_case(
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     source_graph = _graph_store(runtime).load(name)
-    effective_scope, scoped = _resolve_graph_object_scope(
+    effective_scope, scoped, scope_warnings = _resolve_graph_object_scope(
         source=source_graph, focuses=focuses, object_ids=scope_object_ids, runtime=runtime,
     )
     graph = (
@@ -1452,6 +1458,7 @@ def compile_context_prefix_use_case(
             ContextScope(
                 mode="graph_scope_prefix", namespace=namespace,
                 focuses=tuple(sorted(set(focuses))), objects=effective_scope,
+                warnings=scope_warnings,
             )
             if scoped else None
         ),
@@ -1521,6 +1528,7 @@ def compile_workspace_context_prefix_use_case(
             zones=tuple(sorted(set(selection.zones))),
             focuses=tuple(sorted(set(selection.focuses))),
             objects=tuple(sorted(set(selection.objects))),
+            warnings=scope.warnings,
         ),
     )
     result = add_logical_context_hints_use_case(

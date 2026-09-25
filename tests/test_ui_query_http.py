@@ -129,3 +129,31 @@ class QueryHTTPTests(TestCase):
             })
         self.assertEqual(raised.exception.code, 409)
         self.assertEqual(json.load(raised.exception)["error"]["code"], "stale_query_scope")
+
+    def test_retrieval_configuration_failure_keeps_its_stable_http_error(self) -> None:
+        server = _Server(
+            ("127.0.0.1", 0),
+            TarelUIBackend(UIConfig(
+                graph="sales", search_mode="vector", model_path=Path("missing.gguf"),
+            )),
+            "vector-token",
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/api/search",
+                data=json.dumps({"query": "DateKey"}).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Tarel-Token": "vector-token",
+                },
+            )
+            with self.assertRaises(HTTPError) as raised:
+                urlopen(request, timeout=5)
+            self.assertEqual(raised.exception.code, 404)
+            self.assertEqual(json.load(raised.exception)["error"]["code"], "model_not_found")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
