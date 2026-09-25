@@ -208,6 +208,31 @@ class RetrievalWorkflowTests(TestCase):
                 )
                 self.assertEqual(response["packet"]["dynamic"]["retrieval"]["mode"], "bm25")
 
+    def test_empty_focus_intersection_preserves_workspace_query_and_mode(self) -> None:
+        graph = self.sdk.graph.load("sales_demo")
+        outside = replace(graph, name="outside")
+        self.sdk.runtime.graph_store().save(outside)
+        workspace = define_system(
+            create_workspace("estate"), "analytics",
+            graph_names=(graph.name,), graphs={graph.name: graph},
+        )
+        self.sdk.runtime.workspace_store().save(workspace)
+        focus = _focus("outside-slice", outside, self.fact_id)
+        self.sdk.runtime.focus_store().save(focus)
+
+        search = self.sdk.search.workspace(
+            workspace.name, "unmatched business question", focuses=(focus.name,), mode="bm25",
+        )
+        context = self.sdk.context.workspace(
+            workspace.name, "unmatched business question", focuses=(focus.name,), mode="bm25",
+        )
+
+        self.assertEqual(search.graphs, ())
+        self.assertEqual(search.query, "unmatched business question")
+        self.assertEqual(search.mode, "bm25")
+        self.assertEqual(context.query, "unmatched business question")
+        self.assertEqual(context.retrieval_mode, "bm25")
+
     def test_search_here_accepts_more_than_one_hundred_visible_objects(self) -> None:
         graph = build_graph_from_catalog(
             "large",

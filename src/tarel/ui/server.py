@@ -1195,6 +1195,7 @@ def _ui_failure(exc: Exception) -> UIFailure:
             "stale_index",
             "index_policy_mismatch",
             "model_index_mismatch",
+            "stale_expansion_base",
         } else 400
         if code.endswith("_not_found"):
             status = 404

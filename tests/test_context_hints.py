@@ -266,6 +266,16 @@ class LogicalContextHintTests(TestCase):
         self.assertEqual(packet.stable_dict()["logical_hints"]["items"], [])
         self.assertNotIn("reference.regions", packet.canonical_json())
 
+        countries = next(node.id for node in graph.nodes if node.label == "sales.countries")
+        regions = next(node.id for node in graph.nodes if node.label == "reference.regions")
+        scoped = self.sdk.context.graph(
+            "commerce", "countries", namespace="sales",
+            scope_object_ids=(countries, regions), seed_limit=1, max_objects=1,
+            logical_hints="include_candidates",
+        )
+        self.assertEqual(scoped.stable_dict()["logical_hints"]["items"], [])
+        self.assertNotIn("reference.regions", scoped.canonical_json())
+
     def test_namespace_filter_is_case_insensitive_for_mapping_hints(self) -> None:
         self._save_hints()
         lower = self.sdk.context.graph(

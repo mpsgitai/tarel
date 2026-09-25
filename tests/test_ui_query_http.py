@@ -157,3 +157,34 @@ class QueryHTTPTests(TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=3)
+
+    def test_stale_expansion_base_returns_revision_conflict(self) -> None:
+        scope = self._post("/api/query/scope", {})
+        fact = next(node for node in self.graph.nodes if node.label == "mart.FactSales")
+        preview = self._post("/api/context/preview", {
+            "query": "sales amount", "kind": "selected", "object_ids": [fact.id],
+            "expected_revisions": scope["revisions"],
+            "expected_scope_identity": scope["scope_identity"],
+        })
+        changed = replace(
+            self.graph,
+            nodes=tuple(
+                replace(node, annotation=GraphAnnotation(description="Changed meaning"))
+                if node.id == fact.id else node
+                for node in self.graph.nodes
+            ),
+        )
+        self.sdk.runtime.graph_store().save(changed)
+        current = self._post("/api/query/scope", {})
+
+        with self.assertRaises(HTTPError) as raised:
+            self._post("/api/context/expand", {
+                "packet": preview["packet"], "object_ids": [fact.id],
+                "expected_revisions": current["revisions"],
+                "expected_scope_identity": current["scope_identity"],
+            })
+
+        self.assertEqual(raised.exception.code, 409)
+        self.assertEqual(
+            json.load(raised.exception)["error"]["code"], "stale_expansion_base"
+        )

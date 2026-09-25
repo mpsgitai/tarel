@@ -11,6 +11,8 @@ def combine_workspace_search(
     scope: ResolvedScope,
     results: tuple[SearchResults, ...],
     *,
+    query: str,
+    mode: str,
     limit: int,
 ) -> SearchResults:
     allowed = {(item.graph, item.object_id) for item in scope.objects}
@@ -53,8 +55,6 @@ def combine_workspace_search(
     ranked = tuple(
         sorted(hits, key=lambda item: (-item.score, item.label.casefold(), item.id))[:limit]
     )
-    query = results[0].query if results else ""
-    mode = results[0].mode if results else "lexical"
     terms = tuple(sorted({term for result in results for term in result.terms}))
     return SearchResults(
         graph=workspace_graph_name(scope.workspace),

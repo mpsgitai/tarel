@@ -63,19 +63,22 @@ def add_logical_context_hints_use_case(
         }
         if not selected_original:
             continue
-        if projection is None and packet.scope.mode.startswith("graph_scope"):
-            allowed = set(packet.scope.objects)
-        else:
-            allowed = {
-                node.id
-                for node in (projection or graph).nodes
-                if node.type in {"table", "view"}
-                and (
-                    packet.scope.namespace is None
-                    or str(node.metadata.get("namespace") or "").casefold()
-                    == packet.scope.namespace.casefold()
-                )
-            }
+        scoped_objects = set(packet.scope.objects)
+        allowed = {
+            node.id
+            for node in (projection or graph).nodes
+            if node.type in {"table", "view"}
+            and (
+                packet.scope.namespace is None
+                or str(node.metadata.get("namespace") or "").casefold()
+                == packet.scope.namespace.casefold()
+            )
+            and (
+                projection is not None
+                or not packet.scope.mode.startswith("graph_scope")
+                or node.id in scoped_objects
+            )
+        }
         items.extend(
             _derived_hints(graph, selected_original, projected_id, mode, omissions, runtime)
         )

@@ -1056,7 +1056,9 @@ def search_workspace_use_case(
     results = tuple(results_list)
     from tarel.object_families.search import family_name_hits, with_family_hits
 
-    combined = combine_workspace_search(scope, results, limit=limit)
+    combined = combine_workspace_search(
+        scope, results, query=query, mode=mode, limit=limit,
+    )
     type_counts: dict[str, int] = {}
     role_counts: dict[str, int] = {}
     for inventory in inventories:
