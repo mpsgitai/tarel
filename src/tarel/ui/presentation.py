@@ -553,10 +553,19 @@ def browser_lineages(documents: Iterable[LineageDocument]) -> list[dict[str, obj
     payload = []
     for document in sorted(documents, key=lambda item: item.name):
         definitions = document.definition_by_id()
-        descriptions = {item.definition_id: item.summary for item in document.analyses}
+        analyses = {item.definition_id: item for item in document.analyses}
         jobs = [
             {
-                "description": descriptions.get(item.id),
+                "analysis": (
+                    {
+                        "analyzer": analyses[item.id].analyzer,
+                        "analyzer_version": analyses[item.id].analyzer_version,
+                        "dialect": analyses[item.id].dialect,
+                    }
+                    if item.id in analyses
+                    else None
+                ),
+                "description": analyses[item.id].summary if item.id in analyses else None,
                 "id": item.id,
                 "kind": item.kind,
                 "language": item.language,
@@ -641,15 +650,19 @@ def browser_lineage_flows(
         for definition in document.definitions:
             identifier = f"lineage-job::{document.name}::{definition.id}"
             job_ids[definition.id] = identifier
-            nodes[identifier] = {
-                "description": next(
-                    (
-                        analysis.summary
-                        for analysis in document.analyses
-                        if analysis.definition_id == definition.id
-                    ),
-                    None,
+            analysis = next(
+                (
+                    item
+                    for item in document.analyses
+                    if item.definition_id == definition.id
                 ),
+                None,
+            )
+            nodes[identifier] = {
+                "analyzer": analysis.analyzer if analysis else None,
+                "analyzer_version": analysis.analyzer_version if analysis else None,
+                "description": analysis.summary if analysis else None,
+                "dialect": analysis.dialect if analysis else None,
                 "graph": None,
                 "id": identifier,
                 "kind": definition.kind,

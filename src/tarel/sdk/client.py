@@ -159,7 +159,7 @@ from tarel.lineage.application import (
     load_runtime_lineage_use_case,
     next_lineage_task_use_case,
     process_lineage_view_use_case,
-    run_lineage_provider_use_case,
+    run_lineage_analysis_use_case,
     table_lineage_view_use_case,
     trace_runtime_lineage_use_case,
     trace_upstream_use_case,
@@ -1571,7 +1571,9 @@ class LineageAPI(_RuntimeAPI):
         name: str,
         *,
         source: str | Path,
-        provider: str,
+        analyzer: str = "llm",
+        provider: str | None = None,
+        dialect: str | None = None,
         model: str | None = None,
         timeout: float = 180.0,
         retry: int = 1,
@@ -1582,10 +1584,12 @@ class LineageAPI(_RuntimeAPI):
         reasoning_effort: str | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> LineageProviderRunResult:
-        return run_lineage_provider_use_case(
+        return run_lineage_analysis_use_case(
             name,
             source_path=Path(source),
+            analyzer=analyzer,
             provider_name=provider,
+            dialect=dialect,
             model=model,
             timeout=timeout,
             retry=retry,

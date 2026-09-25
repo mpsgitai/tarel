@@ -157,12 +157,13 @@ GROUPS = {
         ),
         (
             "Build consumes canonical input rather than extracting a schedule"
-            "r itself. Analyze invokes the provider and persists drafts. Next"
+            "r itself. Analyze can use a provider, optional local SQLGlot, or "
+            "SQLGlot with provider fallback; every path persists drafts. Next"
             "/apply supports harness-authored proposals. Runtime imports stor"
             "e caller observations separately from reusable static ETL defini"
             "tions."
         ),
-        "runtime-lineage.md",
+        "static-lineage.md",
         "tarel lineage show sales-etl --view status --format json",
     ),
     "semantic": (
@@ -369,11 +370,12 @@ NOTES = {
         "annotation runner, not the lineage runner."
     ),
     "lineage analyze": (
-        "Makes sequential per-definition extraction requests, followed by"
-        " --review-passes audit requests. It is not a provider batch API."
-        " Compatible analysis-cache entries can be reused. Failed work is"
-        " recorded; exhausted correction attempts stop the run. A provide"
-        "r audit leaves the result a draft."
+        "The sqlglot strategy is local and provider-free. Auto runs SQLGl"
+        "ot first and sends each unresolved definition in full to the pr"
+        "ovider. Provider requests remain sequential per definition, fol"
+        "lowed by --review-passes audit requests; this is not a provider "
+        "batch API. Compatible provider-cache entries can be reused. Fail"
+        "ed work remains visible and every accepted result stays draft."
     ),
     "context prefix": (
         "Question-independent packet for an explicit graph/workspace scop"
@@ -615,6 +617,7 @@ DOC_TARGETS = {
     "graph-storage.md": "contracts.md#graph-storage-and-selective-reads",
     "context-contract.md": "contracts.md#context-packets",
     "local-retrieval.md": "contracts.md#local-retrieval",
+    "static-lineage.md": "static-lineage.md",
     "runtime-lineage.md": "contracts.md#runtime-lineage",
     "semantic-imports.md": "contracts.md#semantic-model-imports",
     "discovery-runs.md": "contracts.md#discovery-protocol",

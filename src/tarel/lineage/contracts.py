@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-_CONTRACT_VERSION = "tarel.lineage.v0.4"
+_CONTRACT_VERSION = "tarel.lineage.v0.5"
 _READABLE_CONTRACT_VERSIONS = frozenset(
-    {_CONTRACT_VERSION, "tarel.lineage.v0.3", "tarel.lineage.v0.2"}
+    {_CONTRACT_VERSION, "tarel.lineage.v0.4", "tarel.lineage.v0.3", "tarel.lineage.v0.2"}
 )
 _DEFINITION_KINDS = frozenset({"procedure", "query", "script"})
 _OPERATIONS = frozenset({"call", "read"})
@@ -137,11 +137,17 @@ class LineageAnalysis:
     summary: str
     warnings: tuple[str, ...]
     excluded_writes: tuple[LineageExcludedWrite, ...] = ()
+    analyzer: str = "coding_agent"
+    analyzer_version: str | None = None
+    dialect: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "analyzer": self.analyzer,
+            "analyzer_version": self.analyzer_version,
             "definition_id": self.definition_id,
             "definition_revision": self.definition_revision,
+            "dialect": self.dialect,
             "excluded_writes": [item.to_dict() for item in self.excluded_writes],
             "summary": self.summary,
             "warnings": list(self.warnings),
@@ -288,6 +294,23 @@ class LineageDocument:
             data = {**data, "analysis_failures": []}
         if contract_version in {"tarel.lineage.v0.2", "tarel.lineage.v0.3"}:
             data = {**data, "materializations": []}
+        if contract_version in {
+            "tarel.lineage.v0.2",
+            "tarel.lineage.v0.3",
+            "tarel.lineage.v0.4",
+        }:
+            data = {
+                **data,
+                "analyses": [
+                    {
+                        **item,
+                        "analyzer": "coding_agent",
+                        "analyzer_version": None,
+                        "dialect": None,
+                    }
+                    for item in _objects(data.get("analyses"), "analyses")
+                ],
+            }
         _fields(
             data,
             {
@@ -416,6 +439,13 @@ def validate_lineage_document(document: LineageDocument) -> None:
                 "Analysis revision does not match its lineage definition.",
             )
         _text_value(item.summary, "analysis summary")
+        _text_value(item.analyzer, "analysis analyzer")
+        for value, label in (
+            (item.analyzer_version, "analysis analyzer_version"),
+            (item.dialect, "analysis dialect"),
+        ):
+            if value is not None:
+                _text_value(value, label)
         if not all(isinstance(value, str) for value in item.warnings):
             raise LineageFailure("invalid_lineage", "Analysis warnings must be strings.")
         for excluded in item.excluded_writes:
@@ -580,12 +610,30 @@ def _step(data: dict[str, Any]) -> LineageStep:
 def _analysis(data: dict[str, Any]) -> LineageAnalysis:
     _fields(
         data,
-        {"definition_id", "definition_revision", "excluded_writes", "summary", "warnings"},
+        {
+            "analyzer",
+            "analyzer_version",
+            "definition_id",
+            "definition_revision",
+            "dialect",
+            "excluded_writes",
+            "summary",
+            "warnings",
+        },
         "analysis",
     )
     values = {
-        key: value for key, value in data.items() if key not in {"excluded_writes", "warnings"}
+        key: value
+        for key, value in data.items()
+        if key not in {"excluded_writes", "warnings"}
     }
+    for field in ("analyzer_version", "dialect"):
+        value = values.get(field)
+        if value is not None and not isinstance(value, str):
+            raise LineageFailure(
+                "invalid_lineage",
+                f"Analysis {field} must be a string or null.",
+            )
     return LineageAnalysis(
         **values,
         warnings=_strings(data.get("warnings"), "analysis warnings"),

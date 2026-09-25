@@ -34,6 +34,9 @@ class LineageDefinitionStatus:
     definition_id: str
     definition_name: str
     analysis_state: str
+    analysis_analyzer: str | None
+    analysis_analyzer_version: str | None
+    analysis_dialect: str | None
     failure_code: str | None
     failure_provider: str | None
     failure_model: str | None
@@ -43,6 +46,15 @@ class LineageDefinitionStatus:
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "analysis": (
+                None
+                if self.analysis_analyzer is None
+                else {
+                    "analyzer": self.analysis_analyzer,
+                    "analyzer_version": self.analysis_analyzer_version,
+                    "dialect": self.analysis_dialect,
+                }
+            ),
             "analysis_state": self.analysis_state,
             "claims": self.claims.to_dict(),
             "definition_id": self.definition_id,
@@ -92,7 +104,7 @@ class LineageStatus:
 
 
 def lineage_status(document: LineageDocument) -> LineageStatus:
-    analyses = {item.definition_id for item in document.analyses}
+    analyses = {item.definition_id: item for item in document.analyses}
     failures = {item.definition_id: item for item in document.analysis_failures}
     rows = []
     for definition in sorted(
@@ -100,7 +112,8 @@ def lineage_status(document: LineageDocument) -> LineageStatus:
         key=lambda item: (item.qualified_name.casefold(), item.id),
     ):
         failure = failures.get(definition.id)
-        if definition.id in analyses:
+        analysis = analyses.get(definition.id)
+        if analysis is not None:
             analysis_state = "complete"
         elif failure is not None:
             analysis_state = "failed"
@@ -111,6 +124,9 @@ def lineage_status(document: LineageDocument) -> LineageStatus:
                 definition_id=definition.id,
                 definition_name=definition.qualified_name,
                 analysis_state=analysis_state,
+                analysis_analyzer=analysis.analyzer if analysis else None,
+                analysis_analyzer_version=analysis.analyzer_version if analysis else None,
+                analysis_dialect=analysis.dialect if analysis else None,
                 failure_code=failure.code if failure else None,
                 failure_provider=failure.provider if failure else None,
                 failure_model=failure.model if failure else None,

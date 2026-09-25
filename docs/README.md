@@ -6,6 +6,7 @@ Start with the [Retail DWH demo](retail-demo.md) for a local, credential-free wa
 | --- | --- |
 | [CLI reference](cli-reference.md) | Look up every command, argument, default, result, and related contract |
 | [Architecture and extensions](architecture.md) | Understand the graph, adapter boundaries, and reviewed self-modification |
+| [Static lineage analysis](static-lineage.md) | Use coding-agent, provider, or optional local SQLGlot analysis |
 | [Demo warehouse](retail-demo.md) | Build and inspect a reproducible source |
 | [Three-day workshop](workshop.md) | Apply TAREL to an enterprise landscape with a harness |
 | [Experimental architecture browser](architecture-ui.md) | Explore layers and collections; edit a separate local architecture map |

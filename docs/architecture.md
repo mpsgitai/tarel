@@ -56,6 +56,11 @@ Static lineage distinguishes job order, procedure calls, and physical reads/writ
 supply report/model links; definition analysis supplies candidate data dependencies. A schedule
 alone cannot establish the complete path from a report to source tables.
 
+Definition analysis has one validated application path for CLI and SDK callers. Coding-agent
+workfiles, provider workfiles, and the optional SQLGlot adapter all enter through the same coverage,
+evidence, revision, and draft-review checks. SQLGlot is imported only inside its adapter when the
+explicit `sql-lineage` extra and analyzer mode are used.
+
 [Runtime lineage](contracts.md#runtime-lineage) separately records caller-reported execution,
 including dependencies, hashes, and checks. It does not independently certify an answer or approve
 a relationship.
