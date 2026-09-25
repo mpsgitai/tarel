@@ -9,7 +9,7 @@ from tarel.lineage.contracts import LineageFailure
 from tarel.lineage.coverage import WriteMarker, write_markers
 from tarel.lineage.source import SourceDefinition
 
-_ADAPTER_VERSION = "tarel.sqlglot-lineage.v0.1"
+_ADAPTER_VERSION = "tarel.sqlglot-lineage.v0.2"
 _DIALECT_ALIASES = {
     "duckdb": "duckdb",
     "postgres": "postgres",
@@ -48,6 +48,7 @@ class _Write:
     operation: str
     marker: WriteMarker
     expression: Any
+    target_table: Any
     target: str
     target_line_end: int
 
@@ -88,11 +89,17 @@ def analyze_with_sqlglot(
     ):
         return _unsupported(sqlglot.__version__, resolved, "sqlglot_unsupported_statement")
     if any(
-        isinstance(node, exp.Execute) and not isinstance(node.this, exp.Table)
+        _is_dynamic_execute(node, exp)
         for expression in expressions
         for node in expression.walk()
     ):
         return _unsupported(sqlglot.__version__, resolved, "sqlglot_dynamic_sql")
+    if any(
+        _is_create_as(node, exp)
+        for expression in expressions
+        for node in expression.walk()
+    ):
+        return _unsupported(sqlglot.__version__, resolved, "sqlglot_unsupported_create_as")
 
     markers = write_markers(definition.content)
     candidates = tuple(
@@ -113,8 +120,12 @@ def analyze_with_sqlglot(
         if sources is None:
             return _unsupported(sqlglot.__version__, resolved, "sqlglot_unresolved_source")
         if _is_local(write.target):
-            local_sources[write.target.casefold()] = _merge_sources(
-                (*local_sources.get(write.target.casefold(), ()), *sources)
+            local_sources[write.target.casefold()] = (
+                ()
+                if write.operation == "truncate"
+                else _merge_sources(
+                    (*local_sources.get(write.target.casefold(), ()), *sources)
+                )
             )
             excluded.append(
                 {
@@ -162,6 +173,22 @@ def analyze_with_sqlglot(
 
 def _resolve_dialect(value: str) -> str | None:
     return _DIALECT_ALIASES.get(value.strip().casefold())
+
+
+def _is_dynamic_execute(node: Any, exp: Any) -> bool:
+    if not isinstance(node, exp.Execute):
+        return False
+    if not isinstance(node.this, exp.Table):
+        return True
+    return _table_name(node.this).casefold().split(".")[-1] == "sp_executesql"
+
+
+def _is_create_as(node: Any, exp: Any) -> bool:
+    return (
+        isinstance(node, exp.Create)
+        and str(node.args.get("kind", "")).casefold() == "table"
+        and node.args.get("expression") is not None
+    )
 
 
 def _unsupported(version: str, dialect: str | None, code: str) -> SqlglotAnalysisResult:
@@ -216,6 +243,7 @@ def _match_writes(
                 operation=operation,
                 marker=marker,
                 expression=expression,
+                target_table=target_table,
                 target=target,
                 target_line_end=max(marker.line, target_lines[1]),
             )
@@ -272,26 +300,17 @@ def _write_sources(
     local_sources: dict[str, tuple[_Source, ...]],
     exp: Any,
 ) -> tuple[_Source, ...] | None:
-    cte_names = {
-        cte.alias_or_name.casefold()
-        for cte in write.expression.find_all(exp.CTE)
-        if cte.alias_or_name
-    }
     sources: list[_Source] = []
-    for table in write.expression.find_all(exp.Table):
+    for table in _reachable_tables(write.expression, exp):
         if _is_write_target_table(write, table, exp):
             continue
         target = _table_name(table)
         if not target:
             return None
-        if target.casefold() == write.target.casefold():
-            continue
-        if not _is_qualified(table) and target.casefold() in cte_names:
-            continue
         via = _cte_ancestors(table, exp)
         if _is_local(target):
             expanded = local_sources.get(target.casefold())
-            if not expanded:
+            if expanded is None:
                 return None
             sources.extend(
                 _Source(item.target, item.line_start, item.line_end, (*via, target, *item.via))
@@ -305,7 +324,41 @@ def _write_sources(
     return _merge_sources(tuple(sources))
 
 
+def _reachable_tables(expression: Any, exp: Any) -> tuple[Any, ...]:
+    ctes = {
+        cte.alias_or_name.casefold(): cte
+        for cte in expression.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+    expanded_ctes: set[str] = set()
+    tables: list[Any] = []
+
+    def visit(node: Any) -> None:
+        if isinstance(node, exp.CTE):
+            return
+        if isinstance(node, exp.Table):
+            target = _table_name(node)
+            key = target.casefold()
+            cte = ctes.get(key) if not _is_qualified(node) else None
+            if cte is not None:
+                if key not in expanded_ctes:
+                    expanded_ctes.add(key)
+                    visit(cte.this)
+            else:
+                tables.append(node)
+            for child in node.iter_expressions():
+                visit(child)
+            return
+        for child in node.iter_expressions():
+            visit(child)
+
+    visit(expression)
+    return tuple(tables)
+
+
 def _is_write_target_table(write: _Write, table: Any, exp: Any) -> bool:
+    if table is write.target_table:
+        return True
     expression = write.expression
     candidates: tuple[Any, ...]
     if write.operation == "truncate":

@@ -805,7 +805,7 @@ def run_lineage_analysis_use_case(
         applied=static_applied,
         cache_hits=0,
         provider_requests=0,
-        analyzer="sqlglot",
+        analyzer=analyzer,
         sqlglot_applied=static_applied,
         unresolved_definitions=fallback_names,
     )

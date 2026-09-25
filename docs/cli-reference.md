@@ -5139,7 +5139,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `source_graph_not_mapped` | [tarel/grounding_application.py](../src/tarel/grounding_application.py#L377), [sources/application.py](../src/tarel/sources/application.py#L354) |
 | `source_not_found` | [sources/store.py](../src/tarel/sources/store.py#L58) |
 | `source_save_failed` | [sources/store.py](../src/tarel/sources/store.py#L47) |
-| `sqlglot_not_installed` | [lineage/sqlglot_adapter.py](../src/tarel/lineage/sqlglot_adapter.py#L66) |
+| `sqlglot_not_installed` | [lineage/sqlglot_adapter.py](../src/tarel/lineage/sqlglot_adapter.py#L67) |
 | `stale_discovery_run` | [discovery/application.py](../src/tarel/discovery/application.py#L404), [discovery/application.py](../src/tarel/discovery/application.py#L667) |
 | `stale_entity_resolution_candidate` | [entity_resolution/application.py](../src/tarel/entity_resolution/application.py#L256) |
 | `stale_expansion_base` | [expansion/application.py](../src/tarel/expansion/application.py#L153), [expansion/application.py](../src/tarel/expansion/application.py#L182), [expansion/projections.py](../src/tarel/expansion/projections.py#L233) |

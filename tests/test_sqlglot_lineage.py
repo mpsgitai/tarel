@@ -129,6 +129,84 @@ class SqlglotLineageTests(TestCase):
             [["dbo.Source"], ["dbo.Obsolete"]],
         )
 
+    def test_self_referential_insert_preserves_the_distinct_source_node(self) -> None:
+        result = analyze_with_sqlglot(
+            _definition(
+                "tsql",
+                "INSERT INTO mart.History SELECT * FROM mart.History;",
+            )
+        )
+
+        self.assertTrue(result.complete)
+        assert result.analysis is not None
+        self.assertEqual(
+            [item["target"] for item in result.analysis["writes"][0]["sources"]],
+            ["mart.History"],
+        )
+
+    def test_only_reachable_ctes_contribute_sources(self) -> None:
+        result = analyze_with_sqlglot(
+            _definition(
+                "postgresql",
+                "WITH unused AS (SELECT * FROM raw.secret)\n"
+                "INSERT INTO mart.out SELECT * FROM raw.actual;",
+            )
+        )
+
+        self.assertTrue(result.complete)
+        assert result.analysis is not None
+        self.assertEqual(
+            [item["target"] for item in result.analysis["writes"][0]["sources"]],
+            ["raw.actual"],
+        )
+
+    def test_local_truncate_clears_sources_before_refill(self) -> None:
+        result = analyze_with_sqlglot(
+            _definition(
+                "tsql",
+                "SELECT * INTO #Stage FROM raw.Old;\n"
+                "TRUNCATE TABLE #Stage;\n"
+                "INSERT INTO #Stage SELECT * FROM raw.New;\n"
+                "INSERT INTO mart.Target SELECT * FROM #Stage;",
+            )
+        )
+
+        self.assertTrue(result.complete)
+        assert result.analysis is not None
+        sources = result.analysis["writes"][0]["sources"]
+        self.assertEqual(
+            [(item["target"], item["via"]) for item in sources],
+            [("raw.New", ["#Stage"])],
+        )
+        self.assertEqual(
+            [item["operation"] for item in result.analysis["excluded_writes"]],
+            ["select_into", "truncate", "insert"],
+        )
+
+    def test_create_table_as_is_not_silently_reported_as_complete(self) -> None:
+        for language in ("duckdb", "postgresql", "sqlite"):
+            with self.subTest(language=language):
+                result = analyze_with_sqlglot(
+                    _definition(
+                        language,
+                        "CREATE TABLE mart.out AS SELECT * FROM raw.source;",
+                    )
+                )
+                self.assertFalse(result.complete)
+                self.assertEqual(result.failure_code, "sqlglot_unsupported_create_as")
+
+    def test_sp_executesql_is_treated_as_dynamic_sql(self) -> None:
+        result = analyze_with_sqlglot(
+            _definition(
+                "tsql",
+                "EXEC sys.sp_executesql "
+                "N'INSERT INTO dbo.Target SELECT * FROM dbo.Source';",
+            )
+        )
+
+        self.assertFalse(result.complete)
+        self.assertEqual(result.failure_code, "sqlglot_dynamic_sql")
+
     def test_dynamic_sql_is_sent_as_one_definition_to_provider_fallback(self) -> None:
         source = _source("EXEC('INSERT INTO dbo.Target SELECT * FROM dbo.Source');")
         provider = _Provider(
@@ -194,6 +272,28 @@ class SqlglotLineageTests(TestCase):
         self.assertEqual(result.unresolved_definitions, ("etl.Load",))
         self.assertEqual(result.document.analysis_failures[0].provider, "sqlglot")
         self.assertEqual(second.planned, 1)
+
+    def test_successful_auto_run_preserves_the_requested_strategy(self) -> None:
+        source = _source("INSERT INTO dbo.Target SELECT * FROM dbo.Source;")
+        previous = Path.cwd()
+        with TemporaryDirectory() as temporary_directory:
+            os.chdir(temporary_directory)
+            try:
+                source_path = Path("source.json")
+                _write_source(source_path, source)
+                build_lineage_use_case("auto", source_path=source_path)
+                result = run_lineage_analysis_use_case(
+                    "auto",
+                    source_path=source_path,
+                    analyzer="auto",
+                    provider_name="openrouter",
+                )
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(result.analyzer, "auto")
+        self.assertEqual(result.sqlglot_applied, 1)
+        self.assertEqual(result.provider_requests, 0)
 
     def test_missing_extra_has_a_precise_error(self) -> None:
         original_import = builtins.__import__

@@ -76,10 +76,10 @@ The adapter currently handles physical reads, direct procedure calls, INSERT, UP
 MERGE, TRUNCATE, SELECT INTO, CTE paths, and resolvable local temporary-table paths. SQLGlot-derived
 source roles remain `unknown`; TAREL does not turn syntax into unsupported business semantics.
 
-Dynamic SQL, parser failures, unsupported statements, ambiguous dialects, missing physical source
-names, and incomplete write coverage are explicit unresolved outcomes. SQLGlot parsing is treated
-as syntax evidence rather than proof that a database engine would execute the statement. Column
-lineage is outside this first slice.
+Dynamic SQL (including `sp_executesql`), `CREATE TABLE AS SELECT`, parser failures, unsupported
+statements, ambiguous dialects, missing physical source names, and incomplete write coverage are
+explicit unresolved outcomes. SQLGlot parsing is treated as syntax evidence rather than proof that
+a database engine would execute the statement. Column lineage is outside this first slice.
 
 All accepted claims and write units remain `draft`. Analyzer name, adapter/SQLGlot version, dialect,
 and evidence source are persisted with the analysis. Status output and the browser lineage hint show
