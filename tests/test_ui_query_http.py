@@ -66,10 +66,33 @@ class QueryHTTPTests(TestCase):
         self.assertFalse((self.sdk.root / "sources").exists())
         self.assertFalse((self.sdk.root / "context").exists())
 
+    def test_selected_context_can_expand_one_packet_object_over_http(self) -> None:
+        scope = self._post("/api/query/scope", {})
+        fact = next(node for node in self.graph.nodes if node.label == "mart.FactSales")
+        preview = self._post("/api/context/preview", {
+            "query": "sales amount", "kind": "selected", "object_ids": [fact.id],
+            "max_objects": 1, "seed_limit": 1, "max_fields_per_object": 1,
+            "expected_revisions": scope["revisions"],
+            "expected_scope_identity": scope["scope_identity"],
+        })
+
+        expanded = self._post("/api/context/expand", {
+            "packet": preview["packet"], "object_ids": [fact.id],
+            "expected_revisions": scope["revisions"],
+            "expected_scope_identity": scope["scope_identity"],
+        })["expansion"]
+
+        self.assertEqual(
+            expanded["base_packet_hash"], preview["packet"]["identity"]["packet_hash"]
+        )
+        self.assertEqual(expanded["items"][0]["target"]["id"], fact.id)
+        self.assertEqual(len(expanded["items"][0]["metadata"]["objects"][0]["fields"]), 2)
+
     def test_every_query_route_requires_the_session_token(self) -> None:
         for route, payload in (
             ("/api/query/scope", {}), ("/api/search", {"query": "DateKey"}),
             ("/api/context/preview", {"query": "DateKey"}),
+            ("/api/context/expand", {}),
         ):
             with self.subTest(route=route), self.assertRaises(HTTPError) as raised:
                 self._post(route, payload, token=False)
@@ -106,3 +129,62 @@ class QueryHTTPTests(TestCase):
             })
         self.assertEqual(raised.exception.code, 409)
         self.assertEqual(json.load(raised.exception)["error"]["code"], "stale_query_scope")
+
+    def test_retrieval_configuration_failure_keeps_its_stable_http_error(self) -> None:
+        server = _Server(
+            ("127.0.0.1", 0),
+            TarelUIBackend(UIConfig(
+                graph="sales", search_mode="vector", model_path=Path("missing.gguf"),
+            )),
+            "vector-token",
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/api/search",
+                data=json.dumps({"query": "DateKey"}).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Tarel-Token": "vector-token",
+                },
+            )
+            with self.assertRaises(HTTPError) as raised:
+                urlopen(request, timeout=5)
+            self.assertEqual(raised.exception.code, 404)
+            self.assertEqual(json.load(raised.exception)["error"]["code"], "model_not_found")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+    def test_stale_expansion_base_returns_revision_conflict(self) -> None:
+        scope = self._post("/api/query/scope", {})
+        fact = next(node for node in self.graph.nodes if node.label == "mart.FactSales")
+        preview = self._post("/api/context/preview", {
+            "query": "sales amount", "kind": "selected", "object_ids": [fact.id],
+            "expected_revisions": scope["revisions"],
+            "expected_scope_identity": scope["scope_identity"],
+        })
+        changed = replace(
+            self.graph,
+            nodes=tuple(
+                replace(node, annotation=GraphAnnotation(description="Changed meaning"))
+                if node.id == fact.id else node
+                for node in self.graph.nodes
+            ),
+        )
+        self.sdk.runtime.graph_store().save(changed)
+        current = self._post("/api/query/scope", {})
+
+        with self.assertRaises(HTTPError) as raised:
+            self._post("/api/context/expand", {
+                "packet": preview["packet"], "object_ids": [fact.id],
+                "expected_revisions": current["revisions"],
+                "expected_scope_identity": current["scope_identity"],
+            })
+
+        self.assertEqual(raised.exception.code, 409)
+        self.assertEqual(
+            json.load(raised.exception)["error"]["code"], "stale_expansion_base"
+        )

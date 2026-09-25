@@ -7,13 +7,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tarel.context import ContextFailure
-from tarel.context_output import CONTEXT_CONTRACT_VERSION, canonical_hash
+from tarel.context_output import (
+    CONTEXT_CONTRACT_VERSION,
+    SCOPED_CONTEXT_CONTRACT_VERSION,
+    canonical_hash,
+)
 from tarel.graph.changes import GraphChange
 from tarel.graph.contracts import GraphDocument
 from tarel.graph.refresh import GraphRefreshReport
 from tarel.graph.revision import graph_revision
 
-_SUPPORTED_CONTRACTS = {"tarel.context.v0.1", CONTEXT_CONTRACT_VERSION}
+_SUPPORTED_CONTRACTS = {
+    "tarel.context.v0.1", CONTEXT_CONTRACT_VERSION, SCOPED_CONTEXT_CONTRACT_VERSION,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +151,7 @@ def context_packet_from_dict(payload: dict[str, object]) -> ContextPacketSnapsho
             "stable_hash": stable_hash,
         }
     )
-    if contract == CONTEXT_CONTRACT_VERSION:
+    if contract in {CONTEXT_CONTRACT_VERSION, SCOPED_CONTEXT_CONTRACT_VERSION}:
         identity = _object(payload.get("identity"), "identity")
         expected = {
             "dynamic_hash": dynamic_hash,

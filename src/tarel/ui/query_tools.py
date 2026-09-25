@@ -3,25 +3,35 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from tarel.application import (
+    compile_context_prefix_use_case,
     compile_context_use_case,
+    compile_workspace_context_prefix_use_case,
     compile_workspace_context_use_case,
+    load_focus_use_case,
     load_workspace_use_case,
+    resolve_graph_object_scope_use_case,
     resolve_workspace_scope_use_case,
     search_graph_use_case,
     search_workspace_use_case,
 )
 from tarel.context_output import canonical_hash
+from tarel.expansion.application import expand_context_use_case
+from tarel.expansion.contracts import ExpansionTarget
 from tarel.graph.store import FileGraphStore
 from tarel.runtime import TarelRuntime
+from tarel.search import SearchFilters
 
 _SCOPE_NOTICE = (
-    "Project scope only. Graph display filters, selected objects and report/cube "
-    "filters do not constrain this search or context. No source queries or LLM calls."
+    "The server launch scope is the outer boundary. An explicit working scope can narrow "
+    "search and context; display filters do not constrain it until applied. "
+    "No source queries or LLM calls."
 )
 _EXPECTED_KEYS = frozenset({"expected_revisions", "expected_scope_identity"})
+_MAX_SCOPE_OBJECTS = 5_000
 _BUDGETS = {
     "seed_limit": (3, 1, 20),
     "max_objects": (10, 1, 50),
@@ -50,6 +60,10 @@ class UIQueryScope:
     areas: tuple[str, ...] = ()
     schemas: tuple[str, ...] = ()
     zones: tuple[str, ...] = ()
+    focuses: tuple[str, ...] = ()
+    search_mode: str = "lexical"
+    model_path: Path | None = None
+    n_threads: int | None = None
 
     def __post_init__(self) -> None:
         if bool(self.graph) == bool(self.workspace):
@@ -59,12 +73,14 @@ class UIQueryScope:
             for value in (self.graph, self.workspace)
         ):
             raise UIQueryFailure("invalid_query_scope", "Invalid project query scope.")
-        for values in self.selectors().values():
+        if self.search_mode not in {"lexical", "bm25", "vector", "hybrid"}:
+            raise UIQueryFailure("invalid_query_scope", "Unsupported project search mode.")
+        for key, values in self.selectors().items():
             if not isinstance(values, tuple) or any(
                 not isinstance(value, str) or not value.strip() for value in values
             ):
                 raise UIQueryFailure("invalid_query_scope", "Invalid project query selectors.")
-            if self.graph and values:
+            if self.graph and values and key != "focuses":
                 raise UIQueryFailure(
                     "invalid_query_scope", "Query selectors require a workspace launch scope."
                 )
@@ -72,17 +88,18 @@ class UIQueryScope:
     def selectors(self) -> dict[str, tuple[str, ...]]:
         return {
             "systems": self.systems, "graphs": self.graphs, "areas": self.areas,
-            "schemas": self.schemas, "zones": self.zones,
+            "schemas": self.schemas, "zones": self.zones, "focuses": self.focuses,
         }
 
 
 def query_scope_snapshot(
-    scope: UIQueryScope, *, runtime: TarelRuntime | None = None,
+    scope: UIQueryScope, *, scope_objects: tuple[str, ...] = (),
+    runtime: TarelRuntime | None = None,
 ) -> dict[str, object]:
     """Expose exact source revisions without inventing a viewport selection contract."""
     if scope.workspace:
         resolved = resolve_workspace_scope_use_case(
-            scope.workspace, **scope.selectors(), runtime=runtime,
+            scope.workspace, **scope.selectors(), objects=scope_objects, runtime=runtime,
         )
         names = resolved.graph_names
         selection: dict[str, object] = {
@@ -97,39 +114,73 @@ def query_scope_snapshot(
         assert scope.graph is not None
         names = (scope.graph,)
         selection = {"mode": "graph", "graph": scope.graph}
+        if scope.focuses:
+            selection["focuses"] = list(scope.focuses)
+        if scope_objects:
+            _graph_scope_ids(scope.graph, scope_objects, runtime=runtime)
+            selection["objects"] = list(scope_objects)
     store = runtime.graph_store() if runtime else FileGraphStore()
     revisions = {name: store.header(name).revision for name in names}
+    for name in scope.focuses:
+        revisions[f"focus:{name}"] = load_focus_use_case(name, runtime=runtime).revision
     return {
         "scope": selection,
         "revisions": revisions,
         "scope_identity": canonical_hash({"scope": selection, "revisions": revisions}),
         "notice": _SCOPE_NOTICE,
+        "search": {"local": True, "mode": scope.search_mode},
     }
 
 
 def search_metadata(
     scope: UIQueryScope, payload: dict[str, Any], *, runtime: TarelRuntime | None = None,
 ) -> dict[str, object]:
-    _request_keys(payload, {"query", "limit", "family_mode"} | _EXPECTED_KEYS)
+    _request_keys(
+        payload,
+        {
+            "query", "limit", "family_mode", "types", "roles", "required_fields",
+            "scope_objects", "reviewed_annotations_only",
+        }
+        | _EXPECTED_KEYS,
+    )
     query = _query(payload)
     limit = _integer(payload, "limit", default=20, minimum=1, maximum=100)
     family_mode = payload.get("family_mode", "confirmed_only")
     if family_mode not in ("confirmed_only", "include_candidates"):
         raise UIQueryFailure("invalid_query_policy", "Unsupported family search policy.")
-    before = query_scope_snapshot(scope, runtime=runtime)
+    filters = SearchFilters(
+        types=_strings(payload, "types"),
+        roles=_strings(payload, "roles"),
+        required_fields=_strings(payload, "required_fields"),
+    )
+    reviewed = payload.get("reviewed_annotations_only", False)
+    if not isinstance(reviewed, bool):
+        raise UIQueryFailure("invalid_query_policy", "Reviewed annotations must be a boolean.")
+    scope_objects = _scope_objects(payload)
+    before = query_scope_snapshot(scope, scope_objects=scope_objects, runtime=runtime)
     _check_expected(payload, before, required=False)
     if scope.workspace:
         result = search_workspace_use_case(
             scope.workspace, query, **scope.selectors(),
-            limit=limit, mode="lexical", family_mode=family_mode, runtime=runtime,
+            limit=limit, mode=scope.search_mode, model_path=scope.model_path,
+            n_threads=scope.n_threads, family_mode=family_mode, filters=filters,
+            scope_objects=scope_objects,
+            validated_only=reviewed,
+            runtime=runtime,
         )
     else:
         assert scope.graph is not None
         result = search_graph_use_case(
-            scope.graph, query, limit=limit, mode="lexical", family_mode=family_mode,
+            scope.graph, query, limit=limit, mode=scope.search_mode,
+            model_path=scope.model_path, n_threads=scope.n_threads,
+            family_mode=family_mode, filters=filters, focuses=scope.focuses,
+            validated_only=reviewed,
+            scope_object_ids=_graph_scope_ids(
+                scope.graph, scope_objects, runtime=runtime,
+            ),
             runtime=runtime,
         )
-    _check_unchanged(scope, before, runtime)
+    _check_unchanged(scope, before, runtime, scope_objects=scope_objects)
     return {**before, "results": result.to_dict()}
 
 
@@ -138,9 +189,28 @@ def preview_context(
 ) -> dict[str, object]:
     _request_keys(
         payload,
-        {"query", "reviewed_annotations_only", "logical_hints"} | _EXPECTED_KEYS | _BUDGETS.keys(),
+        {
+            "query", "kind", "object_ids", "scope_objects",
+            "reviewed_annotations_only", "logical_hints",
+        }
+        | _EXPECTED_KEYS | _BUDGETS.keys(),
     )
-    query = _query(payload)
+    kind = payload.get("kind", "question")
+    if kind not in {"question", "prefix", "selected"}:
+        raise UIQueryFailure("invalid_context_kind", "Unsupported context kind.")
+    query = "" if kind == "prefix" else _query(payload)
+    if "object_ids" in payload and kind != "selected":
+        raise UIQueryFailure(
+            "invalid_query_request", "Object IDs require explicit selected context mode."
+        )
+    object_ids = _strings(payload, "object_ids")
+    scope_objects = _scope_objects(payload)
+    if kind == "selected" and not object_ids:
+        raise UIQueryFailure("invalid_context_selection", "Select at least one object.")
+    if kind != "selected" and object_ids:
+        raise UIQueryFailure(
+            "invalid_context_selection", "Object selection requires selected context mode."
+        )
     reviewed = payload.get("reviewed_annotations_only", True)
     if not isinstance(reviewed, bool):
         raise UIQueryFailure("invalid_query_policy", "Reviewed annotations must be a boolean.")
@@ -155,21 +225,136 @@ def preview_context(
     }
     if budgets["seed_limit"] > budgets["max_objects"]:
         raise UIQueryFailure("invalid_query_budget", "Seed limit cannot exceed object budget.")
-    before = query_scope_snapshot(scope, runtime=runtime)
+    before = query_scope_snapshot(scope, scope_objects=scope_objects, runtime=runtime)
     _check_expected(payload, before, required=True)
-    if scope.workspace:
+    if kind == "prefix" and scope.workspace:
+        result = compile_workspace_context_prefix_use_case(
+            scope.workspace, **scope.selectors(),
+            scope_objects=scope_objects,
+            max_objects=budgets["max_objects"], max_joins=budgets["max_joins"],
+            max_fields_per_object=budgets["max_fields_per_object"],
+            max_characters=budgets["max_characters"], validated_only=reviewed,
+            logical_hints=logical_hints, runtime=runtime,
+        )
+    elif kind == "prefix":
+        assert scope.graph is not None
+        result = compile_context_prefix_use_case(
+            scope.graph, max_objects=budgets["max_objects"],
+            max_joins=budgets["max_joins"],
+            max_fields_per_object=budgets["max_fields_per_object"],
+            max_characters=budgets["max_characters"], validated_only=reviewed,
+            logical_hints=logical_hints, focuses=scope.focuses, runtime=runtime,
+            scope_object_ids=_graph_scope_ids(
+                scope.graph, scope_objects, runtime=runtime,
+            ),
+        )
+    elif scope.workspace:
         result = compile_workspace_context_use_case(
-            scope.workspace, query, **scope.selectors(), **budgets, mode="lexical",
-            validated_only=reviewed, logical_hints=logical_hints, runtime=runtime,
+            scope.workspace, query, **scope.selectors(), **budgets, mode=scope.search_mode,
+            scope_objects=scope_objects,
+            model_path=scope.model_path, n_threads=scope.n_threads,
+            validated_only=reviewed, logical_hints=logical_hints,
+            object_ids=object_ids, runtime=runtime,
         )
     else:
         assert scope.graph is not None
         result = compile_context_use_case(
-            scope.graph, query, **budgets, mode="lexical", validated_only=reviewed,
-            logical_hints=logical_hints, runtime=runtime,
+            scope.graph, query, **budgets, mode=scope.search_mode,
+            model_path=scope.model_path, n_threads=scope.n_threads,
+            validated_only=reviewed,
+            logical_hints=logical_hints, object_ids=object_ids,
+            focuses=scope.focuses, runtime=runtime,
+            scope_object_ids=_graph_scope_ids(
+                scope.graph, scope_objects, runtime=runtime,
+            ),
         )
-    _check_unchanged(scope, before, runtime)
+    _check_unchanged(scope, before, runtime, scope_objects=scope_objects)
     return {**before, "packet": result.to_dict()}
+
+
+def preview_expansion(
+    scope: UIQueryScope, payload: dict[str, Any], *, runtime: TarelRuntime | None = None,
+) -> dict[str, object]:
+    """Expand fields for physical objects already present in a validated context packet."""
+    _request_keys(
+        payload,
+        {"packet", "object_ids", "scope_objects", "max_characters"} | _EXPECTED_KEYS,
+    )
+    packet = payload.get("packet")
+    if not isinstance(packet, dict):
+        raise UIQueryFailure("invalid_context_expansion", "A context packet is required.")
+    object_ids = _strings(payload, "object_ids")
+    if not object_ids:
+        raise UIQueryFailure("invalid_context_expansion", "Select at least one packet object.")
+    scope_objects = _scope_objects(payload)
+    max_characters = _integer(
+        payload, "max_characters", default=24_000, minimum=1_000, maximum=100_000,
+    )
+    before = query_scope_snapshot(scope, scope_objects=scope_objects, runtime=runtime)
+    _check_expected(payload, before, required=True)
+    stable = packet.get("stable")
+    if not isinstance(stable, dict):
+        raise UIQueryFailure("invalid_context_expansion", "The context packet is invalid.")
+    graph_identity = stable.get("graph")
+    packet_scope = stable.get("scope")
+    objects = stable.get("objects")
+    if (
+        not isinstance(graph_identity, dict)
+        or not isinstance(packet_scope, dict)
+        or not isinstance(objects, list)
+    ):
+        raise UIQueryFailure("invalid_context_expansion", "The context packet is invalid.")
+    if scope.graph and graph_identity.get("name") != scope.graph:
+        raise UIQueryFailure("invalid_context_expansion", "Packet belongs to another graph.")
+    if scope.workspace and packet_scope.get("workspace") != scope.workspace:
+        raise UIQueryFailure("invalid_context_expansion", "Packet belongs to another workspace.")
+    available = {
+        item.get("id") for item in objects
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    if set(object_ids) - available:
+        raise UIQueryFailure(
+            "invalid_context_expansion", "Expansion object is not present in the packet."
+        )
+    revisions = before["revisions"]
+    assert isinstance(revisions, dict)
+    targets: list[ExpansionTarget] = []
+    for reference in object_ids:
+        if reference.startswith("scope::"):
+            prefix, graph_name, object_id = reference.split("::", 2)
+            if prefix != "scope" or not graph_name or not object_id:
+                raise UIQueryFailure("invalid_context_expansion", "Invalid workspace object ID.")
+        else:
+            if scope.graph is None:
+                raise UIQueryFailure("invalid_context_expansion", "Invalid workspace object ID.")
+            graph_name, object_id = scope.graph, reference
+        revision = revisions.get(graph_name)
+        if not isinstance(revision, str):
+            raise UIQueryFailure("stale_query_scope", "Object graph is outside the working scope.")
+        targets.append(ExpansionTarget("object", graph_name, object_id, revision))
+    if scope.workspace:
+        resolved = resolve_workspace_scope_use_case(
+            scope.workspace, **scope.selectors(), objects=scope_objects, runtime=runtime,
+        )
+        allowed = {(item.graph, item.object_id) for item in resolved.objects}
+    else:
+        assert scope.graph is not None
+        allowed = {
+            (scope.graph, object_id) for object_id in resolve_graph_object_scope_use_case(
+                scope.graph, focuses=scope.focuses,
+                object_ids=_graph_scope_ids(scope.graph, scope_objects, runtime=runtime),
+                runtime=runtime,
+            )
+        }
+    if any((target.graph, target.id) not in allowed for target in targets):
+        raise UIQueryFailure(
+            "invalid_context_expansion", "Expansion object is outside the working scope."
+        )
+    result = expand_context_use_case(
+        packet, tuple(targets), max_characters=max_characters, runtime=runtime,
+    )
+    _check_unchanged(scope, before, runtime, scope_objects=scope_objects)
+    return {**before, "expansion": result.to_dict()}
 
 
 def _request_keys(payload: dict[str, Any], allowed: set[str] | frozenset[str]) -> None:
@@ -196,6 +381,47 @@ def _integer(
     return value
 
 
+def _strings(
+    payload: dict[str, Any], key: str, *, maximum: int = 100,
+) -> tuple[str, ...]:
+    value = payload.get(key, [])
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise UIQueryFailure("invalid_query_request", f"Invalid {key} selection.")
+    if len(value) > maximum:
+        raise UIQueryFailure("invalid_query_request", f"Too many {key} values.")
+    return tuple(value)
+
+
+def _scope_objects(payload: dict[str, Any]) -> tuple[str, ...]:
+    return _strings(payload, "scope_objects", maximum=_MAX_SCOPE_OBJECTS)
+
+
+def _graph_scope_ids(
+    graph_name: str,
+    references: tuple[str, ...],
+    *,
+    runtime: TarelRuntime | None,
+) -> tuple[str, ...]:
+    if not references:
+        return ()
+    object_ids: list[str] = []
+    for reference in references:
+        selected_graph, separator, object_id = reference.partition(":")
+        if not separator or selected_graph != graph_name or not object_id:
+            raise UIQueryFailure(
+                "invalid_query_scope", "Working-scope object belongs to another graph."
+            )
+        object_ids.append(object_id)
+    store = runtime.graph_store() if runtime else FileGraphStore()
+    graph = store.load(graph_name)
+    known = {node.id for node in graph.nodes if node.type in {"table", "view"}}
+    if set(object_ids) - known:
+        raise UIQueryFailure("invalid_query_scope", "Working-scope object no longer exists.")
+    return tuple(object_ids)
+
+
 def _check_expected(
     payload: dict[str, Any], snapshot: dict[str, object], *, required: bool,
 ) -> None:
@@ -218,8 +444,11 @@ def _check_expected(
 
 def _check_unchanged(
     scope: UIQueryScope, before: dict[str, object], runtime: TarelRuntime | None,
+    *, scope_objects: tuple[str, ...] = (),
 ) -> None:
-    if query_scope_snapshot(scope, runtime=runtime)["scope_identity"] != before["scope_identity"]:
+    if query_scope_snapshot(
+        scope, scope_objects=scope_objects, runtime=runtime,
+    )["scope_identity"] != before["scope_identity"]:
         _stale()
 
 

@@ -68,6 +68,10 @@ five DWH origin tables. Draft state and changes in lineage granularity remain vi
 Search the graph by technical name or business meaning using built-in BM25 or optional local
 embeddings. Expand along relevant relationships within explicit context budgets.
 
+In the CLI, SDK, and browser you can set a hard working scope, filter physical candidates before
+ranking, inspect why each result matched, turn exact results into a stable context packet, and load
+bounded metadata deltas later without replacing the cacheable base.
+
 Your agent receives a focused slice with source identity, SQL dialect, evidence, and visible gaps.
 The same graph supports many questions without sending the entire estate into every conversation.
 

@@ -58,6 +58,7 @@ from tarel.reference_mapping.contracts import (
 from tarel.runtime import TarelRuntime
 from tarel.sdk.client import Tarel
 from tarel.sdk.setup import create_demo, install_agent_skill, scaffold_connector, scaffold_provider
+from tarel.search import SearchFilters
 from tarel.semantic_concepts.contracts import (
     ConceptBinding,
     SemanticConcept,
@@ -82,6 +83,7 @@ from tarel.topology.endpoint_contracts import LogicalEndpoint, ResolvedLogicalEn
 from tarel.workspaces.scope import ScopeSelection as WorkspaceScope
 
 __all__ = [
+    "SearchFilters",
     "ContextExpansion",
     "ExpansionInput",
     "ExpansionTarget",

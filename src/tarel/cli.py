@@ -127,7 +127,7 @@ from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
 from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.local import DEFAULT_MODEL_NAME
-from tarel.search import SearchFailure, SearchResults
+from tarel.search import SearchFailure, SearchFilters, SearchResults
 from tarel.semantic_concepts.cli import add_concept_commands, dispatch_concept
 from tarel.semantic_concepts.contracts import SemanticConceptFailure
 from tarel.semantics.cli import add_semantic_commands, dispatch_semantic
@@ -675,10 +675,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Checkpoint completed embedding batches and resume a matching interrupted build.",
     )
+    _add_annotation_state_arguments(index_build)
     _add_format_argument(index_build)
 
     index_status = index_commands.add_parser("status", help="Inspect one retrieval index.")
     index_status.add_argument("name", help="Local graph name.")
+    _add_annotation_state_arguments(index_status)
     _add_format_argument(index_status)
 
     graph = subcommands.add_parser("graph", help="Build and inspect local TAREL graphs.")
@@ -753,6 +755,12 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-open", action="store_true", help="Do not open the browser automatically.")
     ui.add_argument("--families", choices=("confirmed_only", "include_candidates"))
     ui.add_argument(
+        "--search-mode", choices=("lexical", "bm25", "vector", "hybrid"),
+        default="bm25", help="Local metadata search mode; BM25 needs no model index.",
+    )
+    ui.add_argument("--model", type=Path, dest="model_path")
+    ui.add_argument("--threads", type=int, dest="n_threads")
+    ui.add_argument(
         "--architecture-file", type=Path, help="Experimental local architecture sidecar.",
     )
     ui.add_argument(
@@ -820,6 +828,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--threads", type=int, dest="n_threads")
     search.add_argument("--bm25-weight", type=float, help="Hybrid BM25 weight; default 1.0.")
     _add_workspace_retrieval_scope_arguments(search)
+    _add_search_filter_arguments(search)
     _add_annotation_state_arguments(search)
     _add_format_argument(search)
 
@@ -861,6 +870,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--bm25-weight", type=float, help="Hybrid BM25 weight; default 1.0."
     )
     _add_workspace_retrieval_scope_arguments(context_build)
+    context_build.add_argument(
+        "--object", action="append", dest="object_ids",
+        help="Use an exact OBJECT_ID, or GRAPH:OBJECT_ID with --workspace; repeat as needed.",
+    )
     _add_annotation_state_arguments(context_build)
     _add_logical_hint_arguments(context_build)
     _add_format_argument(context_build)
@@ -1250,6 +1263,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     architecture_file=args.architecture_file,
                     architecture_edit=args.architecture_edit,
                     family_mode=args.families,
+                    search_mode=args.search_mode,
+                    model_path=args.model_path,
+                    n_threads=args.n_threads,
                     port=args.port,
                     open_browser=not args.no_open,
                 )
@@ -1717,6 +1733,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 n_threads=args.n_threads,
                 resume=args.resume,
                 progress=_index_build_progress,
+                annotation_states=(
+                    frozenset(args.annotation_states) if args.annotation_states else None
+                ),
+                validated_only=args.validated_only,
             )
             payload = {
                 "index": result.metadata.to_dict(),
@@ -1735,7 +1755,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "index" and args.index_command == "status":
-            payload = retrieval_index_status_use_case(args.name)
+            payload = retrieval_index_status_use_case(
+                args.name,
+                annotation_states=(
+                    frozenset(args.annotation_states) if args.annotation_states else None
+                ),
+                validated_only=args.validated_only,
+            )
             if args.format == "json":
                 print(json.dumps(payload, indent=2, sort_keys=True))
             else:
@@ -1845,6 +1871,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     frozenset(args.annotation_states) if args.annotation_states else None
                 ),
                 "validated_only": args.validated_only,
+                "filters": SearchFilters(
+                    types=tuple(args.object_types or ()),
+                    roles=tuple(args.roles or ()),
+                    required_fields=tuple(args.required_fields or ()),
+                ),
             }
             if args.workspace:
                 if args.namespace is not None:
@@ -1861,6 +1892,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     areas=tuple(args.areas or ()),
                     schemas=tuple(args.schemas or ()),
                     zones=tuple(args.zones or ()),
+                    focuses=tuple(args.focuses or ()),
+                    scope_objects=tuple(args.scope_objects or ()),
                     **search_arguments,
                 )
             else:
@@ -1868,6 +1901,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.name,
                     args.query,
                     namespace=args.namespace,
+                    focuses=tuple(args.focuses or ()),
+                    scope_object_ids=_graph_scope_object_ids(
+                        args.name, tuple(args.scope_objects or ())
+                    ),
                     **search_arguments,
                 )
             _render_search_results(results, output_format=args.format)
@@ -1941,6 +1978,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     frozenset(args.annotation_states) if args.annotation_states else None
                 ),
                 "validated_only": args.validated_only,
+                "object_ids": tuple(args.object_ids or ()),
             }
             if args.workspace:
                 if args.namespace is not None:
@@ -1957,6 +1995,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     areas=tuple(args.areas or ()),
                     schemas=tuple(args.schemas or ()),
                     zones=tuple(args.zones or ()),
+                    focuses=tuple(args.focuses or ()),
+                    scope_objects=tuple(args.scope_objects or ()),
                     **context_arguments,
                 )
             else:
@@ -1964,6 +2004,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.name,
                     args.query,
                     namespace=args.namespace,
+                    focuses=tuple(args.focuses or ()),
+                    scope_object_ids=_graph_scope_object_ids(
+                        args.name, tuple(args.scope_objects or ())
+                    ),
                     **context_arguments,
                 )
             _render_context(result, output_format=args.format)
@@ -1995,12 +2039,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     areas=tuple(args.areas or ()),
                     schemas=tuple(args.schemas or ()),
                     zones=tuple(args.zones or ()),
+                    focuses=tuple(args.focuses or ()),
+                    scope_objects=tuple(args.scope_objects or ()),
                     **prefix_arguments,
                 )
             else:
                 result = compile_context_prefix_use_case(
                     args.name,
                     namespace=args.namespace,
+                    focuses=tuple(args.focuses or ()),
+                    scope_object_ids=_graph_scope_object_ids(
+                        args.name, tuple(args.scope_objects or ())
+                    ),
                     **prefix_arguments,
                 )
             _render_context(result, output_format=args.format)
@@ -2432,6 +2482,33 @@ def _add_workspace_retrieval_scope_arguments(parser: argparse.ArgumentParser) ->
         help="Workspace schema as GRAPH:NAMESPACE; repeat for a union.",
     )
     parser.add_argument("--zone", action="append", dest="zones")
+    parser.add_argument(
+        "--scope-object", action="append", dest="scope_objects",
+        help="Hard workspace boundary as GRAPH:OBJECT_ID; repeat for a union.",
+    )
+    parser.add_argument(
+        "--focus", action="append", dest="focuses",
+        help="Limit a workspace operation to a current saved focus; repeat for a union.",
+    )
+
+
+def _add_search_filter_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--type", action="append", dest="object_types", choices=("table", "view"))
+    parser.add_argument("--role", action="append", dest="roles")
+    parser.add_argument("--has-field", action="append", dest="required_fields")
+
+
+def _graph_scope_object_ids(name: str, references: tuple[str, ...]) -> tuple[str, ...]:
+    object_ids: list[str] = []
+    for reference in references:
+        graph_name, separator, object_id = reference.partition(":")
+        if not separator or graph_name != name or not object_id:
+            raise SearchFailure(
+                "invalid_object_reference",
+                f"Graph object scope must use {name}:OBJECT_ID: {reference}",
+            )
+        object_ids.append(object_id)
+    return tuple(object_ids)
 
 
 def _add_logical_hint_arguments(parser: argparse.ArgumentParser) -> None:
@@ -2489,10 +2566,33 @@ def _render_search_results(results: SearchResults, *, output_format: str) -> Non
     else:
         print(f"Graph: {results.graph}")
     print(f"Mode: {results.mode}")
+    print(f"Annotation states: {', '.join(sorted(results.annotation_states))}")
     print(f"Terms: {', '.join(results.terms)}")
+    if results.inventory:
+        print(
+            "Objects: "
+            f"{results.inventory.objects_after_filters}/{results.inventory.objects_in_scope} "
+            "after filters"
+        )
     for hit in results.hits:
         graph = f"; graph={hit.source_graph}" if hit.source_graph else ""
         print(f"- {hit.label} [{hit.type}{graph}] score={hit.score}")
+        origin = " / ".join(value for value in (hit.source_graph, hit.namespace) if value)
+        if origin:
+            print(f"  Origin: {origin}")
+        if hit.description:
+            print(f"  Meaning: {hit.description}")
+        details = [
+            value for value in (
+                f"role={hit.role}" if hit.role else None,
+                f"grain={hit.grain}" if hit.grain else None,
+                f"annotation={hit.annotation_state}" if hit.annotation_state else None,
+            ) if value
+        ]
+        if details:
+            print(f"  Metadata: {', '.join(details)}")
+        if hit.reference:
+            print(f"  Reference: {hit.reference}")
         print(f"  Reasons: {', '.join(hit.reasons)}")
         if hit.family is not None:
             family = hit.family.to_dict()

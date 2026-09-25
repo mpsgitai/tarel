@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tomllib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -51,11 +51,12 @@ from tarel.context import (
     DEFAULT_MAX_CONTEXT_CHARACTERS,
     ContextResult,
     compile_context,
+    compile_context_from_objects,
     compile_context_from_search,
     compile_context_prefix,
 )
 from tarel.context_hints_application import add_logical_context_hints_use_case
-from tarel.context_output import ContextScope
+from tarel.context_output import SCOPED_CONTEXT_CONTRACT_VERSION, ContextScope
 from tarel.context_packets import (
     ContextPacketDiff,
     ContextPacketImpact,
@@ -125,7 +126,15 @@ from tarel.retrieval.local import (
     sha256_file,
 )
 from tarel.runtime import TarelRuntime
-from tarel.search import SearchFailure, SearchResults, search_graph
+from tarel.search import (
+    SearchFailure,
+    SearchFilters,
+    SearchInventory,
+    SearchResults,
+    describe_search_results,
+    filter_search_objects,
+    search_graph,
+)
 from tarel.workspaces.contracts import (
     SchemaReference,
     WorkspaceDocument,
@@ -147,7 +156,12 @@ from tarel.workspaces.core import (
 from tarel.workspaces.impact import WorkspaceChangeImpact, workspace_change_impacts
 from tarel.workspaces.projection import project_workspace_scope
 from tarel.workspaces.retrieval import combine_workspace_search
-from tarel.workspaces.scope import ResolvedScope, ScopeSelection, resolve_scope
+from tarel.workspaces.scope import (
+    ResolvedScope,
+    ScopeSelection,
+    intersect_scope_objects,
+    resolve_scope,
+)
 from tarel.workspaces.store import FileWorkspaceStore
 
 
@@ -680,6 +694,8 @@ def resolve_workspace_scope_use_case(
     areas: tuple[str, ...] = (),
     schemas: tuple[str, ...] = (),
     zones: tuple[str, ...] = (),
+    focuses: tuple[str, ...] = (),
+    objects: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> ResolvedScope:
     _workspace, _loaded, scope = _load_workspace_scope(
@@ -689,6 +705,8 @@ def resolve_workspace_scope_use_case(
         areas=areas,
         schemas=schemas,
         zones=zones,
+        focuses=focuses,
+        objects=objects,
         runtime=runtime,
     )
     return scope
@@ -702,6 +720,8 @@ def _load_workspace_scope(
     areas: tuple[str, ...] = (),
     schemas: tuple[str, ...] = (),
     zones: tuple[str, ...] = (),
+    focuses: tuple[str, ...] = (),
+    objects: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> tuple[WorkspaceDocument, dict[str, GraphDocument], ResolvedScope]:
     workspace = _workspace_store(runtime).load(workspace_name)
@@ -722,9 +742,37 @@ def _load_workspace_scope(
             areas=areas,
             schemas=schemas,
             zones=zones,
+            focuses=focuses,
+            objects=objects,
         ),
     )
+    if focuses:
+        allowed, warnings = _focus_object_allowlist(
+            focuses, graph_names=scope.graph_names, runtime=runtime,
+        )
+        scope = intersect_scope_objects(scope, allowed, warnings=warnings)
     return workspace, loaded, scope
+
+
+def _focus_object_allowlist(
+    focuses: tuple[str, ...],
+    *,
+    graph_names: tuple[str, ...],
+    runtime: TarelRuntime | None,
+) -> tuple[dict[str, frozenset[str]], tuple[str, ...]]:
+    allowed: dict[str, set[str]] = {name: set() for name in graph_names}
+    warnings: list[str] = []
+    for name in sorted(set(focuses)):
+        focus, _lineages, _graphs = _load_current_focus(name, runtime=runtime)
+        for graph_name in graph_names:
+            allowed[graph_name].update(graph_object_ids(focus, graph_name))
+        warnings.extend(f"{name}: {warning}" for warning in focus.warnings)
+        if focus.truncated:
+            warnings.append(f"{name}: focus traversal was truncated")
+    return (
+        {name: frozenset(object_ids) for name, object_ids in allowed.items()},
+        tuple(sorted(set(warnings))),
+    )
 
 
 def define_workspace_system_use_case(
@@ -886,6 +934,9 @@ def search_graph_use_case(
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     family_mode: str | None = "confirmed_only",
+    filters: SearchFilters | None = None,
+    focuses: tuple[str, ...] = (),
+    scope_object_ids: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
     validate_bm25_weight(mode, bm25_weight)
@@ -893,6 +944,16 @@ def search_graph_use_case(
     selected_states = selected_annotation_states(
         annotation_states,
         validated_only=validated_only,
+    )
+    selected_ids, scoped, scope_warnings = _resolve_graph_object_scope(
+        source=graph, focuses=focuses, object_ids=scope_object_ids, runtime=runtime,
+    )
+    object_ids, inventory = filter_search_objects(
+        graph,
+        namespace=namespace,
+        object_ids=frozenset(selected_ids) if scoped else None,
+        filters=filters,
+        annotation_states=selected_states,
     )
     results = _search_loaded_graph(
         graph,
@@ -904,12 +965,19 @@ def search_graph_use_case(
         n_threads=n_threads,
         bm25_weight=bm25_weight,
         annotation_states=selected_states,
+        object_ids=object_ids,
         runtime=runtime,
     )
     from tarel.object_families.search import family_name_hits, with_family_hits
 
+    results = describe_search_results(
+        graph, results, annotation_states=selected_states,
+        filters=filters, inventory=inventory,
+    )
+    results = replace(results, warnings=scope_warnings)
     return with_family_hits(results, family_name_hits(
-        graph, results, mode=family_mode, namespace=namespace, runtime=runtime,
+        graph, results, mode=family_mode, namespace=namespace,
+        object_ids=object_ids, runtime=runtime,
     ), limit=limit)
 
 
@@ -922,6 +990,8 @@ def search_workspace_use_case(
     areas: tuple[str, ...] = (),
     schemas: tuple[str, ...] = (),
     zones: tuple[str, ...] = (),
+    focuses: tuple[str, ...] = (),
+    scope_objects: tuple[str, ...] = (),
     limit: int = 20,
     mode: str = "lexical",
     model_path: Path | None = None,
@@ -930,6 +1000,7 @@ def search_workspace_use_case(
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     family_mode: str | None = "confirmed_only",
+    filters: SearchFilters | None = None,
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
     validate_bm25_weight(mode, bm25_weight)
@@ -942,6 +1013,8 @@ def search_workspace_use_case(
         areas=areas,
         schemas=schemas,
         zones=zones,
+        focuses=focuses,
+        objects=scope_objects,
         runtime=runtime,
     )
     selected_states = selected_annotation_states(
@@ -954,31 +1027,63 @@ def search_workspace_use_case(
         if resolved_model is not None
         else None
     )
-    results = tuple(
-        _search_loaded_graph(
+    query_vector = embedder.embed_query(query) if embedder is not None else None
+    results_list: list[SearchResults] = []
+    inventories: list[SearchInventory] = []
+    filtered_ids: dict[str, frozenset[str]] = {}
+    for name in scope.graph_names:
+        object_ids, inventory = filter_search_objects(
             loaded[name],
-            query,
-            limit=100,
-            object_ids=frozenset(item.object_id for item in scope.objects if item.graph == name),
-            mode=mode,
-            bm25_weight=bm25_weight,
-            resolved_model=resolved_model,
-            embedder=embedder,
+            object_ids=frozenset(
+                item.object_id for item in scope.objects if item.graph == name
+            ),
+            filters=filters,
             annotation_states=selected_states,
-            runtime=runtime,
         )
-        for name in scope.graph_names
-    )
+        assert object_ids is not None
+        filtered_ids[name] = object_ids
+        inventories.append(inventory)
+        result = _search_loaded_graph(
+            loaded[name], query, limit=100, object_ids=object_ids,
+            mode=mode, bm25_weight=bm25_weight, resolved_model=resolved_model,
+            embedder=embedder, query_vector=query_vector,
+            annotation_states=selected_states, runtime=runtime,
+        )
+        results_list.append(describe_search_results(
+            loaded[name], result, annotation_states=selected_states,
+            source_graph=name, filters=filters, inventory=inventory,
+        ))
+    results = tuple(results_list)
     from tarel.object_families.search import family_name_hits, with_family_hits
 
-    combined = combine_workspace_search(scope, results, limit=limit)
+    combined = combine_workspace_search(
+        scope, results, query=query, mode=mode, limit=limit,
+    )
+    type_counts: dict[str, int] = {}
+    role_counts: dict[str, int] = {}
+    for inventory in inventories:
+        for key, value in inventory.types:
+            type_counts[key] = type_counts.get(key, 0) + value
+        for key, value in inventory.roles:
+            role_counts[key] = role_counts.get(key, 0) + value
+    combined = SearchResults(
+        graph=combined.graph, query=combined.query, terms=combined.terms,
+        hits=combined.hits, mode=combined.mode, workspace=combined.workspace,
+        graphs=combined.graphs, scope_hash=combined.scope_hash,
+        filters=filters or SearchFilters(),
+        inventory=SearchInventory(
+            objects_in_scope=sum(item.objects_in_scope for item in inventories),
+            objects_after_filters=sum(item.objects_after_filters for item in inventories),
+            types=tuple(sorted(type_counts.items())), roles=tuple(sorted(role_counts.items())),
+        ),
+        annotation_states=selected_states,
+        warnings=combined.warnings,
+    )
     families = tuple(
         hit for graph_name in scope.graph_names
         for hit in family_name_hits(
             loaded[graph_name], combined, mode=family_mode, scoped=True,
-            object_ids=frozenset(
-                item.object_id for item in scope.objects if item.graph == graph_name
-            ), runtime=runtime,
+            object_ids=filtered_ids[graph_name], runtime=runtime,
         )
     )
     return with_family_hits(combined, families, limit=limit)
@@ -995,6 +1100,7 @@ def _search_loaded_graph(
     model_path: Path | None = None,
     resolved_model: Path | None = None,
     embedder: LlamaCppEmbedding | None = None,
+    query_vector: tuple[float, ...] | None = None,
     n_threads: int | None = None,
     bm25_weight: float | None = None,
     annotation_states: frozenset[str],
@@ -1034,7 +1140,87 @@ def _search_loaded_graph(
         annotation_states=annotation_states,
         bm25_weight=bm25_weight,
         store=_retrieval_index(runtime),
+        query_vector=query_vector,
     )
+
+
+def _project_graph_scope(
+    graph: GraphDocument,
+    object_ids: tuple[str, ...],
+) -> GraphDocument:
+    selected = frozenset(object_ids)
+    known = {node.id for node in graph.nodes if node.type in {"table", "view"}}
+    unknown = selected - known
+    if unknown:
+        raise SearchFailure(
+            "object_outside_scope", f"Object is outside the graph scope: {sorted(unknown)[0]}"
+        )
+    nodes = tuple(
+        node for node in graph.nodes
+        if (node.type in {"table", "view"} and node.id in selected)
+        or (node.type == "field" and node.metadata.get("object_id") in selected)
+    )
+    node_ids = {node.id for node in nodes}
+    edges = tuple(
+        edge for edge in graph.edges
+        if edge.source_id in node_ids and edge.target_id in node_ids
+    )
+    return GraphDocument(
+        name=graph.name,
+        connector=graph.connector,
+        source_type=graph.source_type,
+        catalog=graph.catalog,
+        dialect=graph.dialect,
+        nodes=nodes,
+        edges=edges,
+    )
+
+
+def _resolve_graph_object_scope(
+    *,
+    source: GraphDocument,
+    focuses: tuple[str, ...] = (),
+    object_ids: tuple[str, ...] = (),
+    runtime: TarelRuntime | None = None,
+) -> tuple[tuple[str, ...], bool, tuple[str, ...]]:
+    """Resolve explicit graph boundaries while preserving an intentionally empty scope."""
+    known = {node.id for node in source.nodes if node.type in {"table", "view"}}
+    requested = set(object_ids)
+    unknown = requested - known
+    if unknown:
+        raise SearchFailure(
+            "object_outside_scope", f"Object is outside the graph scope: {sorted(unknown)[0]}"
+        )
+    if focuses:
+        allowed, warnings = _focus_object_allowlist(
+            focuses, graph_names=(source.name,), runtime=runtime,
+        )
+        selected = set(allowed[source.name])
+        if object_ids:
+            selected.intersection_update(requested)
+    else:
+        selected = requested
+        warnings = ()
+    return tuple(sorted(selected)), bool(focuses or object_ids), warnings
+
+
+def resolve_graph_object_scope_use_case(
+    name: str,
+    *,
+    focuses: tuple[str, ...] = (),
+    object_ids: tuple[str, ...] = (),
+    runtime: TarelRuntime | None = None,
+) -> tuple[str, ...]:
+    """Return every physical object allowed by one graph working scope."""
+    graph = _graph_store(runtime).load(name)
+    selected, scoped, _warnings = _resolve_graph_object_scope(
+        source=graph, focuses=focuses, object_ids=object_ids, runtime=runtime,
+    )
+    if scoped:
+        return selected
+    return tuple(sorted(
+        node.id for node in graph.nodes if node.type in {"table", "view"}
+    ))
 
 
 def compile_context_use_case(
@@ -1055,15 +1241,41 @@ def compile_context_use_case(
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     logical_hints: str | None = None,
+    object_ids: tuple[str, ...] = (),
+    scope_object_ids: tuple[str, ...] = (),
+    focuses: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     validate_bm25_weight(mode, bm25_weight)
-    graph = _graph_store(runtime).load(name)
+    source_graph = _graph_store(runtime).load(name)
+    effective_scope, scoped, scope_warnings = _resolve_graph_object_scope(
+        source=source_graph, focuses=focuses, object_ids=scope_object_ids, runtime=runtime,
+    )
+    graph = (
+        _project_graph_scope(source_graph, effective_scope)
+        if scoped else source_graph
+    )
+    context_scope = (
+        ContextScope(
+            mode="graph_scope", namespace=namespace,
+            focuses=tuple(sorted(set(focuses))), objects=effective_scope,
+            warnings=scope_warnings,
+        )
+        if scoped else None
+    )
     selected_states = selected_annotation_states(
         annotation_states,
         validated_only=validated_only,
     )
-    if mode == "lexical":
+    if object_ids:
+        result = compile_context_from_objects(
+            graph, object_ids, query=query, max_objects=max_objects,
+            max_joins=max_joins, max_hops=max_hops,
+            max_fields_per_object=max_fields_per_object,
+            max_characters=max_characters, annotation_states=selected_states,
+            scope=context_scope,
+        )
+    elif mode == "lexical":
         result = compile_context(
             graph,
             query,
@@ -1075,6 +1287,7 @@ def compile_context_use_case(
             max_fields_per_object=max_fields_per_object,
             max_characters=max_characters,
             annotation_states=selected_states,
+            scope=context_scope,
         )
     else:
         search = search_graph_use_case(
@@ -1088,6 +1301,8 @@ def compile_context_use_case(
             bm25_weight=bm25_weight,
             annotation_states=selected_states,
             family_mode=None,
+            focuses=focuses,
+            scope_object_ids=scope_object_ids,
             runtime=runtime,
         )
         result = compile_context_from_search(
@@ -1101,10 +1316,17 @@ def compile_context_use_case(
             max_fields_per_object=max_fields_per_object,
             max_characters=max_characters,
             annotation_states=selected_states,
+            scope=context_scope,
         )
-    return add_logical_context_hints_use_case(
-        result, (graph,), mode=logical_hints, runtime=runtime,
+    result = add_logical_context_hints_use_case(
+        result, (source_graph,), mode=logical_hints, runtime=runtime,
     )
+    if scoped:
+        result = replace(
+            result, graph_revision=graph_revision(source_graph),
+            contract_version=SCOPED_CONTEXT_CONTRACT_VERSION,
+        )
+    return result
 
 
 def compile_workspace_context_use_case(
@@ -1116,6 +1338,8 @@ def compile_workspace_context_use_case(
     areas: tuple[str, ...] = (),
     schemas: tuple[str, ...] = (),
     zones: tuple[str, ...] = (),
+    focuses: tuple[str, ...] = (),
+    scope_objects: tuple[str, ...] = (),
     seed_limit: int = 3,
     max_objects: int = 10,
     max_joins: int = 12,
@@ -1129,6 +1353,7 @@ def compile_workspace_context_use_case(
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     logical_hints: str | None = None,
+    object_ids: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     validate_bm25_weight(mode, bm25_weight)
@@ -1139,55 +1364,60 @@ def compile_workspace_context_use_case(
         areas=areas,
         schemas=schemas,
         zones=zones,
+        focuses=focuses,
+        objects=scope_objects,
         runtime=runtime,
     )
     selected_states = selected_annotation_states(
         annotation_states,
         validated_only=validated_only,
     )
-    search = search_workspace_use_case(
-        workspace_name,
-        query,
-        systems=systems,
-        graphs=graphs,
-        areas=areas,
-        schemas=schemas,
-        zones=zones,
-        limit=100,
-        mode=mode,
-        model_path=model_path,
-        n_threads=n_threads,
-        bm25_weight=bm25_weight,
-        annotation_states=selected_states,
-        family_mode=None,
-        runtime=runtime,
-    )
     projection = project_workspace_scope(workspace, loaded, scope)
     selection = scope.selection
-    result = compile_context_from_search(
-        projection,
-        search,
-        seed_limit=seed_limit,
-        max_objects=max_objects,
-        max_joins=max_joins,
-        max_hops=max_hops,
-        max_fields_per_object=max_fields_per_object,
-        max_characters=max_characters,
-        annotation_states=selected_states,
-        scope=ContextScope(
-            mode="workspace_retrieval",
-            workspace=workspace_name,
-            scope_hash=scope.scope_hash,
-            systems=tuple(sorted(set(selection.systems))),
-            graphs=scope.graph_names,
-            areas=tuple(sorted(set(selection.areas))),
-            schemas=tuple(sorted(set(selection.schemas))),
-            zones=tuple(sorted(set(selection.zones))),
-        ),
+    context_scope = ContextScope(
+        mode="workspace_retrieval",
+        workspace=workspace_name,
+        scope_hash=scope.scope_hash,
+        systems=tuple(sorted(set(selection.systems))),
+        graphs=scope.graph_names,
+        areas=tuple(sorted(set(selection.areas))),
+        schemas=tuple(sorted(set(selection.schemas))),
+        zones=tuple(sorted(set(selection.zones))),
+        focuses=tuple(sorted(set(selection.focuses))),
+        objects=tuple(sorted(set(selection.objects))),
+        warnings=scope.warnings,
     )
-    return add_logical_context_hints_use_case(
+    if object_ids:
+        selected = _workspace_context_object_ids(scope, object_ids)
+        result = compile_context_from_objects(
+            projection, selected, query=query, max_objects=max_objects,
+            max_joins=max_joins, max_hops=max_hops,
+            max_fields_per_object=max_fields_per_object,
+            max_characters=max_characters, annotation_states=selected_states,
+            scope=context_scope,
+        )
+    else:
+        search = search_workspace_use_case(
+            workspace_name, query, systems=systems, graphs=graphs, areas=areas,
+            schemas=schemas, zones=zones, focuses=focuses, limit=100, mode=mode,
+            scope_objects=scope_objects,
+            model_path=model_path, n_threads=n_threads, bm25_weight=bm25_weight,
+            annotation_states=selected_states, family_mode=None, runtime=runtime,
+        )
+        result = compile_context_from_search(
+            projection, search, seed_limit=seed_limit, max_objects=max_objects,
+            max_joins=max_joins, max_hops=max_hops,
+            max_fields_per_object=max_fields_per_object,
+            max_characters=max_characters, annotation_states=selected_states,
+            scope=context_scope,
+        )
+    result = add_logical_context_hints_use_case(
         result, tuple(loaded.values()), mode=logical_hints,
         projection=projection, runtime=runtime,
+    )
+    return (
+        replace(result, contract_version=SCOPED_CONTEXT_CONTRACT_VERSION)
+        if focuses or scope_objects else result
     )
 
 
@@ -1202,9 +1432,18 @@ def compile_context_prefix_use_case(
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
     logical_hints: str | None = None,
+    scope_object_ids: tuple[str, ...] = (),
+    focuses: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
-    graph = _graph_store(runtime).load(name)
+    source_graph = _graph_store(runtime).load(name)
+    effective_scope, scoped, scope_warnings = _resolve_graph_object_scope(
+        source=source_graph, focuses=focuses, object_ids=scope_object_ids, runtime=runtime,
+    )
+    graph = (
+        _project_graph_scope(source_graph, effective_scope)
+        if scoped else source_graph
+    )
     selected_states = selected_annotation_states(
         annotation_states,
         validated_only=validated_only,
@@ -1217,10 +1456,24 @@ def compile_context_prefix_use_case(
         max_fields_per_object=max_fields_per_object,
         max_characters=max_characters,
         annotation_states=selected_states,
+        scope=(
+            ContextScope(
+                mode="graph_scope_prefix", namespace=namespace,
+                focuses=tuple(sorted(set(focuses))), objects=effective_scope,
+                warnings=scope_warnings,
+            )
+            if scoped else None
+        ),
     )
-    return add_logical_context_hints_use_case(
-        result, (graph,), mode=logical_hints, runtime=runtime,
+    result = add_logical_context_hints_use_case(
+        result, (source_graph,), mode=logical_hints, runtime=runtime,
     )
+    if scoped:
+        result = replace(
+            result, graph_revision=graph_revision(source_graph),
+            contract_version=SCOPED_CONTEXT_CONTRACT_VERSION,
+        )
+    return result
 
 
 def compile_workspace_context_prefix_use_case(
@@ -1231,6 +1484,8 @@ def compile_workspace_context_prefix_use_case(
     areas: tuple[str, ...] = (),
     schemas: tuple[str, ...] = (),
     zones: tuple[str, ...] = (),
+    focuses: tuple[str, ...] = (),
+    scope_objects: tuple[str, ...] = (),
     max_objects: int = 250,
     max_joins: int = 500,
     max_fields_per_object: int = 50,
@@ -1247,6 +1502,8 @@ def compile_workspace_context_prefix_use_case(
         areas=areas,
         schemas=schemas,
         zones=zones,
+        focuses=focuses,
+        objects=scope_objects,
         runtime=runtime,
     )
     selected_states = selected_annotation_states(
@@ -1271,12 +1528,42 @@ def compile_workspace_context_prefix_use_case(
             areas=tuple(sorted(set(selection.areas))),
             schemas=tuple(sorted(set(selection.schemas))),
             zones=tuple(sorted(set(selection.zones))),
+            focuses=tuple(sorted(set(selection.focuses))),
+            objects=tuple(sorted(set(selection.objects))),
+            warnings=scope.warnings,
         ),
     )
-    return add_logical_context_hints_use_case(
+    result = add_logical_context_hints_use_case(
         result, tuple(loaded.values()), mode=logical_hints,
         projection=projection, runtime=runtime,
     )
+    return (
+        replace(result, contract_version=SCOPED_CONTEXT_CONTRACT_VERSION)
+        if focuses or scope_objects else result
+    )
+
+
+def _workspace_context_object_ids(
+    scope: ResolvedScope,
+    references: tuple[str, ...],
+) -> tuple[str, ...]:
+    from tarel.workspaces.projection import scoped_node_id
+
+    allowed = {(item.graph, item.object_id) for item in scope.objects}
+    selected: list[str] = []
+    for reference in references:
+        graph_name, separator, object_id = reference.partition(":")
+        if not separator or not graph_name or not object_id:
+            raise SearchFailure(
+                "invalid_object_reference",
+                f"Workspace object must use GRAPH:OBJECT_ID: {reference}",
+            )
+        if (graph_name, object_id) not in allowed:
+            raise SearchFailure(
+                "object_outside_scope", f"Object is outside the selected scope: {reference}"
+            )
+        selected.append(scoped_node_id(graph_name, object_id))
+    return tuple(selected)
 
 
 def diff_context_packets_use_case(left: Path, right: Path) -> ContextPacketDiff:
@@ -1339,11 +1626,16 @@ def build_retrieval_index_use_case(
     n_threads: int | None = None,
     resume: bool = False,
     progress: Callable[[int, int, str], None] | None = None,
+    annotation_states: frozenset[str] | None = None,
+    validated_only: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> IndexBuildResult:
     if not 1 <= batch_size <= 256:
         raise RetrievalFailure("invalid_batch_size", "Batch size must be between 1 and 256.")
     graph = _graph_store(runtime).load(name)
+    selected_states = selected_annotation_states(
+        annotation_states, validated_only=validated_only,
+    )
     resolved_model = resolve_model_path(model_path)
     return _retrieval_index(runtime).build(
         graph,
@@ -1352,6 +1644,7 @@ def build_retrieval_index_use_case(
         batch_size=batch_size,
         resume=resume,
         progress=progress,
+        annotation_states=selected_states,
     )
 
 
@@ -1359,12 +1652,17 @@ def retrieval_index_status_use_case(
     name: str,
     *,
     runtime: TarelRuntime | None = None,
+    annotation_states: frozenset[str] | None = None,
+    validated_only: bool = False,
 ) -> dict[str, object]:
     graph = _graph_store(runtime).load(name)
     store = _retrieval_index(runtime)
-    checkpoint = store.checkpoint_status(name)
+    selected_states = selected_annotation_states(
+        annotation_states, validated_only=validated_only,
+    )
+    checkpoint = store.checkpoint_status(name, annotation_states=selected_states)
     try:
-        metadata = store.metadata(name)
+        metadata = store.metadata(name, annotation_states=selected_states)
     except RetrievalFailure as exc:
         if exc.code != "index_not_found" or checkpoint is None:
             raise
@@ -1373,14 +1671,14 @@ def retrieval_index_status_use_case(
             "current": False,
             "index": None,
             "model_available": None,
-            "path": str(store.path(name)),
+            "path": str(store.path(name, annotation_states=selected_states)),
         }
     return {
         "checkpoint": checkpoint,
         "current": metadata.graph_hash == graph_revision(graph),
         "index": metadata.to_dict(),
         "model_available": Path(metadata.model_path).is_file(),
-        "path": str(store.path(name)),
+        "path": str(store.path(name, annotation_states=selected_states)),
     }
 
 

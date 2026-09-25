@@ -36,9 +36,69 @@ from tarel.retrieval.local import (
     download_model,
 )
 from tarel.sdk import Tarel
+from tarel.workspaces.core import create_workspace, define_system
 
 
 class RetrievalTests(TestCase):
+    def test_workspace_vector_search_embeds_the_query_once(self) -> None:
+        first = _retrieval_graph()
+        second = replace(first, name="retrieval_demo_2", catalog="AdventureWorksDW2")
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(root / ".tarel")
+            for graph in (first, second):
+                sdk.runtime.graph_store().save(graph)
+                sdk.runtime.retrieval_index().build(
+                    graph, embedder=_FakeEmbedding(), model_path=model,
+                )
+            workspace = define_system(
+                create_workspace("multi"), "analytics",
+                graph_names=(first.name, second.name),
+                graphs={first.name: first, second.name: second},
+            )
+            sdk.runtime.workspace_store().save(workspace)
+            embedder = _CountingQueryEmbedding()
+
+            with patch("tarel.application.LlamaCppEmbedding", return_value=embedder):
+                results = sdk.search.workspace(
+                    "multi", "Internet Umsatz pro Jahr", mode="vector",
+                    model_path=model, family_mode=None,
+                )
+
+        self.assertTrue(results.hits)
+        self.assertEqual(embedder.query_calls, 1)
+
+    def test_annotation_policy_indexes_coexist(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            store = FileRetrievalIndex(root / "indexes")
+
+            broad = store.build(
+                graph, embedder=_FakeEmbedding(), model_path=model,
+            )
+            reviewed = store.build(
+                graph, embedder=_FakeEmbedding(), model_path=model,
+                annotation_states=frozenset({"validated"}),
+            )
+
+            self.assertNotEqual(broad.path, reviewed.path)
+            self.assertTrue(broad.path.is_file())
+            self.assertTrue(reviewed.path.is_file())
+            self.assertEqual(
+                broad.metadata.annotation_states,
+                ("deferred", "draft", "review_required", "validated"),
+            )
+            self.assertEqual(reviewed.metadata.annotation_states, ("validated",))
+            metadata, _documents, _vectors = store.load(
+                graph, model_path=model, annotation_states=frozenset({"validated"}),
+            )
+            self.assertEqual(metadata.annotation_states, ("validated",))
+
     def test_hybrid_weight_favors_dense_without_dropping_lexical_evidence(self) -> None:
         documents = tuple(
             RetrievalDocument(name, name, None, "dbo", name, name)
@@ -636,6 +696,15 @@ class _FakeEmbeddingWithCalls(_FakeEmbedding):
     ) -> tuple[tuple[float, ...], ...]:
         self.texts.extend(texts)
         return super().embed_documents(texts, batch_size=batch_size)
+
+
+class _CountingQueryEmbedding(_FakeEmbedding):
+    def __init__(self) -> None:
+        self.query_calls = 0
+
+    def embed_query(self, text: str) -> tuple[float, ...]:
+        self.query_calls += 1
+        return super().embed_query(text)
 
 
 class _FailingEmbedding(_FakeEmbedding):

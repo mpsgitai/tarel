@@ -31,13 +31,21 @@ from tarel.retrieval.documents import build_retrieval_documents
 from tarel.retrieval.local import sha256_file
 from tarel.search import FieldSearchHit, SearchHit, SearchResults
 
-_CONTRACT_VERSION = "tarel.retrieval.v0.1"
+_CONTRACT_VERSION = "tarel.retrieval.v0.2"
+_LEGACY_CONTRACT_VERSION = "tarel.retrieval.v0.1"
 _GRAPH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _RRF_K = 60
 _RESULT_SCORE_SCALE = 1_000_000
 _MAX_SAFE_BM25_WEIGHT = sys.float_info.max / _RESULT_SCORE_SCALE
 DEFAULT_BM25_WEIGHT = 1.0
 _MAX_FIELDS = 8
+
+
+def _annotation_policy_suffix(annotation_states: frozenset[str]) -> str:
+    if annotation_states == DEFAULT_CONTEXT_ANNOTATION_STATES:
+        return ""
+    payload = json.dumps(sorted(annotation_states), separators=(",", ":")).encode("utf-8")
+    return f"-{hashlib.sha256(payload).hexdigest()[:12]}"
 
 
 class FileRetrievalIndex:
@@ -53,13 +61,14 @@ class FileRetrievalIndex:
         batch_size: int = 16,
         resume: bool = False,
         progress: Callable[[int, int, str], None] | None = None,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
     ) -> IndexBuildResult:
         if not 1 <= batch_size <= 256:
             raise RetrievalFailure("invalid_batch_size", "Batch size must be between 1 and 256.")
-        documents = build_retrieval_documents(graph)
+        documents = build_retrieval_documents(graph, annotation_states=annotation_states)
         total = len(documents)
         model_sha256 = sha256_file(model_path)
-        checkpoint = self.checkpoint_path(graph.name)
+        checkpoint = self.checkpoint_path(graph.name, annotation_states=annotation_states)
         resumed_documents = 0
         vector_batches: list[tuple[float, ...]] = []
         if resume:
@@ -70,6 +79,7 @@ class FileRetrievalIndex:
                     documents=documents,
                     model_id=embedder.model_id,
                     model_sha256=model_sha256,
+                    annotation_states=annotation_states,
                 )
             )
             resumed_documents = len(vector_batches)
@@ -106,8 +116,9 @@ class FileRetrievalIndex:
             model_path=str(model_path.resolve()),
             model_sha256=model_sha256,
             normalized=True,
+            annotation_states=tuple(sorted(annotation_states)),
         )
-        path = self.path(graph.name)
+        path = self.path(graph.name, annotation_states=annotation_states)
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             dir=path.parent,
@@ -166,8 +177,11 @@ class FileRetrievalIndex:
             resumed_documents=resumed_documents,
         )
 
-    def metadata(self, name: str) -> IndexMetadata:
-        path = self.path(name)
+    def metadata(
+        self, name: str, *,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> IndexMetadata:
+        path = self.path(name, annotation_states=annotation_states)
         if not path.is_file():
             raise RetrievalFailure("index_not_found", f"Retrieval index not found: {name}")
         try:
@@ -182,11 +196,23 @@ class FileRetrievalIndex:
                 f"Could not read retrieval index: {name}",
             ) from exc
         try:
+            if values.get("contract_version") == _LEGACY_CONTRACT_VERSION:
+                if annotation_states != DEFAULT_CONTEXT_ANNOTATION_STATES:
+                    raise RetrievalFailure(
+                        "index_policy_mismatch", "Retrieval index annotation policy differs."
+                    )
+                values["annotation_states"] = sorted(DEFAULT_CONTEXT_ANNOTATION_STATES)
+            if isinstance(values.get("annotation_states"), list):
+                values["annotation_states"] = tuple(values["annotation_states"])
             metadata = IndexMetadata(**values)
         except (TypeError, ValueError) as exc:
             raise RetrievalFailure("invalid_index", "Retrieval index metadata is invalid.") from exc
-        if metadata.contract_version != _CONTRACT_VERSION:
+        if metadata.contract_version not in {_CONTRACT_VERSION, _LEGACY_CONTRACT_VERSION}:
             raise RetrievalFailure("unsupported_index", "Retrieval index must be rebuilt.")
+        if frozenset(metadata.annotation_states) != annotation_states:
+            raise RetrievalFailure(
+                "index_policy_mismatch", "Retrieval index annotation policy differs."
+            )
         return metadata
 
     def load(
@@ -194,8 +220,9 @@ class FileRetrievalIndex:
         graph: GraphDocument,
         *,
         model_path: Path,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
     ) -> tuple[IndexMetadata, tuple[RetrievalDocument, ...], tuple[tuple[float, ...], ...]]:
-        metadata = self.metadata(graph.name)
+        metadata = self.metadata(graph.name, annotation_states=annotation_states)
         if metadata.graph_hash != graph_revision(graph):
             raise RetrievalFailure(
                 "stale_index",
@@ -206,7 +233,7 @@ class FileRetrievalIndex:
                 "model_index_mismatch",
                 "The selected embedding model differs from the indexed model. Rebuild the index.",
             )
-        path = self.path(graph.name)
+        path = self.path(graph.name, annotation_states=annotation_states)
         try:
             with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
                 rows = connection.execute(
@@ -236,17 +263,28 @@ class FileRetrievalIndex:
             raise RetrievalFailure("invalid_index", "Retrieval index document count is invalid.")
         return metadata, documents, vectors
 
-    def path(self, name: str) -> Path:
+    def path(
+        self, name: str, *,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> Path:
         if not _GRAPH_NAME.fullmatch(name):
             raise RetrievalFailure("invalid_graph_name", "Invalid graph name for retrieval index.")
-        return self.root / name / "index.sqlite"
+        suffix = _annotation_policy_suffix(annotation_states)
+        return self.root / name / f"index{suffix}.sqlite"
 
-    def checkpoint_path(self, name: str) -> Path:
-        self.path(name)
-        return self.root / name / "index.checkpoint.sqlite"
+    def checkpoint_path(
+        self, name: str, *,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> Path:
+        suffix = _annotation_policy_suffix(annotation_states)
+        self.path(name, annotation_states=annotation_states)
+        return self.root / name / f"index{suffix}.checkpoint.sqlite"
 
-    def checkpoint_status(self, name: str) -> dict[str, object] | None:
-        path = self.checkpoint_path(name)
+    def checkpoint_status(
+        self, name: str, *,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> dict[str, object] | None:
+        path = self.checkpoint_path(name, annotation_states=annotation_states)
         if not path.is_file():
             return None
         try:
@@ -269,6 +307,7 @@ class FileRetrievalIndex:
             "graph_hash",
             "model_id",
             "model_sha256",
+            "annotation_states",
         }
         document_count = identity.get("document_count")
         if (
@@ -288,6 +327,7 @@ class FileRetrievalIndex:
             "graph_hash": identity["graph_hash"],
             "model_id": identity["model_id"],
             "model_sha256": identity["model_sha256"],
+            "annotation_states": identity["annotation_states"],
             "path": str(path),
         }
 
@@ -305,18 +345,13 @@ def search_retrieval(
     store: FileRetrievalIndex | None = None,
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
     bm25_weight: float | None = None,
+    query_vector: tuple[float, ...] | None = None,
 ) -> SearchResults:
     if mode not in {"bm25", "vector", "hybrid"}:
         raise RetrievalFailure("invalid_retrieval_mode", "Mode must be bm25, vector, or hybrid.")
     if not 1 <= limit <= 100:
         raise RetrievalFailure("invalid_limit", "Search limit must be between 1 and 100.")
     weight = validate_bm25_weight(mode, bm25_weight)
-    if mode in {"vector", "hybrid"} and annotation_states != DEFAULT_CONTEXT_ANNOTATION_STATES:
-        raise RetrievalFailure(
-            "unsupported_annotation_filter",
-            "Vector and hybrid search currently use the default annotation states. "
-            "Use lexical or BM25 mode for a custom annotation-state filter.",
-        )
     documents = tuple(
         document
         for document in build_retrieval_documents(graph, annotation_states=annotation_states)
@@ -334,6 +369,7 @@ def search_retrieval(
         _metadata, indexed_documents, vectors = (store or FileRetrievalIndex()).load(
             graph,
             model_path=model_path,
+            annotation_states=annotation_states,
         )
         indexed = tuple(
             (document, vector)
@@ -341,8 +377,8 @@ def search_retrieval(
             if namespace is None or document.namespace.casefold() == namespace.casefold()
             if object_ids is None or document.object_id in object_ids
         )
-        query_vector = embedder.embed_query(query)
-        vector_results = _rank_vectors(indexed, query_vector, limit=candidate_limit)
+        selected_query_vector = query_vector or embedder.embed_query(query)
+        vector_results = _rank_vectors(indexed, selected_query_vector, limit=candidate_limit)
 
     if mode == "bm25":
         ranked = bm25_results
@@ -493,12 +529,14 @@ def _load_index_checkpoint(
     documents: tuple[RetrievalDocument, ...],
     model_id: str,
     model_sha256: str,
+    annotation_states: frozenset[str],
 ) -> tuple[tuple[float, ...], ...]:
     identity = _checkpoint_identity(
         graph,
         documents,
         model_id=model_id,
         model_sha256=model_sha256,
+        annotation_states=annotation_states,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -596,6 +634,7 @@ def _checkpoint_identity(
     *,
     model_id: str,
     model_sha256: str,
+    annotation_states: frozenset[str],
 ) -> dict[str, object]:
     payload = json.dumps(
         [
@@ -613,7 +652,8 @@ def _checkpoint_identity(
         separators=(",", ":"),
     ).encode("utf-8")
     return {
-        "checkpoint_version": "tarel.retrieval-checkpoint.v0.1",
+        "checkpoint_version": "tarel.retrieval-checkpoint.v0.2",
+        "annotation_states": sorted(annotation_states),
         "document_count": len(documents),
         "documents_sha256": hashlib.sha256(payload).hexdigest(),
         "graph": graph.name,

@@ -266,6 +266,16 @@ class LogicalContextHintTests(TestCase):
         self.assertEqual(packet.stable_dict()["logical_hints"]["items"], [])
         self.assertNotIn("reference.regions", packet.canonical_json())
 
+        countries = next(node.id for node in graph.nodes if node.label == "sales.countries")
+        regions = next(node.id for node in graph.nodes if node.label == "reference.regions")
+        scoped = self.sdk.context.graph(
+            "commerce", "countries", namespace="sales",
+            scope_object_ids=(countries, regions), seed_limit=1, max_objects=1,
+            logical_hints="include_candidates",
+        )
+        self.assertEqual(scoped.stable_dict()["logical_hints"]["items"], [])
+        self.assertNotIn("reference.regions", scoped.canonical_json())
+
     def test_namespace_filter_is_case_insensitive_for_mapping_hints(self) -> None:
         self._save_hints()
         lower = self.sdk.context.graph(
@@ -279,6 +289,20 @@ class LogicalContextHintTests(TestCase):
         self.assertEqual(lower.objects, upper.objects)
         self.assertEqual(lower.stable_dict()["logical_hints"], upper.stable_dict()["logical_hints"])
         self.assertEqual(len(upper.stable_dict()["logical_hints"]["items"]), 1)
+
+    def test_exact_graph_scope_validates_hints_against_the_complete_graph(self) -> None:
+        self._save_hints()
+        orders = next(node.id for node in self.graph.nodes if node.label == "sales.orders")
+
+        packet = self.sdk.context.graph(
+            "commerce", "orders", scope_object_ids=(orders,), seed_limit=1, max_objects=1,
+            logical_hints="include_candidates",
+        )
+
+        hints = packet.stable_dict()["logical_hints"]["items"]
+        self.assertEqual([item["kind"] for item in hints], ["derived_relation"])
+        self.assertEqual(hints[0]["source_object_id"], orders)
+        self.assertEqual(packet.scope.objects, (orders,))
 
     def test_workspace_validates_original_graphs_and_scopes_every_endpoint_id(self) -> None:
         second = replace(self.graph, name="commerce-second")

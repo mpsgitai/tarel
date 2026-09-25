@@ -11,6 +11,7 @@ from tarel.context_hints import LogicalContextHints
 
 DEFAULT_MAX_CONTEXT_CHARACTERS = 24_000
 CONTEXT_CONTRACT_VERSION = "tarel.context.v0.2"
+SCOPED_CONTEXT_CONTRACT_VERSION = "tarel.context.v0.3"
 
 
 def canonical_json(value: object) -> str:
@@ -40,6 +41,9 @@ class ContextScope:
     areas: tuple[str, ...] = ()
     schemas: tuple[str, ...] = ()
     zones: tuple[str, ...] = ()
+    focuses: tuple[str, ...] = ()
+    objects: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"mode": self.mode, "namespace": self.namespace}
@@ -55,6 +59,12 @@ class ContextScope:
                     "zones": list(self.zones),
                 }
             )
+        if self.focuses:
+            payload["focuses"] = list(self.focuses)
+        if self.objects or self.mode.startswith("graph_scope"):
+            payload["objects"] = list(self.objects)
+        if self.warnings:
+            payload["warnings"] = list(self.warnings)
         return payload
 
 

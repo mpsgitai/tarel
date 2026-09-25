@@ -156,7 +156,11 @@ def _scope(
         namespace = scope.get("namespace")
         if namespace is not None and not isinstance(namespace, str):
             invalid("Base namespace is invalid.")
-        return {name: (revision, None, namespace)}, (
+        objects = scope.get("objects", [])
+        if not isinstance(objects, list) or any(not isinstance(item, str) for item in objects):
+            invalid("Base graph object scope is invalid.")
+        allowed = frozenset(objects) if "objects" in scope else None
+        return {name: (revision, allowed, namespace)}, (
             (name, header.read_stats.mode, header.read_stats.full_document_read),
         )
     # Workspace scope includes zones/relationships; revalidate using its existing authoritative
@@ -165,7 +169,7 @@ def _scope(
     from tarel.workspaces.projection import project_workspace_scope
 
     selections = {}
-    for key in ("systems", "graphs", "areas", "schemas", "zones"):
+    for key in ("systems", "graphs", "areas", "schemas", "zones", "focuses", "objects"):
         values = scope.get(key, [])
         if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
             invalid("Base workspace selection is invalid.")
