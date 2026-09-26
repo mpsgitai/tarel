@@ -1577,6 +1577,18 @@ def diff_context_packets_use_case(left: Path, right: Path) -> ContextPacketDiff:
     return diff_context_packets(load_context_packet(left), load_context_packet(right))
 
 
+def context_packet_diff_views_use_case(
+    left: Path, right: Path,
+) -> tuple[ContextPacketDiff, ContextDelta]:
+    """Load two packet files once and return their technical and guidance views."""
+    left_packet = load_context_packet(left)
+    right_packet = load_context_packet(right)
+    return (
+        diff_context_packets(left_packet, right_packet),
+        context_delta(left_packet, right_packet),
+    )
+
+
 def describe_context_use_case(
     packet: ContextResult | ContextPacketSnapshot | dict[str, object],
 ) -> ContextBrief:

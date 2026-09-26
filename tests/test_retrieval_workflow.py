@@ -176,7 +176,7 @@ class RetrievalWorkflowTests(TestCase):
             "sales-slice: focus traversal was truncated",
         )
         self.assertEqual(scope.graph_names, (graph.name,))
-        self.assertNotEqual(scope.scope_hash, complete_scope.scope_hash)
+        self.assertEqual(scope.scope_hash, complete_scope.scope_hash)
         self.assertEqual(scope.warnings, expected_warnings)
         self.assertEqual(search.warnings, expected_warnings)
         self.assertEqual(context.scope.warnings, expected_warnings)

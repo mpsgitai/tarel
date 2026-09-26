@@ -173,6 +173,9 @@ class ContextDelta:
     current_packet_hash: str
     scope_changed: bool
     query_changed: bool
+    retrieval_changed: bool
+    selection_changed: bool
+    graph_revision_changed: bool
     logical_hints_changed: bool | None
     stable_prefix_reusable: bool
     objects_added: tuple[str, ...]
@@ -206,6 +209,8 @@ class ContextDelta:
             },
             "request": {
                 "query_changed": self.query_changed,
+                "retrieval_changed": self.retrieval_changed,
+                "selection_changed": self.selection_changed,
                 "scope_changed": self.scope_changed,
             },
             "objects": {
@@ -224,6 +229,7 @@ class ContextDelta:
                 "changed": list(self.joins_changed),
                 "removed": list(self.joins_removed),
             },
+            "graph_revision_changed": self.graph_revision_changed,
             "size": {
                 "character_delta": self.character_delta,
                 "estimated_token_delta": self.estimated_token_delta,
@@ -242,10 +248,16 @@ class ContextDelta:
         added = _change_names(self.objects_added, self.fields_added, self.joins_added)
         removed = _change_names(self.objects_removed, self.fields_removed, self.joins_removed)
         changed = _change_names(self.objects_changed, self.fields_changed, self.joins_changed)
+        signals: list[str] = [] if changed == "none" else [changed]
+        if self.graph_revision_changed:
+            signals.append("graph revision")
         if self.logical_hints_changed:
-            changed = (
-                f"{changed} · logical hints" if changed != "none" else "logical hints"
-            )
+            signals.append("logical hints")
+        if self.retrieval_changed:
+            signals.append("retrieval")
+        if self.selection_changed:
+            signals.append("selection evidence")
+        changed = " · ".join(signals) or "none"
         gaps = _delta_gap_summary(self)
         cache = "stable prefix reusable" if self.stable_prefix_reusable else "stable prefix changed"
         sign = "+" if self.estimated_token_delta > 0 else ""
@@ -326,6 +338,15 @@ def context_delta(
             != _scope_boundary(_mapping(right.stable.get("scope"), "stable.scope"))
         ),
         query_changed=left.dynamic.get("query") != right.dynamic.get("query"),
+        retrieval_changed=(
+            left.dynamic.get("retrieval") != right.dynamic.get("retrieval")
+        ),
+        selection_changed=(
+            left.dynamic.get("selection") != right.dynamic.get("selection")
+        ),
+        graph_revision_changed=(
+            _graph_revision(left.stable) != _graph_revision(right.stable)
+        ),
         logical_hints_changed=(
             left.stable.get("logical_hints") != right.stable.get("logical_hints")
             if "logical_hints" in left.stable or "logical_hints" in right.stable
@@ -541,7 +562,7 @@ def _scope_label(
     parts = [root]
     selectors = (
         ("systems", "systems"), ("areas", "areas"), ("schemas", "schemas"),
-        ("zones", "zones"), ("focuses", "focuses"),
+        ("zones", "zones"), ("focuses", "focuses"), ("objects", "objects"),
     )
     if isinstance(workspace, str) and workspace:
         selectors = (("graphs", "graphs"),) + selectors
@@ -619,8 +640,21 @@ def _changed_ids(
 
 
 def _scope_boundary(scope: dict[str, object]) -> dict[str, object]:
-    """Return the selection boundary without diagnostic warning text."""
-    return {key: value for key, value in scope.items() if key != "warnings"}
+    """Return explicit scope selectors without diagnostics or derived identity."""
+    return {
+        key: value for key, value in scope.items()
+        if key not in {"scope_hash", "warnings"}
+    }
+
+
+def _graph_revision(stable: dict[str, object]) -> str:
+    graph = _mapping(stable.get("graph"), "stable.graph")
+    revision = graph.get("revision")
+    if not isinstance(revision, str) or not revision:
+        raise ContextFailure(
+            "invalid_context_packet", "Context packet graph revision is invalid."
+        )
+    return revision
 
 
 def _entity_names(
@@ -640,10 +674,20 @@ def _field_names(
 def _join_names(
     joins: dict[str, dict[str, object]], identifiers: set[str]
 ) -> tuple[str, ...]:
-    return tuple(sorted(
-        f"{joins[item].get('from_object') or '?'} → {joins[item].get('to_object') or '?'}"
-        for item in identifiers
-    ))
+    names: list[str] = []
+    for identifier in identifiers:
+        join = joins[identifier]
+        from_fields = _strings(
+            join.get("from_fields"), f"stable.joins[{identifier}].from_fields"
+        )
+        to_fields = _strings(
+            join.get("to_fields"), f"stable.joins[{identifier}].to_fields"
+        )
+        names.append(
+            f"{join.get('from_object') or '?'}({', '.join(from_fields)}) → "
+            f"{join.get('to_object') or '?'}({', '.join(to_fields)})"
+        )
+    return tuple(sorted(names))
 
 
 def _entity_list(section: dict[str, object], field: str) -> list[dict[str, object]]:

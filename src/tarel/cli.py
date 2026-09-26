@@ -25,13 +25,13 @@ from tarel.application import (
     check_connector_use_case,
     check_provider_use_case,
     check_relationship_use_case,
-    compare_context_packets_use_case,
     compile_context_prefix_use_case,
     compile_context_use_case,
     compile_workspace_context_prefix_use_case,
     compile_workspace_context_use_case,
     configure_provider_use_case,
     context_packet_brief_use_case,
+    context_packet_diff_views_use_case,
     context_packet_impact_use_case,
     create_demo_use_case,
     create_workspace_use_case,
@@ -42,7 +42,6 @@ from tarel.application import (
     define_workspace_system_use_case,
     define_workspace_zone_use_case,
     describe_context_use_case,
-    diff_context_packets_use_case,
     discover_catalog_use_case,
     discover_relationships_use_case,
     download_embedding_model_use_case,
@@ -2094,8 +2093,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "context" and args.context_command == "diff":
-            result = diff_context_packets_use_case(args.left, args.right)
-            guidance = compare_context_packets_use_case(args.left, args.right)
+            result, guidance = context_packet_diff_views_use_case(args.left, args.right)
             _render_context_diff(
                 result.to_dict(), guidance=guidance, output_format=args.format,
             )

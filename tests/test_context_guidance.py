@@ -21,7 +21,7 @@ from tarel.context import (
 )
 from tarel.context_guidance import context_brief, context_delta
 from tarel.context_output import ContextScope, canonical_hash
-from tarel.context_packets import context_packet_from_dict
+from tarel.context_packets import context_packet_from_dict, load_context_packet
 from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.store import FileGraphStore
 from tarel.sdk import Tarel
@@ -64,6 +64,7 @@ class ContextGuidanceTests(TestCase):
                 workspace="enterprise",
                 systems=("adventure", "worldwide"),
                 graphs=("context_demo",),
+                objects=("context_demo:sales.FactSales",),
                 warnings=("Focus traversal reached its boundary.",),
             ),
         )
@@ -73,6 +74,7 @@ class ContextGuidanceTests(TestCase):
         self.assertIn("enterprise", brief.scope)
         self.assertIn("graphs=context_demo", brief.scope)
         self.assertIn("systems=adventure, worldwide", brief.scope)
+        self.assertIn("objects=context_demo:sales.FactSales", brief.scope)
         warning = next(gap for gap in brief.gaps if gap.code == "scope_warnings")
         self.assertEqual(warning.category, "scope")
         self.assertEqual(warning.references, ("Focus traversal reached its boundary.",))
@@ -125,6 +127,30 @@ class ContextGuidanceTests(TestCase):
         self.assertEqual(change.before, change.after)
         self.assertTrue(change.evidence_changed)
 
+    def test_parallel_join_deltas_include_their_field_pairs(self) -> None:
+        packet = compile_context(
+            _context_graph(include_geography_fk=True),
+            "sales city",
+            seed_limit=1,
+            max_objects=3,
+        )
+        previous = packet.to_dict()
+        current = deepcopy(previous)
+        join = current["stable"]["joins"][0]
+        previous_from_field = join["from_fields"][0]
+        join["id"] = f"{join['id']}::parallel"
+        join["from_fields"] = ["SalesAmount"]
+        join["to_fields"] = ["CustomerName"]
+        _refresh_identity(current)
+
+        delta = context_delta(previous, current)
+
+        self.assertEqual(len(delta.joins_added), 1)
+        self.assertEqual(len(delta.joins_removed), 1)
+        self.assertNotEqual(delta.joins_added, delta.joins_removed)
+        self.assertIn("(SalesAmount)", delta.joins_added[0])
+        self.assertIn(f"({previous_from_field})", delta.joins_removed[0])
+
     def test_delta_reports_added_fields_gap_improvement_and_cache_change(self) -> None:
         graph = _context_graph()
         previous = compile_context(
@@ -149,11 +175,21 @@ class ContextGuidanceTests(TestCase):
         packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
         previous = replace(
             packet,
-            scope=ContextScope(mode="retrieval", warnings=("Old boundary warning.",)),
+            scope=ContextScope(
+                mode="retrieval",
+                workspace="enterprise",
+                scope_hash="a" * 64,
+                warnings=("Old boundary warning.",),
+            ),
         )
         current = replace(
             packet,
-            scope=ContextScope(mode="retrieval", warnings=("New boundary warning.",)),
+            scope=ContextScope(
+                mode="retrieval",
+                workspace="enterprise",
+                scope_hash="b" * 64,
+                warnings=("New boundary warning.",),
+            ),
         )
 
         delta = context_delta(previous, current)
@@ -202,6 +238,36 @@ class ContextGuidanceTests(TestCase):
         self.assertEqual((change.before, change.after), (1, 1))
         self.assertTrue(change.evidence_changed)
         self.assertEqual(current_gap.references, ("character_budget: 1",))
+
+    def test_delta_reports_retrieval_and_selection_evidence_changes(self) -> None:
+        packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
+        previous = packet.to_dict()
+        current = deepcopy(previous)
+        current["dynamic"]["retrieval"]["mode"] = "hybrid"
+        current["dynamic"]["selection"][0]["search_score"] += 1
+        _refresh_identity(current)
+
+        delta = context_delta(previous, current)
+
+        self.assertTrue(delta.retrieval_changed)
+        self.assertTrue(delta.selection_changed)
+        self.assertFalse(delta.query_changed)
+        self.assertTrue(delta.stable_prefix_reusable)
+        self.assertIn("Changed: retrieval · selection evidence", delta.text())
+
+    def test_delta_reports_graph_revision_changes(self) -> None:
+        packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
+        previous = packet.to_dict()
+        current = deepcopy(previous)
+        current["stable"]["graph"]["revision"] = "f" * 64
+        _refresh_identity(current)
+
+        delta = context_delta(previous, current)
+
+        self.assertTrue(delta.graph_revision_changed)
+        self.assertTrue(delta.to_dict()["graph_revision_changed"])
+        self.assertEqual(delta.objects_changed, ())
+        self.assertIn("Changed: graph revision", delta.text())
 
     def test_snapshot_hashes_are_revalidated_before_use(self) -> None:
         packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
@@ -311,7 +377,13 @@ class ContextGuidanceTests(TestCase):
             with redirect_stdout(text_output):
                 brief_exit = main(["context", "brief", str(left)])
             json_output = StringIO()
-            with redirect_stdout(json_output):
+            with (
+                patch(
+                    "tarel.application.load_context_packet",
+                    wraps=load_context_packet,
+                ) as packet_loader,
+                redirect_stdout(json_output),
+            ):
                 diff_exit = main([
                     "context", "diff", str(left), str(right), "--format", "json",
                 ])
@@ -320,6 +392,7 @@ class ContextGuidanceTests(TestCase):
         self.assertIn("Area: context_demo", text_output.getvalue())
         self.assertIn("Next:", text_output.getvalue())
         self.assertEqual(diff_exit, 0)
+        self.assertEqual(packet_loader.call_count, 2)
         self.assertTrue(json.loads(json_output.getvalue())["guidance"]["identity"]["identical"])
 
     def test_context_build_can_return_only_the_compact_brief(self) -> None:

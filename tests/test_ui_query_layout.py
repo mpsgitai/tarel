@@ -139,7 +139,9 @@ assert.equal(searchHitObject({id:'object_family:sales',source_graph:'south',
         self._script(r"""
 const delta = {
   identity:{identical:false,stable_prefix_reusable:false},
+  graph_revision_changed:true,
   logical_hints_changed:true,
+  request:{retrieval_changed:true,selection_changed:true},
   objects:{added:['<unsafe object>'],removed:[],changed:[],preserved:2},
   fields:{added:['Sales.ProductCategory'],removed:[],changed:['Sales.Amount']},
   gaps:{added:[],resolved:[],changed:[
@@ -155,7 +157,9 @@ assert.ok(!html.includes('<unsafe object>'));
 assert.ok(html.includes('Kept:</strong> 2 objects'));
 assert.ok(html.includes('missing_field_semantics 4→2'));
 assert.ok(html.includes('scope_warnings evidence changed'));
-assert.ok(html.includes('1 field · logical hints'));
+assert.ok(html.includes(
+  '1 field · graph revision · logical hints · retrieval · selection evidence'
+));
 """)
 
     def _script(self, assertions: str) -> None:
