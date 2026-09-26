@@ -90,6 +90,7 @@ class UIPresentationTests(TestCase):
         self.assertEqual(field_annotation["provenance"]["source"], "agent")
         self.assertEqual(field_annotation["synonyms"], [])
         self.assertEqual(field_annotation["warnings"], [])
+        self.assertEqual(fact["fields"][0]["reference"], "mart.FactSales.DateKey")
         self.assertEqual(len(payload["edges"]), 1)
 
     def test_browser_assets_render_expandable_complete_field_annotations(self) -> None:
@@ -112,10 +113,14 @@ class UIPresentationTests(TestCase):
             "Probe coverage",
             "Global mapping coverage",
             "Candidate evidence coverage",
+            "field-quick-annotation",
+            "Evidence &amp; technical detail",
+            "Field annotation added as a usable draft.",
         ):
             self.assertIn(marker, application)
         self.assertIn(".field-card", styles)
         self.assertIn(".field-evidence", styles)
+        self.assertIn(".field-advanced", styles)
 
     def test_cli_reports_an_invalid_ui_port_without_a_traceback(self) -> None:
         errors = StringIO()
@@ -262,6 +267,43 @@ class UIBackendTests(TestCase):
                 },
             )
         self.assertEqual(raised.exception.status, 409)
+
+    def test_edit_mode_can_add_one_missing_field_annotation(self) -> None:
+        graph = self.graph_store.load("sales")
+        graph = replace(
+            graph,
+            nodes=tuple(
+                replace(node, annotation=None)
+                if node.label == "SalesAmount"
+                else node
+                for node in graph.nodes
+            ),
+        )
+        self.graph_store.save(graph)
+        before = self.backend.bootstrap()
+
+        result = self.backend.mutate(
+            "/api/annotation/edit",
+            {
+                "patch": {
+                    "description": "Net sales in the reporting currency.",
+                    "synonyms": ["revenue"],
+                    "tags": ["metric", "financial"],
+                },
+                "reason": "Added from the compact field editor.",
+                "reference": "mart.FactSales.SalesAmount",
+                "revision": before["revision"],
+            },
+        )
+
+        self.assertEqual(result["record"]["annotation"]["state"], "draft")
+        self.assertEqual(
+            result["record"]["annotation"]["tags"],
+            ["metric", "financial"],
+        )
+        stored = self.graph_store.load("sales")
+        field = next(node for node in stored.nodes if node.label == "SalesAmount")
+        self.assertEqual(field.annotation.description, "Net sales in the reporting currency.")
 
     def test_hundreds_of_focuses_can_be_listed_but_only_selected_paths_are_sent(self) -> None:
         graph = self.graph_store.load("sales")

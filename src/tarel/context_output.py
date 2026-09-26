@@ -79,9 +79,10 @@ class ContextField:
     semantic_type: str | None
     annotation_state: str | None
     reasons: tuple[str, ...]
+    tags: tuple[str, ...] = ()
 
     def stable_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "annotation_state": self.annotation_state,
             "data_type": self.data_type,
             "description": self.description,
@@ -91,6 +92,9 @@ class ContextField:
             "role": self.role,
             "semantic_type": self.semantic_type,
         }
+        if self.tags:
+            payload["tags"] = list(self.tags)
+        return payload
 
     def selection_dict(self) -> dict[str, object]:
         return {"id": self.id, "reasons": list(self.reasons)}
@@ -112,9 +116,10 @@ class ContextObject:
     annotation_state: str | None
     fields: tuple[ContextField, ...]
     omitted_fields: int
+    tags: tuple[str, ...] = ()
 
     def stable_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "annotation_state": self.annotation_state,
             "description": self.description,
             "fields": [
@@ -128,6 +133,9 @@ class ContextObject:
             "type": self.type,
             "warnings": list(self.warnings),
         }
+        if self.tags:
+            payload["tags"] = list(self.tags)
+        return payload
 
     def selection_dict(self) -> dict[str, object]:
         return {

@@ -17,7 +17,7 @@ from tarel.graph.contracts import (
 
 _REVIEW_KEY = "annotation_review"
 _EDITABLE_KEYS = frozenset(
-    {"description", "grain", "role", "semantic_type", "synonyms", "warnings"}
+    {"description", "grain", "role", "semantic_type", "synonyms", "tags", "warnings"}
 )
 
 
@@ -85,7 +85,7 @@ def edit_annotation(
     reason: str,
 ) -> tuple[GraphDocument, AnnotationReviewRecord]:
     node, resolved_reference = resolve_annotation_target(graph, reference)
-    annotation = _require_annotation(node)
+    annotation = node.annotation
     clean_reason = _review_reason(reason)
     unknown = set(patch) - _EDITABLE_KEYS
     if unknown:
@@ -105,24 +105,48 @@ def edit_annotation(
             "invalid_annotation_patch",
             "semantic_type can only be edited on a field annotation.",
         )
+    if annotation is None and "description" not in patch:
+        raise AnnotationFailure(
+            "invalid_annotation_patch",
+            "Creating an annotation requires a description.",
+        )
+
+    base_annotation = annotation or GraphAnnotation(
+        description=_required_patch_string(patch["description"], "description"),
+        provenance=AnnotationProvenance(source="human"),
+    )
 
     description = (
         _required_patch_string(patch["description"], "description")
         if "description" in patch
-        else annotation.description
+        else base_annotation.description
     )
-    role = _optional_patch_string(patch["role"], "role") if "role" in patch else annotation.role
+    role = (
+        _optional_patch_string(patch["role"], "role")
+        if "role" in patch
+        else base_annotation.role
+    )
     synonyms = (
         _patch_strings(patch["synonyms"], "synonyms")
         if "synonyms" in patch
-        else annotation.synonyms
+        else base_annotation.synonyms
+    )
+    tags = (
+        _patch_strings(patch["tags"], "tags")
+        if "tags" in patch
+        else base_annotation.tags
     )
     warnings = (
         _patch_strings(patch["warnings"], "warnings")
         if "warnings" in patch
-        else annotation.warnings
+        else base_annotation.warnings
     )
-    metadata = _metadata_with_review(node, action="edit", reason=clean_reason)
+    metadata = _metadata_with_review(
+        node,
+        action="edit",
+        reason=clean_reason,
+        original_annotation=base_annotation,
+    )
     if "grain" in patch:
         metadata["grain"] = _optional_patch_string(patch["grain"], "grain")
     if "semantic_type" in patch:
@@ -133,10 +157,11 @@ def edit_annotation(
         node,
         metadata=metadata,
         annotation=replace(
-            annotation,
+            base_annotation,
             description=description,
             role=role,
             synonyms=synonyms,
+            tags=tags,
             warnings=warnings,
             confidence=None,
             confidence_reason=None,
@@ -241,12 +266,18 @@ def has_human_review(node: GraphNode) -> bool:
     return _REVIEW_KEY in node.metadata
 
 
-def _metadata_with_review(node: GraphNode, *, action: str, reason: str) -> dict[str, object]:
+def _metadata_with_review(
+    node: GraphNode,
+    *,
+    action: str,
+    reason: str,
+    original_annotation: GraphAnnotation | None = None,
+) -> dict[str, object]:
     metadata = dict(node.metadata)
     metadata.pop("change_review", None)
     existing = _review_metadata(node)
     if existing is None:
-        annotation = _require_annotation(node)
+        annotation = original_annotation or _require_annotation(node)
         original = {
             "annotation": annotation.to_dict(),
             "grain": _optional_metadata_string(node, "grain"),

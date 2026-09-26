@@ -72,9 +72,10 @@ class GraphAnnotation:
         default_factory=lambda: AnnotationProvenance(source="agent")
     )
     state: str = "draft"
+    tags: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "confidence": self.confidence,
             "confidence_reason": self.confidence_reason,
             "description": self.description,
@@ -85,6 +86,9 @@ class GraphAnnotation:
             "synonyms": list(self.synonyms),
             "warnings": list(self.warnings),
         }
+        if self.tags:
+            payload["tags"] = list(self.tags)
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> GraphAnnotation:
@@ -96,6 +100,7 @@ class GraphAnnotation:
             description=_string(data, "description"),
             role=_optional_string(data.get("role")),
             synonyms=_string_tuple(data.get("synonyms", [])),
+            tags=_string_tuple(data.get("tags", [])),
             warnings=_string_tuple(data.get("warnings", [])),
             confidence=_optional_confidence(data.get("confidence")),
             confidence_reason=_optional_string(data.get("confidence_reason")),

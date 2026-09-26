@@ -472,6 +472,7 @@ def _object_sources(
         ("object_name", str(node.metadata.get("name") or node.label), 12),
         ("object_description", _annotation_value(annotation, "description"), 8),
         ("object_synonym", " ".join(annotation.synonyms) if annotation else "", 10),
+        ("object_tag", " ".join(annotation.tags) if annotation else "", 7),
         ("object_role", (annotation.role or "") if annotation else "", 6),
         ("technical_description", str(node.metadata.get("technical_description") or ""), 5),
         (
@@ -493,6 +494,7 @@ def _field_sources(
     return (
         ("name", field.label, 9),
         ("synonym", " ".join(annotation.synonyms) if annotation else "", 8),
+        ("tag", " ".join(annotation.tags) if annotation else "", 6),
         ("description", _annotation_value(annotation, "description"), 7),
         ("role", (annotation.role or "") if annotation else "", 5),
         (

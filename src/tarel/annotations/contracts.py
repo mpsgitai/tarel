@@ -25,20 +25,27 @@ class AnnotationTask:
     request: StructuredRequest
     context_documents: tuple[KnowledgeReference, ...] = ()
     protected_values: tuple[str, ...] = field(default=(), repr=False)
+    mode: str = "full"
+    include_object: bool = True
+    field_names: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
             "graph_name": self.graph_name,
             "id": self.id,
             "messages": [message.to_dict() for message in self.request.messages],
+            "mode": self.mode,
             "response_schema": self.request.schema,
             "schema_name": self.request.schema_name,
             "context_documents": [item.to_dict() for item in self.context_documents],
             "target_id": self.target_id,
             "target_label": self.target_label,
+            "include_object": self.include_object,
+            "field_names": list(self.field_names),
             "submission_template": {
                 "annotation": "<response matching response_schema>",
                 "context_documents": [item.to_dict() for item in self.context_documents],
+                "mode": self.mode,
                 "target_id": self.target_id,
                 "task_id": self.id,
             },
@@ -56,6 +63,7 @@ class FieldAnnotationProposal:
     confidence: float
     confidence_reason: str
     evidence: tuple[AnnotationEvidence, ...]
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +77,7 @@ class ObjectAnnotationProposal:
     confidence_reason: str
     evidence: tuple[AnnotationEvidence, ...]
     fields: tuple[FieldAnnotationProposal, ...]
+    tags: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ObjectAnnotationProposal:
@@ -80,6 +89,7 @@ class ObjectAnnotationProposal:
             role=_optional_string(data.get("role")),
             grain=_optional_string(data.get("grain")),
             synonyms=_strings(data.get("synonyms"), "synonyms"),
+            tags=_strings(data.get("tags", []), "tags"),
             warnings=_strings(data.get("warnings"), "warnings"),
             confidence=_confidence(data.get("confidence")),
             confidence_reason=_required_string(data, "confidence_reason"),
@@ -94,6 +104,7 @@ class AnnotationProposalEnvelope:
     target_id: str
     annotation: ObjectAnnotationProposal
     context_documents: tuple[KnowledgeReference, ...] = ()
+    mode: str = "full"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AnnotationProposalEnvelope:
@@ -113,10 +124,14 @@ class AnnotationProposalEnvelope:
                 "invalid_proposal",
                 "Proposal contains an invalid knowledge reference.",
             ) from exc
+        mode = data.get("mode", "full")
+        if not isinstance(mode, str) or mode not in {"full", "missing"}:
+            raise AnnotationFailure("invalid_proposal", "Proposal mode must be full or missing.")
         return cls(
             task_id=_required_string(data, "task_id"),
             target_id=_required_string(data, "target_id"),
             annotation=ObjectAnnotationProposal.from_dict(annotation),
+            mode=mode,
             context_documents=references,
         )
 
@@ -140,6 +155,7 @@ def _field(value: Any) -> FieldAnnotationProposal:
         role=_optional_string(value.get("role")),
         semantic_type=_optional_string(value.get("semantic_type")),
         synonyms=_strings(value.get("synonyms"), "field synonyms"),
+        tags=_strings(value.get("tags", []), "field tags"),
         warnings=_strings(value.get("warnings"), "field warnings"),
         confidence=_confidence(value.get("confidence")),
         confidence_reason=_required_string(value, "confidence_reason"),

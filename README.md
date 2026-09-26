@@ -28,13 +28,19 @@ Runs locally. No mandatory third-party runtime dependencies.
 TAREL helps your harness explore schemas, objects, and tables, progressively gathering metadata
 and annotations into a persistent **TAREL Graph**.
 
-**Self-annotation** turns available evidence into proposed descriptions and relationships. Review
-and refine them in the browser, with provenance preserved and proposals clearly distinguished
-from accepted knowledge.
+**Self-annotation** turns available evidence into usable descriptions, synonyms, tags, and
+relationship proposals. Drafts can immediately help an agent; optional review and governance stay
+available when a project needs them. Rerunning the default batch fills missing table or field
+annotations without replacing existing work.
+
+TAREL treats semantics as metadata over the source—not as a second calculation engine. SQL views,
+warehouse transformations, measures, calendars, and currency logic remain authoritative where they
+already live. TAREL describes and connects those assets; it does not duplicate their expressions,
+cache query results, or require a governed semantic model before an agent can start.
 
 ![TAREL field annotation inspector with semantic descriptions, evidence, and review state](https://raw.githubusercontent.com/mpsgitai/tarel/master/docs/assets/tarel-field-annotation-inspector.png)
 
-*Inspect field meanings and supporting evidence, then review, edit, approve, defer, or reject proposals.*
+*Descriptions stay prominent; evidence, provenance, and optional review unfold only when needed.*
 
 ## Explore through Space and Lineage
 

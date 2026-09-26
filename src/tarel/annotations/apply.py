@@ -24,7 +24,27 @@ def apply_annotation_proposal(
     model: str | None = None,
     context_documents: tuple[KnowledgeReference, ...] | None = None,
 ) -> GraphDocument:
-    task = annotation_task_for_target(graph, envelope.target_id)
+    try:
+        task = annotation_task_for_target(graph, envelope.target_id, mode=envelope.mode)
+    except AnnotationFailure as exc:
+        if envelope.mode == "missing" and exc.code == "annotation_complete":
+            raise AnnotationFailure(
+                "stale_proposal",
+                "Annotation proposal does not match the current graph object.",
+            ) from exc
+        raise
+    if envelope.task_id != task.id and envelope.mode == "full":
+        try:
+            missing_task = annotation_task_for_target(
+                graph,
+                envelope.target_id,
+                mode="missing",
+            )
+        except AnnotationFailure:
+            pass
+        else:
+            if envelope.task_id == missing_task.id:
+                task = missing_task
     if envelope.task_id != task.id:
         raise AnnotationFailure(
             "stale_proposal",
@@ -37,23 +57,26 @@ def apply_annotation_proposal(
     _validate_knowledge_evidence(proposal, supplied_context)
     context_payload = [item.to_dict() for item in supplied_context]
     field_proposals = {item.name: item for item in proposal.fields}
-    object_fields = {
-        node.label
-        for node in graph.nodes
-        if node.type == "field" and node.metadata.get("object_id") == envelope.target_id
-    }
-    if set(field_proposals) != object_fields:
+    requested_fields = set(task.field_names)
+    if (
+        len(field_proposals) != len(proposal.fields)
+        or set(field_proposals) != requested_fields
+    ):
         raise AnnotationFailure(
             "invalid_proposal",
-            "Proposal must annotate every supplied field exactly once.",
+            "Proposal must annotate every requested field exactly once.",
         )
 
     reviewed_nodes = [
         node
         for node in graph.nodes
         if (
-            node.id == envelope.target_id
-            or (node.type == "field" and node.metadata.get("object_id") == envelope.target_id)
+            (task.include_object and node.id == envelope.target_id)
+            or (
+                node.type == "field"
+                and node.label in requested_fields
+                and node.metadata.get("object_id") == envelope.target_id
+            )
         )
         and (has_human_review(node) or (node.annotation and node.annotation.state == "validated"))
     ]
@@ -67,7 +90,7 @@ def apply_annotation_proposal(
     provenance = AnnotationProvenance(source=source, provider=provider, model=model)
     updated_nodes: list[GraphNode] = []
     for node in graph.nodes:
-        if node.id == envelope.target_id:
+        if node.id == envelope.target_id and task.include_object:
             metadata = dict(node.metadata)
             metadata["grain"] = proposal.grain
             metadata["annotation_context_documents"] = context_payload
@@ -79,6 +102,7 @@ def apply_annotation_proposal(
                         description=proposal.description,
                         role=proposal.role,
                         synonyms=proposal.synonyms,
+                        tags=proposal.tags,
                         warnings=proposal.warnings,
                         confidence=proposal.confidence,
                         confidence_reason=proposal.confidence_reason,
@@ -89,8 +113,11 @@ def apply_annotation_proposal(
             )
             continue
         field_proposal = field_proposals.get(node.label)
-        if node.type == "field" and node.metadata.get("object_id") == envelope.target_id:
-            assert field_proposal is not None
+        if (
+            node.type == "field"
+            and node.metadata.get("object_id") == envelope.target_id
+            and field_proposal is not None
+        ):
             metadata = dict(node.metadata)
             metadata["semantic_type"] = field_proposal.semantic_type
             metadata["annotation_context_documents"] = context_payload
@@ -102,6 +129,7 @@ def apply_annotation_proposal(
                         description=field_proposal.description,
                         role=field_proposal.role,
                         synonyms=field_proposal.synonyms,
+                        tags=field_proposal.tags,
                         warnings=field_proposal.warnings,
                         confidence=field_proposal.confidence,
                         confidence_reason=field_proposal.confidence_reason,

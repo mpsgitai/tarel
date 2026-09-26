@@ -860,6 +860,7 @@ def _context_object(
             ),
             annotation_state=field.annotation.state if field.annotation else None,
             reasons=tuple(reasons),
+            tags=annotation.tags if annotation else (),
         )
         rank = (
             0 if search_field else 1,
@@ -900,6 +901,7 @@ def _context_object(
         annotation_state=node.annotation.state if node.annotation else None,
         fields=selected_fields,
         omitted_fields=max(0, len(fields) - len(selected_fields)),
+        tags=annotation.tags if annotation else (),
     )
 
 

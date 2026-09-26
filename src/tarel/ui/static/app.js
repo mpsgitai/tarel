@@ -630,7 +630,10 @@ function renderInspector() {
   const relationships = connectedEdges.filter(edge => !["derives", "entity_resolution_candidate", "reference_mapping"].includes(edge.type));
   $("#inspector").innerHTML = `
     ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label)}
-    <section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation?.description || "No TAREL annotation yet.")}</p><small class="semantic-origin">Editable in Review · stored on the TAREL graph</small></section>
+    <section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation?.description || "No TAREL annotation yet.")}</p>
+      ${annotation?.synonyms?.length ? fieldDetail("Synonyms", annotation.synonyms.join(" · ")) : ""}
+      ${annotation?.tags?.length ? fieldDetail("Tags", annotation.tags.join(" · ")) : ""}
+      <small class="semantic-origin">Optional metadata on the existing object · autonomous drafts are usable</small></section>
     <section class="detail-section"><div class="fact-grid">
       ${fact("State", stateLabel(annotation?.state || "missing"))}${fact("Role", annotation?.role || "—")}${fact("Grain", item.grain || "—")}${fact("Primary key", item.primary_key.join(", ") || "—")}
     </div></section>
@@ -638,7 +641,35 @@ function renderInspector() {
     <section class="detail-section"><h3>Fields · ${item.fields.length}</h3><div class="field-list">${item.fields.map(fieldAnnotationCard).join("")}</div></section>
     ${relationshipList(relationships)}`;
   $$('[data-related-object]').forEach(button => button.addEventListener("click", () => selectObject(button.dataset.relatedObject)));
+  $$(".field-quick-annotation").forEach(form => form.addEventListener("submit", saveQuickFieldAnnotation));
   mountOptionalInformation(item);
+}
+
+async function saveQuickFieldAnnotation(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!form.reportValidity()) return;
+  const values = new FormData(form);
+  const button = form.querySelector("button");
+  button.disabled = true;
+  try {
+    await api("/api/annotation/edit", {
+      graph: form.dataset.graph,
+      reference: form.dataset.reference,
+      patch: {
+        description: values.get("description"),
+        synonyms: lines(values.get("synonyms")),
+        tags: lines(values.get("tags")),
+      },
+      reason: "Description added in the local TAREL UI.",
+      revision: state.data.revisions[form.dataset.graph],
+    });
+    toast("Field annotation added as a usable draft.");
+    await load();
+  } catch (error) {
+    toast(error.message);
+    button.disabled = false;
+  }
 }
 
 function inspectorHeading(kind, name, reference = "") {
@@ -796,19 +827,22 @@ function fieldAnnotationCard(field) {
   const contextDocuments = field.annotation_context_documents || [];
   return `<details class="field-card">
     <summary>
-      <span class="field-summary-copy"><strong>${escapeHtml(field.label)}</strong><small class="mono">${escapeHtml(field.data_type || "—")}</small></span>
+      <span class="field-summary-copy"><strong>${escapeHtml(field.label)}</strong><small class="mono">${escapeHtml(field.data_type || "—")}</small>${annotation?.description ? `<small class="field-summary-description">${escapeHtml(annotation.description)}</small>` : ""}</span>
       <span class="field-summary-badges">${field.semantic_type ? `<span class="semantic-pill">${escapeHtml(field.semantic_type)}</span>` : ""}<span class="state-badge">${escapeHtml(stateLabel(annotation?.state || "missing"))}</span></span>
     </summary>
     <div class="field-annotation-body">
       ${annotation ? `<p class="description">${escapeHtml(annotation.description)}</p>
-        <div class="fact-grid">${fact("Role", annotation.role || "—")}${fact("Semantic type", field.semantic_type || "—")}${fact("Confidence", annotation.confidence == null ? "—" : `${Math.round(annotation.confidence * 100)}%`)}${fact("Review", latestReview ? reviewActionLabel(latestReview.action) : "Not reviewed")}</div>
-        ${annotation.confidence_reason ? fieldDetail("Confidence reason", annotation.confidence_reason) : ""}
         ${annotation.synonyms?.length ? fieldDetail("Synonyms", annotation.synonyms.join(" · ")) : ""}
+        ${annotation.tags?.length ? fieldDetail("Tags", annotation.tags.join(" · ")) : ""}
         ${annotation.warnings?.length ? fieldDetail("Warnings", annotation.warnings.join(" · "), "warning") : ""}
-        ${fieldEvidence(annotation.evidence || [])}
-        <div class="field-provenance"><strong>Provenance</strong><span>${escapeHtml(provenance?.source || "unknown")}${provenance?.provider ? ` · ${escapeHtml(provenance.provider)}` : ""}${provenance?.model ? ` · ${escapeHtml(provenance.model)}` : ""}</span></div>
-        ${latestReview ? fieldDetail(`Human review · ${reviewActionLabel(latestReview.action)}`, latestReview.reason) : ""}
-        ${contextDocuments.length ? fieldDetail("Context documents", contextDocuments.map(item => `${item.id}@${item.revision}`).join(" · ")) : ""}` : '<p class="field-missing">No TAREL field annotation yet.</p>'}
+        <details class="field-advanced"><summary>Evidence &amp; technical detail</summary><div class="field-advanced-body">
+          <div class="fact-grid">${fact("Role", annotation.role || "—")}${fact("Semantic type", field.semantic_type || "—")}${fact("Confidence", annotation.confidence == null ? "—" : `${Math.round(annotation.confidence * 100)}%`)}${fact("Review", latestReview ? reviewActionLabel(latestReview.action) : "Not reviewed")}</div>
+          ${annotation.confidence_reason ? fieldDetail("Confidence reason", annotation.confidence_reason) : ""}
+          ${fieldEvidence(annotation.evidence || [])}
+          <div class="field-provenance"><strong>Provenance</strong><span>${escapeHtml(provenance?.source || "unknown")}${provenance?.provider ? ` · ${escapeHtml(provenance.provider)}` : ""}${provenance?.model ? ` · ${escapeHtml(provenance.model)}` : ""}</span></div>
+          ${latestReview ? fieldDetail(`Human review · ${reviewActionLabel(latestReview.action)}`, latestReview.reason) : ""}
+          ${contextDocuments.length ? fieldDetail("Context documents", contextDocuments.map(item => `${item.id}@${item.revision}`).join(" · ")) : ""}
+        </div></details>` : `<p class="field-missing">No TAREL field annotation yet.</p>${state.data.editable ? `<form class="field-quick-annotation" data-graph="${escapeAttr(selectedObject().graph)}" data-reference="${escapeAttr(field.reference)}"><label><span>Description</span><textarea name="description" required placeholder="What does this field mean?"></textarea></label><details><summary>Optional synonyms &amp; tags</summary><label><span>Synonyms · one per line</span><textarea name="synonyms"></textarea></label><label><span>Tags · one per line</span><textarea name="tags"></textarea></label></details><button class="quiet-button">Add annotation</button></form>` : ""}`}
       ${sourceSemantics.length ? `<div class="field-source-semantics"><strong>Imported source semantics</strong><div>${sourceSemantics.map(entry => `<span class="source-pill" title="${escapeAttr(entry.import_name)}">${escapeHtml(entry.name)}</span>`).join(" ")}</div></div>` : ""}
     </div>
   </details>`;
@@ -1015,6 +1049,7 @@ function renderReviewEditor() {
       <label><span>Business description</span><textarea name="description" required ${disabled ? "disabled" : ""}>${escapeHtml(annotation.description)}</textarea></label>
       <div class="field-grid"><label><span>Business role</span><input name="role" value="${escapeAttr(annotation.role || "")}" ${disabled ? "disabled" : ""} /></label><label><span>Grain</span><input name="grain" value="${escapeAttr(record.grain || "")}" ${disabled ? "disabled" : ""} /></label></div>
       <label><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.synonyms || []).join("\n"))}</textarea></label>
+      <label><span>Tags · one per line</span><textarea class="short-textarea" name="tags" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.tags || []).join("\n"))}</textarea></label>
       <label><span>Warnings · one per line</span><textarea class="short-textarea" name="warnings" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.warnings || []).join("\n"))}</textarea></label>
       <label><span>Human review reason</span><input name="reason" value="Reviewed in the local TAREL UI." required ${disabled ? "disabled" : ""} /></label>
       <label class="checkbox"><input name="include_fields" type="checkbox" ${disabled ? "disabled" : ""} /><span>Apply the final decision to all ${record.field_count} field proposals too</span></label>
@@ -1050,7 +1085,7 @@ async function reviewAction(action) {
   const form = $("#annotation-form");
   if (!form?.reportValidity()) return;
   const values = new FormData(form);
-  const patch = {description: values.get("description"), role: emptyToNull(values.get("role")), grain: emptyToNull(values.get("grain")), synonyms: lines(values.get("synonyms")), warnings: lines(values.get("warnings"))};
+  const patch = {description: values.get("description"), role: emptyToNull(values.get("role")), grain: emptyToNull(values.get("grain")), synonyms: lines(values.get("synonyms")), tags: lines(values.get("tags")), warnings: lines(values.get("warnings"))};
   const reason = values.get("reason");
   try {
     if (action === "save" || changed(record, patch)) {
@@ -1252,7 +1287,7 @@ function annotationText(item) {
     ...(item.source_semantics || []),
     ...item.fields.flatMap(field => field.source_semantics || []),
   ].map(entry => `${entry.name} ${entry.description || ""} ${(entry.synonyms || []).join(" ")}`).join(" ");
-  return `${item.annotation?.description || ""} ${(item.annotation?.synonyms || []).join(" ")} ${imported}`.toLowerCase();
+  return `${item.annotation?.description || ""} ${(item.annotation?.synonyms || []).join(" ")} ${(item.annotation?.tags || []).join(" ")} ${imported}`.toLowerCase();
 }
 function annotationCommand(record, scopedKnowledge = false) {
   const focus = focusMembership(record.id)[0];
@@ -1274,7 +1309,7 @@ function stateLabel(value) { return ({draft: "Draft", review_required: "Review r
 function reviewActionLabel(value) { return ({validate: "Approved", reject: "Removed", defer: "Deferred", edit: "Edited"})[value] || value; }
 function lines(value) { return String(value || "").split("\n").map(item => item.trim()).filter(Boolean); }
 function emptyToNull(value) { const clean = String(value || "").trim(); return clean || null; }
-function changed(record, patch) { const a = record.annotation; return patch.description !== a.description || patch.role !== (a.role || null) || patch.grain !== (record.grain || null) || JSON.stringify(patch.synonyms) !== JSON.stringify(a.synonyms || []) || JSON.stringify(patch.warnings) !== JSON.stringify(a.warnings || []); }
+function changed(record, patch) { const a = record.annotation; return patch.description !== a.description || patch.role !== (a.role || null) || patch.grain !== (record.grain || null) || JSON.stringify(patch.synonyms) !== JSON.stringify(a.synonyms || []) || JSON.stringify(patch.tags) !== JSON.stringify(a.tags || []) || JSON.stringify(patch.warnings) !== JSON.stringify(a.warnings || []); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]); }
 function escapeAttr(value) { return escapeHtml(value); }
 function setFooter(value) { $("#footer-status").textContent = value; }

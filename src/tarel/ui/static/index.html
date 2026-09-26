@@ -125,10 +125,10 @@
         </section>
 
         <section id="review-view" class="view review-layout">
-          <div class="review-tools"><button id="open-review-queue" class="quiet-button mobile-only" aria-controls="review-queue" aria-expanded="false">Review queue</button><span>Read the proposal and its evidence before deciding.</span><button id="open-evidence" class="quiet-button" aria-controls="review-evidence" aria-expanded="false">Evidence</button></div>
+          <div class="review-tools"><button id="open-review-queue" class="quiet-button mobile-only" aria-controls="review-queue" aria-expanded="false">Review queue</button><span>Optional governance: inspect, correct or approve autonomous annotations.</span><button id="open-evidence" class="quiet-button" aria-controls="review-evidence" aria-expanded="false">Evidence</button></div>
           <aside id="review-queue" class="review-queue-pane">
-            <div class="pane-heading"><div><p class="eyebrow">Human in the loop</p><h1>Annotations</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="review-queue" aria-label="Close review queue">×</button></div>
-            <p class="guidance">Table and field proposals in this workspace / report scope. Graph display filters do not hide pending work.</p>
+            <div class="pane-heading"><div><p class="eyebrow">Optional governance</p><h1>Annotations</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="review-queue" aria-label="Close review queue">×</button></div>
+            <p class="guidance">Autonomous drafts are usable immediately. Review only where your governance policy requires it.</p>
             <div class="filter-row"><button class="review-filter chip is-active" data-review-filter="pending">To review</button><button class="review-filter chip" data-review-filter="all">All</button></div>
             <div id="review-progress" class="progress-copy"></div><div class="progress-track"><span id="review-progress-bar"></span></div>
             <nav id="review-list" class="review-list" aria-label="Annotation review queue"></nav>
@@ -202,8 +202,8 @@
           <label><span>Context source</span><select id="context-kind"><option value="question">Question-based context</option><option value="prefix">Stable base context</option><option value="selected">Selected search results</option></select></label>
           <label><span>Question or topic</span><textarea id="context-query" name="query" rows="2" maxlength="2000" required placeholder="Which tables and fields describe sales by month?"></textarea></label>
           <p id="context-selection-summary" class="semantic-origin">No search results selected.</p>
-          <details class="context-options"><summary>Policies &amp; limits <small id="context-policy-summary">Reviewed annotations · logical hints off</small></summary><div class="context-options-body">
-            <label class="checkbox"><input id="context-reviewed" name="reviewed_annotations_only" type="checkbox" checked /><span>Only reviewed annotations. Physical tables remain discoverable.</span></label>
+          <details class="context-options"><summary>Policies &amp; limits <small id="context-policy-summary">All usable annotations · logical hints off</small></summary><div class="context-options-body">
+            <label class="checkbox"><input id="context-reviewed" name="reviewed_annotations_only" type="checkbox" /><span>Require reviewed annotations. Leave off for fast autonomous use.</span></label>
             <label><span>Additional logical hints</span><select id="context-logical-hints" name="logical_hints"><option value="">Off</option><option value="confirmed_only">Reviewed logical hints</option><option value="include_candidates">Include exploratory logical hints</option></select></label>
             <p class="semantic-origin">Logical hints are not executable joins or expanded family members. Entity-resolution candidates are not included by this option.</p>
             <div class="field-grid"><label><span>Maximum objects</span><input id="context-max-objects" name="max_objects" type="number" value="10" min="1" max="50" required /></label><label><span>Maximum packet characters</span><input id="context-max-characters" name="max_characters" type="number" value="24000" min="1000" max="100000" step="1000" required /></label></div>

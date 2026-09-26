@@ -18,11 +18,54 @@ from tarel.context import ContextFailure, compile_context, compile_context_prefi
 from tarel.context_caching import split_context_packet
 from tarel.context_output import canonical_hash
 from tarel.graph.build import build_graph_from_catalog
+from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.store import FileGraphStore
 from tarel.relationships.core import add_manual_relationship, relationship_pair
 
 
 class ContextTests(TestCase):
+    def test_visible_tags_are_carried_into_compiled_context(self) -> None:
+        graph = _context_graph()
+        graph = replace(
+            graph,
+            nodes=tuple(
+                replace(
+                    node,
+                    annotation=GraphAnnotation(
+                        description="Sales facts.",
+                        tags=("financial",),
+                    ),
+                )
+                if node.label == "sales.FactSales"
+                else replace(
+                    node,
+                    annotation=GraphAnnotation(
+                        description="Revenue amount.",
+                        tags=("currency",),
+                    ),
+                )
+                if node.label == "SalesAmount"
+                else node
+                for node in graph.nodes
+            ),
+        )
+
+        result = compile_context(
+            graph,
+            "financial currency",
+            seed_limit=1,
+            max_objects=1,
+        )
+
+        fact = result.objects[0]
+        sales_amount = next(field for field in fact.fields if field.name == "SalesAmount")
+        stable = result.stable_dict()["objects"][0]
+        stable_field = next(field for field in stable["fields"] if field["name"] == "SalesAmount")
+        self.assertEqual(fact.tags, ("financial",))
+        self.assertEqual(sales_amount.tags, ("currency",))
+        self.assertEqual(stable["tags"], ["financial"])
+        self.assertEqual(stable_field["tags"], ["currency"])
+
     def test_search_seed_expands_over_bounded_declared_join_paths(self) -> None:
         graph = _context_graph(include_geography_fk=True)
 

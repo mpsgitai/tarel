@@ -83,6 +83,9 @@ def _object_text(
         synonyms = _synonyms(field.annotation, annotation_states)
         if synonyms:
             lines.append(f"  Synonyms: {', '.join(synonyms)}")
+        tags = _tags(field.annotation, annotation_states)
+        if tags:
+            lines.append(f"  Tags: {', '.join(tags)}")
     return "\n".join(lines)
 
 
@@ -153,6 +156,9 @@ def _append_approved_description(
     synonyms = _synonyms(node.annotation, annotation_states)
     if synonyms:
         lines.append(f"Synonyms: {', '.join(synonyms)}")
+    tags = _tags(node.annotation, annotation_states)
+    if tags:
+        lines.append(f"Tags: {', '.join(tags)}")
 
 
 def _approved_description(node: GraphNode, annotation_states: frozenset[str]) -> str:
@@ -167,6 +173,13 @@ def _synonyms(
     annotation_states: frozenset[str],
 ) -> tuple[str, ...]:
     return annotation.synonyms if annotation_is_visible(annotation, annotation_states) else ()
+
+
+def _tags(
+    annotation: GraphAnnotation | None,
+    annotation_states: frozenset[str],
+) -> tuple[str, ...]:
+    return annotation.tags if annotation_is_visible(annotation, annotation_states) else ()
 
 
 def _text(value: object) -> str:
