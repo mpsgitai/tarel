@@ -682,24 +682,40 @@ def _annotate_new_refresh_gaps(
         )
     store = _graph_store(runtime)
     provider = load_provider(provider_name, timeout=timeout)
-    updated, run = run_annotation_batch(
-        result.graph,
-        tasks,
-        provider,
-        workers=workers,
-        retry=0,
-        retry_backoff=0,
-        skip_errors=False,
-        max_errors=None,
-        model=model,
-        after_annotation=store.save,
-    )
-    return replace(
-        result,
-        graph=updated,
-        path=store.save(updated),
-        annotation_run=run,
-    )
+    try:
+        updated, run = run_annotation_batch(
+            result.graph,
+            tasks,
+            provider,
+            workers=workers,
+            retry=0,
+            retry_backoff=0,
+            skip_errors=False,
+            max_errors=None,
+            model=model,
+            after_annotation=store.save,
+        )
+    except AnnotationFailure:
+        _align_refresh_report(result, store.load(result.graph.name), runtime=runtime)
+        raise
+    path = store.save(updated)
+    aligned = _align_refresh_report(result, updated, runtime=runtime)
+    return replace(aligned, graph=updated, path=path, annotation_run=run)
+
+
+def _align_refresh_report(
+    result: GraphRefreshResult,
+    graph: GraphDocument,
+    *,
+    runtime: TarelRuntime | None,
+) -> GraphRefreshResult:
+    """Bind a source-change report to the graph revision persisted after annotation."""
+    revision = graph_revision(graph)
+    if result.report.after_revision == revision:
+        return result
+    report = replace(result.report, after_revision=revision)
+    report_path = _graph_change_store(runtime).save(graph.name, report)
+    return replace(result, report=report, change_report_path=report_path)
 
 
 def _validate_refresh_observation(
@@ -721,22 +737,23 @@ def _validate_refresh_observation(
         )
     if selected_namespace is None:
         return
+    selected_identifier = selected_namespace.casefold()
     current_namespaces = {
-        str(node.metadata.get("namespace"))
+        str(node.metadata.get("namespace")).casefold()
         for node in current_objects
         if node.metadata.get("namespace")
     }
-    if current_namespaces - {selected_namespace}:
+    if current_namespaces - {selected_identifier}:
         raise GraphFailure(
             "partial_refresh_scope",
             "A namespace-scoped refresh cannot replace a graph that contains other namespaces.",
         )
     discovered_namespaces = {
-        str(node.metadata.get("namespace"))
+        str(node.metadata.get("namespace")).casefold()
         for node in discovered_objects
         if node.metadata.get("namespace")
     }
-    if discovered_namespaces != {selected_namespace}:
+    if discovered_namespaces != {selected_identifier}:
         raise GraphFailure(
             "refresh_scope_mismatch",
             "The connector observation did not match the requested namespace scope.",

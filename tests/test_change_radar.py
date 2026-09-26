@@ -9,7 +9,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from tarel.annotations.review import decide_annotation
-from tarel.application import refresh_graph_use_case
+from tarel.application import context_packet_impact_use_case, refresh_graph_use_case
 from tarel.cli import main
 from tarel.connectors.contracts import (
     CatalogField,
@@ -23,7 +23,7 @@ from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.change_store import FileGraphChangeStore
 from tarel.graph.contracts import GraphAnnotation, GraphFailure
 from tarel.graph.refresh import refresh_graph
-from tarel.graph.revision import technical_graph_fingerprint
+from tarel.graph.revision import graph_revision, technical_graph_fingerprint
 from tarel.graph.store import FileGraphStore
 from tarel.providers.contracts import ProviderFailure
 from tarel.relationships.core import (
@@ -141,11 +141,42 @@ class ChangeRadarTests(TestCase):
         self.assertEqual(partial.exception.code, "partial_refresh_scope")
         self.assertEqual(empty.exception.code, "empty_refresh_observation")
 
-    def test_refresh_annotation_batch_touches_only_new_gaps(self) -> None:
-        provider = _DeltaAnnotationProvider()
+    def test_namespace_scope_comparison_accepts_canonical_case(self) -> None:
+        catalog = _catalog(changed=False)
+        sales_catalog = replace(
+            catalog,
+            objects=tuple(item for item in catalog.objects if item.namespace == "sales"),
+        )
+        graph = build_graph_from_catalog("warehouse", sales_catalog)
         with TemporaryDirectory() as temporary_directory:
             runtime = TarelRuntime.local(Path(temporary_directory) / ".tarel")
-            runtime.graph_store().save(_annotated_graph())
+            runtime.graph_store().save(graph)
+
+            with patch(
+                "tarel.application.discover_catalog_use_case",
+                return_value=sales_catalog,
+            ):
+                result = refresh_graph_use_case(
+                    graph.name,
+                    namespace="SALES",
+                    runtime=runtime,
+                )
+
+        self.assertEqual(result.status, "unchanged")
+
+    def test_refresh_annotation_batch_touches_only_new_gaps(self) -> None:
+        provider = _DeltaAnnotationProvider()
+        before = _annotated_graph()
+        packet = compile_context(
+            before,
+            "sales amount",
+            seed_limit=1,
+            max_objects=1,
+            max_fields_per_object=10,
+        )
+        with TemporaryDirectory() as temporary_directory:
+            runtime = TarelRuntime.local(Path(temporary_directory) / ".tarel")
+            runtime.graph_store().save(before)
 
             with (
                 patch(
@@ -172,12 +203,31 @@ class ChangeRadarTests(TestCase):
                 for node in result.graph.nodes
                 if node.label == "ExternalCode" and node.metadata.get("object_id") == fact.id
             )
+            impact = context_packet_impact(
+                context_packet_from_dict(packet.to_dict()),
+                result.graph,
+                result.report,
+            )
+            packet_path = Path(temporary_directory) / "before-context.json"
+            packet_path.write_text(json.dumps(packet.to_dict()), encoding="utf-8")
+            persisted_impact = context_packet_impact_use_case(
+                packet_path,
+                "warehouse",
+                runtime=runtime,
+            )
+            report_exists = result.change_report_path.is_file()
 
         self.assertEqual(result.annotation_run.annotated, 1)
         self.assertEqual(len(provider.requests), 1)
         self.assertEqual(fact.annotation.state, "review_required")
         self.assertIsNone(sales_key.annotation)
         self.assertEqual(external_code.annotation.state, "draft")
+        self.assertEqual(result.report.after_revision, graph_revision(result.graph))
+        self.assertTrue(report_exists)
+        self.assertEqual(impact.status, "affected")
+        self.assertTrue(impact.exact)
+        self.assertEqual(persisted_impact.status, "affected")
+        self.assertTrue(persisted_impact.exact)
 
     def test_unchanged_refresh_never_loads_delta_annotation_provider(self) -> None:
         with TemporaryDirectory() as temporary_directory:
