@@ -198,6 +198,8 @@ class AnnotationFlowTests(TestCase):
         )
 
         task = plan_annotation_tasks(graph, samples_by_target={customer_id: sample})[0]
+        self.assertIn("annotation text in English", task.request.messages[0].content)
+        self.assertIn("otherwise never use that evidence source", task.request.messages[0].content)
         serialized_context = task.request.messages[1].content.split("\n\n", 1)[1]
         context = json.loads(serialized_context.split("\n\nOBSERVED-VALUE POLICY:", 1)[0])
 
