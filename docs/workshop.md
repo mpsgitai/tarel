@@ -303,6 +303,16 @@ of an annotation run is not blanket approval. The broad pass may continue overni
 **Day-1 checkpoint:** Save source identities, focus coverage, reviewed joins, remaining annotation
 work, and unresolved lineage. Retrieval and context assembly begin on day 2.
 
+For a recurring post-ETL schema check, reuse the bound source without scanning rows:
+
+```bash
+tarel source refresh warehouse dwh-main --format json
+```
+
+An unchanged fingerprint performs no graph write. When autonomous semantics are desired, add
+`--annotate-new openrouter`; this annotates only objects and fields introduced by that refresh.
+Existing annotation backlog remains a separate, explicitly resumable `graph annotate` run.
+
 ## Day 2: Use knowledge
 
 ### 1. Prepare a stable report context

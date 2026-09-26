@@ -263,6 +263,9 @@ class ChangeRadarTests(TestCase):
         self.assertEqual(fact.annotation.state, "review_required")
         self.assertEqual(amount.annotation.state, "review_required")
         self.assertEqual(account.annotation.state, "validated")
+        self.assertIn("primary_key_changed", fact.metadata["source_change"]["reasons"])
+        self.assertIn("field_type_changed", amount.metadata["source_change"]["reasons"])
+        self.assertNotIn("source_change", account.metadata)
         self.assertEqual(report.review_required_annotations, 2)
 
         refreshed_candidate = next(edge for edge in refreshed.edges if edge.id == candidate.id)
@@ -293,8 +296,43 @@ class ChangeRadarTests(TestCase):
         )
         self.assertEqual(annotation_record.node.annotation.state, "validated")
         self.assertNotIn("change_review", annotation_record.node.metadata)
+        self.assertNotIn("source_change", annotation_record.node.metadata)
         self.assertEqual(relationship.metadata["state"], "validated")
         self.assertNotIn("change_review", relationship.metadata)
+
+    def test_draft_source_change_is_visible_in_context_without_forcing_review_state(self) -> None:
+        current = _annotated_graph()
+        current = replace(
+            current,
+            nodes=tuple(
+                replace(node, annotation=replace(node.annotation, state="draft"))
+                if node.label == "Amount" and node.annotation is not None
+                else node
+                for node in current.nodes
+            ),
+        )
+
+        refreshed, _report = refresh_graph(current, _changed_graph())
+        amount = next(node for node in refreshed.nodes if node.label == "Amount")
+        packet = compile_context(
+            refreshed,
+            "sales amount",
+            seed_limit=1,
+            max_objects=1,
+            max_fields_per_object=10,
+        )
+        fact = next(item for item in packet.objects if item.label == "sales.FactSales")
+        context_amount = next(field for field in fact.fields if field.name == "Amount")
+
+        self.assertEqual(amount.annotation.state, "draft")
+        self.assertEqual(
+            amount.metadata["source_change"]["reasons"],
+            ["field_type_changed"],
+        )
+        self.assertEqual(
+            context_amount.source_change["reasons"],
+            ["field_type_changed"],
+        )
 
     def test_change_report_round_trips_without_volatile_metadata(self) -> None:
         report = refresh_graph(_annotated_graph(), _changed_graph())[1]

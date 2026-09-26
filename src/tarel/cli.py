@@ -2486,9 +2486,22 @@ def _add_refresh_annotation_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="PROVIDER",
         help="Annotate only object and field gaps introduced by this refresh.",
     )
-    parser.add_argument("--annotation-workers", type=int, default=1)
-    parser.add_argument("--annotation-model")
-    parser.add_argument("--annotation-timeout", type=float, default=120.0)
+    parser.add_argument(
+        "--annotation-workers",
+        type=int,
+        default=1,
+        help="Parallel provider requests for newly introduced annotation gaps.",
+    )
+    parser.add_argument(
+        "--annotation-model",
+        help="Optional model override for the delta annotation batch.",
+    )
+    parser.add_argument(
+        "--annotation-timeout",
+        type=float,
+        default=120.0,
+        help="Provider timeout in seconds for delta annotation requests.",
+    )
 
 
 def _add_annotation_knowledge_arguments(parser: argparse.ArgumentParser) -> None:

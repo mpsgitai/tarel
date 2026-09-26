@@ -19,6 +19,7 @@ _SEMANTIC_METADATA_KEYS = {
     "change_review",
     "grain",
     "semantic_type",
+    "source_change",
 }
 
 
@@ -161,6 +162,7 @@ def refresh_graph(
     before_revision = graph_revision(current)
     changes = classify_graph_changes(current, discovered)
     reasons_by_node = _stale_reasons_by_node(changes)
+    source_reasons_by_node = _source_change_reasons_by_node(changes)
     current_nodes = current.node_by_id()
     discovered_ids = {node.id for node in discovered.nodes}
     carried_annotations = 0
@@ -180,6 +182,12 @@ def refresh_graph(
         if annotation is not None:
             carried_annotations += 1
             reasons = reasons_by_node.get(node.id, ())
+            source_reasons = source_reasons_by_node.get(node.id, ())
+            if source_reasons:
+                metadata["source_change"] = {
+                    "from_revision": before_revision,
+                    "reasons": list(source_reasons),
+                }
             if annotation.state == "validated" and reasons:
                 previous_state = annotation.state
                 annotation = replace(annotation, state="review_required")
@@ -339,6 +347,19 @@ def _stale_reasons_by_node(changes: tuple[GraphChange, ...]) -> dict[str, tuple[
     return {key: tuple(sorted(value)) for key, value in reasons.items()}
 
 
+def _source_change_reasons_by_node(
+    changes: tuple[GraphChange, ...],
+) -> dict[str, tuple[str, ...]]:
+    reasons = {
+        target_id: set(values)
+        for target_id, values in _stale_reasons_by_node(changes).items()
+    }
+    for change in changes:
+        if change.entity_type == "node" and change.kind == "technical_description_changed":
+            reasons.setdefault(change.target_id, set()).add(change.kind)
+    return {key: tuple(sorted(value)) for key, value in reasons.items()}
+
+
 def _annotation_claim(
     node: GraphNode,
     graph: GraphDocument,
@@ -351,7 +372,13 @@ def _annotation_claim(
     if annotation is None:
         raise GraphFailure("invalid_stale_claim", "Annotated stale claim has no annotation.")
     claim: dict[str, object] = {"annotation": annotation.to_dict()}
-    for key in ("grain", "semantic_type", "annotation_review", "change_review"):
+    for key in (
+        "grain",
+        "semantic_type",
+        "annotation_review",
+        "change_review",
+        "source_change",
+    ):
         if key in node.metadata:
             claim[key] = node.metadata[key]
     return StaleClaim(

@@ -630,6 +630,7 @@ function renderInspector() {
   const relationships = connectedEdges.filter(edge => !["derives", "entity_resolution_candidate", "reference_mapping"].includes(edge.type));
   $("#inspector").innerHTML = `
     ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label)}
+    ${sourceChangeNotice(item.source_change)}
     <section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation?.description || "No TAREL annotation yet.")}</p>
       ${annotation?.synonyms?.length ? fieldDetail("Synonyms", annotation.synonyms.join(" · ")) : ""}
       ${annotation?.tags?.length ? fieldDetail("Tags", annotation.tags.join(" · ")) : ""}
@@ -828,9 +829,10 @@ function fieldAnnotationCard(field) {
   return `<details class="field-card">
     <summary>
       <span class="field-summary-copy"><strong>${escapeHtml(field.label)}</strong><small class="mono">${escapeHtml(field.data_type || "—")}</small>${annotation?.description ? `<small class="field-summary-description">${escapeHtml(annotation.description)}</small>` : ""}</span>
-      <span class="field-summary-badges">${field.semantic_type ? `<span class="semantic-pill">${escapeHtml(field.semantic_type)}</span>` : ""}<span class="state-badge">${escapeHtml(stateLabel(annotation?.state || "missing"))}</span></span>
+      <span class="field-summary-badges">${field.source_change ? '<span class="source-change-pill">Source changed</span>' : ""}${field.semantic_type ? `<span class="semantic-pill">${escapeHtml(field.semantic_type)}</span>` : ""}<span class="state-badge">${escapeHtml(stateLabel(annotation?.state || "missing"))}</span></span>
     </summary>
     <div class="field-annotation-body">
+      ${sourceChangeNotice(field.source_change)}
       ${annotation ? `<p class="description">${escapeHtml(annotation.description)}</p>
         ${annotation.synonyms?.length ? fieldDetail("Synonyms", annotation.synonyms.join(" · ")) : ""}
         ${annotation.tags?.length ? fieldDetail("Tags", annotation.tags.join(" · ")) : ""}
@@ -846,6 +848,13 @@ function fieldAnnotationCard(field) {
       ${sourceSemantics.length ? `<div class="field-source-semantics"><strong>Imported source semantics</strong><div>${sourceSemantics.map(entry => `<span class="source-pill" title="${escapeAttr(entry.import_name)}">${escapeHtml(entry.name)}</span>`).join(" ")}</div></div>` : ""}
     </div>
   </details>`;
+}
+
+function sourceChangeNotice(change) {
+  if (!change || !Array.isArray(change.reasons) || !change.reasons.length) return "";
+  const reasons = change.reasons.map(reason => reason.replaceAll("_", " ")).join(" · ");
+  const revision = typeof change.from_revision === "string" ? change.from_revision.slice(0, 12) : "unknown";
+  return `<div class="source-change-notice"><strong>Source schema changed</strong><span>${escapeHtml(reasons)}</span><small>Previous graph ${escapeHtml(revision)}</small></div>`;
 }
 
 function fieldDetail(label, value, kind = "") {

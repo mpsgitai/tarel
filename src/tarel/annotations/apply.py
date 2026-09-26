@@ -101,6 +101,8 @@ def apply_annotation_proposal(
     for node in graph.nodes:
         if node.id == envelope.target_id and task.include_object:
             metadata = dict(node.metadata)
+            metadata.pop("change_review", None)
+            metadata.pop("source_change", None)
             metadata["grain"] = proposal.grain
             metadata["annotation_context_documents"] = context_payload
             updated_nodes.append(
@@ -128,6 +130,8 @@ def apply_annotation_proposal(
             and field_proposal is not None
         ):
             metadata = dict(node.metadata)
+            metadata.pop("change_review", None)
+            metadata.pop("source_change", None)
             metadata["semantic_type"] = field_proposal.semantic_type
             metadata["annotation_context_documents"] = context_payload
             updated_nodes.append(

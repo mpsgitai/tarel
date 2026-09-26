@@ -993,6 +993,7 @@ def _object_payload(
         "primary_key": list(node.metadata.get("primary_key") or ()),
         "reference": f"{graph.catalog}.{node.label}",
         "review": node.metadata.get("annotation_review"),
+        "source_change": node.metadata.get("source_change"),
         "system": system,
         "schema_ref": f"{graph.name}:{node.metadata.get('namespace')}",
         "source_semantics": semantic_bindings.get((graph.name, node.id), ()),
@@ -1022,6 +1023,7 @@ def _field_payload(
         "reference": f"{parent_label}.{node.label}",
         "review": node.metadata.get("annotation_review"),
         "semantic_type": node.metadata.get("semantic_type"),
+        "source_change": node.metadata.get("source_change"),
         "source_semantics": list(source_semantics),
     }
 
