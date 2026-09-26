@@ -45,6 +45,8 @@ class AnnotationTask:
             "submission_template": {
                 "annotation": "<response matching response_schema>",
                 "context_documents": [item.to_dict() for item in self.context_documents],
+                "field_names": list(self.field_names) if self.mode == "missing" else [],
+                "include_object": self.include_object if self.mode == "missing" else None,
                 "mode": self.mode,
                 "target_id": self.target_id,
                 "task_id": self.id,
@@ -105,6 +107,8 @@ class AnnotationProposalEnvelope:
     annotation: ObjectAnnotationProposal
     context_documents: tuple[KnowledgeReference, ...] = ()
     mode: str = "full"
+    field_names: tuple[str, ...] = ()
+    include_object: bool | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AnnotationProposalEnvelope:
@@ -127,12 +131,28 @@ class AnnotationProposalEnvelope:
         mode = data.get("mode", "full")
         if not isinstance(mode, str) or mode not in {"full", "missing"}:
             raise AnnotationFailure("invalid_proposal", "Proposal mode must be full or missing.")
+        field_names = data.get("field_names", [])
+        if not isinstance(field_names, list) or not all(
+            isinstance(item, str) and item for item in field_names
+        ):
+            raise AnnotationFailure(
+                "invalid_proposal",
+                "Proposal field_names must be non-empty strings.",
+            )
+        include_object = data.get("include_object")
+        if include_object is not None and not isinstance(include_object, bool):
+            raise AnnotationFailure(
+                "invalid_proposal",
+                "Proposal include_object must be boolean or null.",
+            )
         return cls(
             task_id=_required_string(data, "task_id"),
             target_id=_required_string(data, "target_id"),
             annotation=ObjectAnnotationProposal.from_dict(annotation),
             mode=mode,
             context_documents=references,
+            field_names=tuple(field_names),
+            include_object=include_object,
         )
 
 

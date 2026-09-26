@@ -425,6 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
     source_refresh.add_argument("name")
     source_refresh.add_argument("graph_name")
     source_refresh.add_argument("--namespace", "--schema", dest="namespace")
+    _add_refresh_annotation_arguments(source_refresh)
     _add_format_argument(source_refresh)
 
     source_enrich = source_commands.add_parser(
@@ -708,6 +709,7 @@ def build_parser() -> argparse.ArgumentParser:
     graph_refresh.add_argument("name", help="Existing local graph name.")
     graph_refresh.add_argument("--config", type=Path, help="Private connector configuration.")
     graph_refresh.add_argument("--namespace", "--schema", dest="namespace")
+    _add_refresh_annotation_arguments(graph_refresh)
     _add_format_argument(graph_refresh)
 
     graph_import = graph_commands.add_parser(
@@ -1401,6 +1403,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.name,
                 args.graph_name,
                 namespace=args.namespace,
+                annotate_new_provider=args.annotate_new,
+                annotation_workers=args.annotation_workers,
+                annotation_model=args.annotation_model,
+                annotation_timeout=args.annotation_timeout,
             )
             if args.format == "json":
                 print(
@@ -1409,6 +1415,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "graph": result.graph.to_dict(),
                             "path": str(result.path),
                             "refresh": result.report.to_dict(),
+                            "annotation": (
+                                result.annotation_run.to_dict()
+                                if result.annotation_run is not None
+                                else None
+                            ),
+                            "status": result.status,
                         },
                         indent=2,
                         sort_keys=True,
@@ -1416,7 +1428,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             else:
                 _render_graph_summary(result.graph, output_format="text", path=result.path)
+                print(f"Status: {result.status}")
                 print(f"Changes: {len(result.report.changes)}")
+                if result.annotation_run is not None:
+                    print(
+                        "Delta annotations: "
+                        f"{result.annotation_run.annotated}/{result.annotation_run.planned}"
+                    )
             return 0
 
         if args.command == "source" and args.source_command == "enrich":
@@ -1847,21 +1865,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.name,
                 config_path=args.config,
                 namespace=args.namespace,
+                annotate_new_provider=args.annotate_new,
+                annotation_workers=args.annotation_workers,
+                annotation_model=args.annotation_model,
+                annotation_timeout=args.annotation_timeout,
             )
             payload = {
+                "annotation": (
+                    result.annotation_run.to_dict()
+                    if result.annotation_run is not None
+                    else None
+                ),
                 "change_report_path": (
                     str(result.change_report_path) if result.change_report_path else None
                 ),
                 "graph": result.graph.name,
                 "path": str(result.path),
                 "refresh": result.report.to_dict(),
+                "status": result.status,
                 "workspace_impacts": [impact.to_dict() for impact in result.workspace_impacts],
             }
             if args.format == "json":
                 print(json.dumps(payload, indent=2, sort_keys=True))
             else:
-                print(f"Refreshed graph: {result.graph.name}")
+                print(f"Refreshed graph: {result.graph.name} ({result.status})")
                 print(f"Changes: {len(result.report.changes)}")
+                if result.annotation_run is not None:
+                    print(
+                        "Delta annotations: "
+                        f"{result.annotation_run.annotated}/{result.annotation_run.planned}"
+                    )
                 for change in result.report.changes:
                     values = ""
                     if change.before is not None or change.after is not None:
@@ -2455,6 +2488,30 @@ def _add_format_argument(parser: argparse.ArgumentParser) -> None:
         choices=("text", "json"),
         default="text",
         help="Output format (default: text).",
+    )
+
+
+def _add_refresh_annotation_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--annotate-new",
+        metavar="PROVIDER",
+        help="Annotate only object and field gaps introduced by this refresh.",
+    )
+    parser.add_argument(
+        "--annotation-workers",
+        type=int,
+        default=1,
+        help="Parallel provider requests for newly introduced annotation gaps.",
+    )
+    parser.add_argument(
+        "--annotation-model",
+        help="Optional model override for the delta annotation batch.",
+    )
+    parser.add_argument(
+        "--annotation-timeout",
+        type=float,
+        default=120.0,
+        help="Provider timeout in seconds for delta annotation requests.",
     )
 
 

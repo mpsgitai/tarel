@@ -79,6 +79,7 @@ class ContextField:
     semantic_type: str | None
     annotation_state: str | None
     reasons: tuple[str, ...]
+    source_change: dict[str, object] | None = None
     tags: tuple[str, ...] = ()
 
     def stable_dict(self) -> dict[str, object]:
@@ -94,6 +95,8 @@ class ContextField:
         }
         if self.tags:
             payload["tags"] = list(self.tags)
+        if self.source_change is not None:
+            payload["source_change"] = self.source_change
         return payload
 
     def selection_dict(self) -> dict[str, object]:
@@ -116,6 +119,7 @@ class ContextObject:
     annotation_state: str | None
     fields: tuple[ContextField, ...]
     omitted_fields: int
+    source_change: dict[str, object] | None = None
     tags: tuple[str, ...] = ()
 
     def stable_dict(self) -> dict[str, object]:
@@ -135,6 +139,8 @@ class ContextObject:
         }
         if self.tags:
             payload["tags"] = list(self.tags)
+        if self.source_change is not None:
+            payload["source_change"] = self.source_change
         return payload
 
     def selection_dict(self) -> dict[str, object]:

@@ -437,6 +437,52 @@ revision changes, is stored under:
 
 There are no timestamps, runtimes, credentials, samples, or volatile paths in the report.
 
+### Incremental refresh
+
+Before reconciliation, TAREL computes a deterministic technical fingerprint over observed tables,
+views, fields, source descriptions, primary keys, and declared foreign keys. Local annotations,
+review records, discovery candidates, and other TAREL-authored semantics are excluded. If the fresh
+observation has the same fingerprint, refresh returns `status=unchanged`, writes neither graph nor
+change report, and does not call an annotation provider. Connector discovery still reads metadata;
+this is not a claim that a source-side schema-revision API exists.
+
+Refresh never profiles or samples rows. An empty observation for a previously non-empty graph is
+rejected rather than interpreted as mass deletion. A namespace-scoped observation cannot replace a
+graph containing other namespaces, and a connector that returns a different requested namespace
+fails visibly. Full-scope legitimate removals continue through the normal classified-change path.
+
+The technical fingerprint is available as `tarel.sdk.technical_graph_fingerprint(graph)`. The SDK
+refresh result exposes `changed`, `status`, and its normal deterministic report.
+
+### Optional delta annotation
+
+Provider annotation remains opt-in. `--annotate-new PROVIDER` sends only gaps introduced by this
+refresh through the existing protected annotation runner:
+
+```bash
+tarel source refresh warehouse warehouse-graph \
+  --annotate-new openrouter --annotation-workers 3
+```
+
+```python
+from tarel.sdk import Tarel
+
+sdk = Tarel(".tarel")
+result = sdk.source.refresh_graph(
+    "warehouse",
+    "warehouse-graph",
+    annotate_new_provider="openrouter",
+    annotation_workers=3,
+)
+```
+
+A new object may receive its object annotation and new fields. For an existing object, only newly
+added fields are requested; older missing fields remain backlog. No samples, profiles, source rows,
+or broad knowledge documents are attached by this refresh path. A provider failure remains visible,
+but the successful technical refresh has already been stored and is not rolled back. Rerunning the
+refresh after such a failure is a technical no-op and therefore does not retry annotation; use the
+normal resumable missing-only annotation command for remaining gaps.
+
 ### Classified changes
 
 The first contract reports added and removed objects and fields, field type/nullability/key/position
@@ -457,7 +503,11 @@ graph. They are therefore retained as `stale_claims` in the immutable transition
 silently deleted or represented as current source observations.
 
 Draft, deferred, and rejected annotations keep their existing state. A source change must not make an
-unreviewed proposal appear human-approved.
+unreviewed proposal appear human-approved. Affected annotations receive a compact `source_change`
+marker containing only the prior graph revision and deterministic reason codes. Context packets and
+the browser expose that marker only on affected objects or fields. A human review or a replacement
+annotation based on current metadata clears it; validated annotations still additionally move to
+`review_required` under the existing policy.
 
 ### Workspace and context impact
 

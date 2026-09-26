@@ -77,6 +77,8 @@ def run_annotation_batch(
                     annotation=ObjectAnnotationProposal.from_dict(raw),
                     mode=task.mode,
                     context_documents=task.context_documents,
+                    field_names=task.field_names if task.mode == "missing" else (),
+                    include_object=task.include_object if task.mode == "missing" else None,
                 )
                 current_graph = apply_annotation_proposal(
                     current_graph,
@@ -156,6 +158,8 @@ def _validate_generated_proposal(
         annotation=ObjectAnnotationProposal.from_dict(raw),
         mode=task.mode,
         context_documents=task.context_documents,
+        field_names=task.field_names if task.mode == "missing" else (),
+        include_object=task.include_object if task.mode == "missing" else None,
     )
     apply_annotation_proposal(
         graph,

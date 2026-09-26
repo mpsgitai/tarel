@@ -208,6 +208,10 @@ def refresh_source_graph_use_case(
     graph_name: str,
     *,
     namespace: str | None = None,
+    annotate_new_provider: str | None = None,
+    annotation_workers: int = 1,
+    annotation_model: str | None = None,
+    annotation_timeout: float = 120.0,
     runtime: TarelRuntime | None = None,
 ) -> GraphRefreshResult:
     source = load_source_use_case(name, runtime=runtime)
@@ -221,6 +225,10 @@ def refresh_source_graph_use_case(
         graph_name,
         config_path=_config_path(source, runtime=runtime),
         namespace=namespace or source.namespace,
+        annotate_new_provider=annotate_new_provider,
+        annotation_workers=annotation_workers,
+        annotation_model=annotation_model,
+        annotation_timeout=annotation_timeout,
         runtime=runtime,
     )
 

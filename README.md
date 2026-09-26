@@ -38,6 +38,10 @@ warehouse transformations, measures, calendars, and currency logic remain author
 already live. TAREL describes and connects those assets; it does not duplicate their expressions,
 cache query results, or require a governed semantic model before an agent can start.
 
+Graph refresh is incremental: TAREL fingerprints connector-observed schema metadata, performs no
+write for an unchanged observation, and can optionally annotate only newly added objects or fields.
+It does not scan data rows or rerun annotation across the existing graph.
+
 ![TAREL field annotation inspector with semantic descriptions, evidence, and review state](https://raw.githubusercontent.com/mpsgitai/tarel/master/docs/assets/tarel-field-annotation-inspector.png)
 
 *Descriptions stay prominent; evidence, provenance, and optional review unfold only when needed.*

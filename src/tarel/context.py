@@ -860,6 +860,7 @@ def _context_object(
             ),
             annotation_state=field.annotation.state if field.annotation else None,
             reasons=tuple(reasons),
+            source_change=_source_change(field),
             tags=annotation.tags if annotation else (),
         )
         rank = (
@@ -901,9 +902,23 @@ def _context_object(
         annotation_state=node.annotation.state if node.annotation else None,
         fields=selected_fields,
         omitted_fields=max(0, len(fields) - len(selected_fields)),
+        source_change=_source_change(node),
         tags=annotation.tags if annotation else (),
     )
 
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _source_change(node: GraphNode) -> dict[str, object] | None:
+    value = node.metadata.get("source_change")
+    if not isinstance(value, dict):
+        return None
+    revision = value.get("from_revision")
+    reasons = value.get("reasons")
+    if not isinstance(revision, str) or not isinstance(reasons, list):
+        return None
+    if not all(isinstance(reason, str) for reason in reasons):
+        return None
+    return {"from_revision": revision, "reasons": list(reasons)}

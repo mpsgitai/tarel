@@ -66,6 +66,24 @@ class UIPresentationTests(TestCase):
 
     def test_browser_projection_nests_fields_and_keeps_only_object_relationships(self) -> None:
         graph = _graph()
+        graph = replace(
+            graph,
+            nodes=tuple(
+                replace(
+                    node,
+                    metadata={
+                        **node.metadata,
+                        "source_change": {
+                            "from_revision": "a" * 64,
+                            "reasons": ["field_type_changed"],
+                        },
+                    },
+                )
+                if node.label == "DateKey"
+                else node
+                for node in graph.nodes
+            ),
+        )
 
         payload = browser_graph(graph, editable=True, lineage_names=("sales-etl",))
 
@@ -91,6 +109,10 @@ class UIPresentationTests(TestCase):
         self.assertEqual(field_annotation["synonyms"], [])
         self.assertEqual(field_annotation["warnings"], [])
         self.assertEqual(fact["fields"][0]["reference"], "mart.FactSales.DateKey")
+        self.assertEqual(
+            fact["fields"][0]["source_change"]["reasons"],
+            ["field_type_changed"],
+        )
         self.assertEqual(len(payload["edges"]), 1)
 
     def test_browser_assets_render_expandable_complete_field_annotations(self) -> None:
@@ -116,11 +138,14 @@ class UIPresentationTests(TestCase):
             "field-quick-annotation",
             "Evidence &amp; technical detail",
             "Field annotation added as a usable draft.",
+            "Source schema changed",
+            "sourceChangeNotice",
         ):
             self.assertIn(marker, application)
         self.assertIn(".field-card", styles)
         self.assertIn(".field-evidence", styles)
         self.assertIn(".field-advanced", styles)
+        self.assertIn(".source-change-notice", styles)
 
     def test_cli_reports_an_invalid_ui_port_without_a_traceback(self) -> None:
         errors = StringIO()

@@ -126,6 +126,69 @@ def annotation_task_for_target(
     return _task_for_object(graph, node, mode=mode)
 
 
+def annotation_task_for_scope(
+    graph: GraphDocument,
+    target_id: str,
+    *,
+    field_names: tuple[str, ...],
+    include_object: bool,
+) -> AnnotationTask:
+    """Recreate an explicit missing-only delta task for validation and application."""
+    node = graph.node_by_id().get(target_id)
+    if node is None or node.type not in {"table", "view"}:
+        raise AnnotationFailure("target_not_found", f"Annotatable object not found: {target_id}")
+    selected_names = set(field_names)
+    if len(selected_names) != len(field_names):
+        raise AnnotationFailure("invalid_annotation_scope", "Delta fields must be unique.")
+    fields = tuple(
+        candidate
+        for candidate in graph.nodes
+        if candidate.type == "field"
+        and candidate.metadata.get("object_id") == target_id
+        and candidate.label in selected_names
+    )
+    if {field.label for field in fields} != selected_names:
+        raise AnnotationFailure(
+            "invalid_annotation_scope",
+            f"Delta fields do not match graph object: {node.label}",
+        )
+    if any(field.annotation is not None for field in fields):
+        raise AnnotationFailure(
+            "stale_proposal",
+            f"Delta annotation scope is no longer missing: {node.label}",
+        )
+    if include_object and node.annotation is not None:
+        raise AnnotationFailure(
+            "stale_proposal",
+            f"Delta object annotation is no longer missing: {node.label}",
+        )
+    return _task_for_object(
+        graph,
+        node,
+        mode="missing",
+        object_fields=fields,
+        include_object_override=include_object,
+    )
+
+
+def plan_annotation_delta_tasks(
+    graph: GraphDocument,
+    fields_by_target: Mapping[str, tuple[str, ...]],
+    *,
+    include_object_targets: frozenset[str],
+) -> tuple[AnnotationTask, ...]:
+    """Plan only annotation gaps introduced by one source refresh."""
+    return tuple(
+        annotation_task_for_scope(
+            graph,
+            target_id,
+            field_names=fields_by_target[target_id],
+            include_object=target_id in include_object_targets,
+        )
+        for target_id in sorted(fields_by_target)
+    )
+
+
 def validate_annotation_samples(
     graph: GraphDocument,
     samples_by_target: Mapping[str, SampleResult],
@@ -253,6 +316,7 @@ def _task_for_object(
     sample: SampleResult | None = None,
     profile: ObjectProfileResult | None = None,
     knowledge: KnowledgeContext | None = None,
+    include_object_override: bool | None = None,
 ) -> AnnotationTask:
     node_by_id = nodes_by_id or graph.node_by_id()
     all_fields = (
@@ -273,7 +337,11 @@ def _task_for_object(
             if edge.type == "foreign_key" and node.id in {edge.source_id, edge.target_id}
         )
     )
-    include_object = mode == "full" or node.annotation is None
+    include_object = (
+        mode == "full" or node.annotation is None
+        if include_object_override is None
+        else include_object_override
+    )
     fields = (
         all_fields
         if mode == "full"

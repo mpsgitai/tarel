@@ -275,6 +275,7 @@ def _metadata_with_review(
 ) -> dict[str, object]:
     metadata = dict(node.metadata)
     metadata.pop("change_review", None)
+    metadata.pop("source_change", None)
     existing = _review_metadata(node)
     if existing is None:
         annotation = original_annotation or _require_annotation(node)
