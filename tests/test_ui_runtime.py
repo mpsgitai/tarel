@@ -19,6 +19,10 @@ class ExplicitUIRuntimeTests(TestCase):
     def test_sdk_ui_forwards_the_clients_explicit_runtime(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             sdk = Tarel(Path(temporary_directory) / "state")
+
+            def ready(_url: str) -> None:
+                pass
+
             with patch("tarel.ui.server.run_ui", return_value=0) as run:
                 result = sdk.ui.serve(
                     "sales",
@@ -26,12 +30,14 @@ class ExplicitUIRuntimeTests(TestCase):
                     editable=True,
                     port=8765,
                     open_browser=False,
+                    on_ready=ready,
                 )
 
         self.assertEqual(result, 0)
         self.assertIs(run.call_args.kwargs["runtime"], sdk.runtime)
         self.assertEqual(run.call_args.kwargs["lineages"], ("sales-lineage",))
         self.assertTrue(run.call_args.kwargs["editable"])
+        self.assertIs(run.call_args.kwargs["on_ready"], ready)
 
     def test_cli_ui_accepts_an_explicit_state_root(self) -> None:
         with TemporaryDirectory() as temporary_directory:

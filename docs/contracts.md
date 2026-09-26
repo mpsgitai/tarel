@@ -3787,6 +3787,7 @@ the packaged browser from that client's runtime, independent of the process work
 The CLI offers the equivalent `tarel ui GRAPH --state-root STATE_ROOT`. Omitting `--state-root`
 preserves the CLI's local `.tarel` default. Both forms bind to loopback only; read-only remains the
 default and edit capability still requires the explicit `editable=True` or `--edit` switch.
+Embedded hosts can pass `on_ready` to receive the final loopback URL without parsing console text.
 
 ### Explore first, details when needed
 

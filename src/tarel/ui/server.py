@@ -6,6 +6,7 @@ import json
 import secrets
 import threading
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1152,6 +1153,7 @@ def run_ui(
     model_path: Path | None = None,
     n_threads: int | None = None,
     runtime: TarelRuntime | None = None,
+    on_ready: Callable[[str], None] | None = None,
 ) -> int:
     if port < 0 or port > 65535:
         raise UIFailure("invalid_port", "Port must be between 0 and 65535.")
@@ -1187,9 +1189,12 @@ def run_ui(
         raise _ui_failure(exc) from exc
     server = _Server(("127.0.0.1", port), backend, secrets.token_urlsafe(32))
     address = f"http://127.0.0.1:{server.server_port}/"
-    mode = "edit" if editable else "read-only"
-    print(f"TAREL UI ({mode}): {address}")
-    print("Press Ctrl+C to stop.")
+    if on_ready is None:
+        mode = "edit" if editable else "read-only"
+        print(f"TAREL UI ({mode}): {address}")
+        print("Press Ctrl+C to stop.")
+    else:
+        on_ready(address)
     if open_browser:
         threading.Timer(0.15, lambda: webbrowser.open(address)).start()
     try:

@@ -1981,6 +1981,7 @@ class UIAPI(_RuntimeAPI):
         search_mode: str = "bm25",
         model_path: Path | None = None,
         n_threads: int | None = None,
+        on_ready: Callable[[str], None] | None = None,
     ) -> int:
         from tarel.ui.server import run_ui
 
@@ -2004,6 +2005,7 @@ class UIAPI(_RuntimeAPI):
             model_path=model_path,
             n_threads=n_threads,
             runtime=self._runtime,
+            on_ready=on_ready,
         )
 
 

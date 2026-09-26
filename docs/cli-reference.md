@@ -5796,11 +5796,12 @@ tarel.view.workspace(name: 'str', *, lineages: 'tuple[str, ...]' = (), selection
 #### SDK UI
 
 ```python
-tarel.ui.serve(graph: 'str | None' = None, *, workspace: 'str | None' = None, systems: 'tuple[str, ...]' = (), graphs: 'tuple[str, ...]' = (), areas: 'tuple[str, ...]' = (), schemas: 'tuple[str, ...]' = (), zones: 'tuple[str, ...]' = (), lineages: 'tuple[str, ...]' = (), focuses: 'tuple[str, ...]' = (), editable: 'bool' = False, family_mode: 'str | None' = None, architecture_file: 'Path | None' = None, architecture_edit: 'bool' = False, port: 'int' = 0, open_browser: 'bool' = True, search_mode: 'str' = 'bm25', model_path: 'Path | None' = None, n_threads: 'int | None' = None) -> 'int'
+tarel.ui.serve(graph: 'str | None' = None, *, workspace: 'str | None' = None, systems: 'tuple[str, ...]' = (), graphs: 'tuple[str, ...]' = (), areas: 'tuple[str, ...]' = (), schemas: 'tuple[str, ...]' = (), zones: 'tuple[str, ...]' = (), lineages: 'tuple[str, ...]' = (), focuses: 'tuple[str, ...]' = (), editable: 'bool' = False, family_mode: 'str | None' = None, architecture_file: 'Path | None' = None, architecture_edit: 'bool' = False, port: 'int' = 0, open_browser: 'bool' = True, search_mode: 'str' = 'bm25', model_path: 'Path | None' = None, n_threads: 'int | None' = None, on_ready: 'Callable[[str], None] | None' = None) -> 'int'
 ```
 
 The browser is loopback-only and uses the explicit state root supplied to `Tarel(...)`. It is
 read-only unless `editable=True` is passed.
+Embedded hosts may use `on_ready` to receive the selected loopback URL directly.
 
 #### SDK workspace
 
