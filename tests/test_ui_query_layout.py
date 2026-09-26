@@ -135,6 +135,33 @@ assert.equal(searchHitObject({id:'object_family:sales',source_graph:'south',
 })()
 """)
 
+    def test_preview_explains_orientation_delta_and_gap_actions(self) -> None:
+        self._script(r"""
+const delta = {
+  identity:{identical:false,stable_prefix_reusable:false},
+  graph_revision_changed:true,
+  logical_hints_changed:true,
+  request:{retrieval_changed:true,selection_changed:true},
+  objects:{added:['<unsafe object>'],removed:[],changed:[],preserved:2},
+  fields:{added:['Sales.ProductCategory'],removed:[],changed:['Sales.Amount']},
+  gaps:{added:[],resolved:[],changed:[
+    {code:'missing_field_semantics',before:4,after:2},
+    {code:'scope_warnings',before:1,after:1,evidence_changed:true}
+  ]},
+  size:{estimated_token_delta:120}
+};
+const html = renderContextDelta(delta);
+assert.ok(html.includes('Since the previous packet'));
+assert.ok(html.includes('&lt;unsafe object&gt;'));
+assert.ok(!html.includes('<unsafe object>'));
+assert.ok(html.includes('Kept:</strong> 2 objects'));
+assert.ok(html.includes('missing_field_semantics 4→2'));
+assert.ok(html.includes('scope_warnings evidence changed'));
+assert.ok(html.includes(
+  '1 field · graph revision · logical hints · retrieval · selection evidence'
+));
+""")
+
     def _script(self, assertions: str) -> None:
         harness = r"""
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');

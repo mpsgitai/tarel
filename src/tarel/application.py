@@ -55,11 +55,18 @@ from tarel.context import (
     compile_context_from_search,
     compile_context_prefix,
 )
+from tarel.context_guidance import (
+    ContextBrief,
+    ContextDelta,
+    context_brief,
+    context_delta,
+)
 from tarel.context_hints_application import add_logical_context_hints_use_case
 from tarel.context_output import SCOPED_CONTEXT_CONTRACT_VERSION, ContextScope
 from tarel.context_packets import (
     ContextPacketDiff,
     ContextPacketImpact,
+    ContextPacketSnapshot,
     context_packet_graph_identity,
     context_packet_impact,
     diff_context_packets,
@@ -1568,6 +1575,41 @@ def _workspace_context_object_ids(
 
 def diff_context_packets_use_case(left: Path, right: Path) -> ContextPacketDiff:
     return diff_context_packets(load_context_packet(left), load_context_packet(right))
+
+
+def context_packet_diff_views_use_case(
+    left: Path, right: Path,
+) -> tuple[ContextPacketDiff, ContextDelta]:
+    """Load two packet files once and return their technical and guidance views."""
+    left_packet = load_context_packet(left)
+    right_packet = load_context_packet(right)
+    return (
+        diff_context_packets(left_packet, right_packet),
+        context_delta(left_packet, right_packet),
+    )
+
+
+def describe_context_use_case(
+    packet: ContextResult | ContextPacketSnapshot | dict[str, object],
+) -> ContextBrief:
+    return context_brief(packet)
+
+
+def compare_context_use_case(
+    previous: ContextResult | ContextPacketSnapshot | dict[str, object] | Path,
+    current: ContextResult | ContextPacketSnapshot | dict[str, object] | Path,
+) -> ContextDelta:
+    left = load_context_packet(previous) if isinstance(previous, Path) else previous
+    right = load_context_packet(current) if isinstance(current, Path) else current
+    return context_delta(left, right)
+
+
+def context_packet_brief_use_case(packet: Path) -> ContextBrief:
+    return describe_context_use_case(load_context_packet(packet))
+
+
+def compare_context_packets_use_case(left: Path, right: Path) -> ContextDelta:
+    return compare_context_use_case(load_context_packet(left), load_context_packet(right))
 
 
 def context_packet_impact_use_case(

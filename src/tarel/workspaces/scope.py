@@ -223,7 +223,6 @@ def intersect_scope_objects(
         objects=objects,
         scope_hash=_scope_hash(
             scope.workspace, scope.selection, graph_names, objects,
-            warnings=combined_warnings,
         ),
         warnings=combined_warnings,
     )
@@ -234,8 +233,6 @@ def _scope_hash(
     selection: ScopeSelection,
     graph_names: tuple[str, ...],
     objects: tuple[ResolvedScopeObject, ...],
-    *,
-    warnings: tuple[str, ...] = (),
 ) -> str:
     payload = {
         "graphs": list(graph_names),
@@ -243,8 +240,6 @@ def _scope_hash(
         "selection": selection.to_dict(),
         "workspace": workspace,
     }
-    if warnings:
-        payload["warnings"] = list(warnings)
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()

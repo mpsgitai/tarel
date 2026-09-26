@@ -11,6 +11,7 @@ const queryTools = {
   previewRequest: 0,
   scope: null,
   packet: null,
+  lastPacket: null,
   expansion: null,
   scopeObjects: [],
   selectedObjects: new Set(),
@@ -184,6 +185,7 @@ function clearContextPreview(message = "Options changed. Build a new project con
 function queryToolsScopeChanged() {
   queryTools.scopeRequest += 1;
   queryTools.scope = null;
+  queryTools.lastPacket = null;
   clearContextPreview("Project view reloaded. Reload the project scope before building context.");
   if (projectSearchActive()) scheduleProjectSearch();
   if ($("#context-dialog").open) loadContextScope();
@@ -231,6 +233,7 @@ function contextRequestPayload() {
   };
   if ($("#context-kind").value === "selected") payload.object_ids = [...queryTools.selectedObjects];
   if (queryTools.scopeObjects.length) payload.scope_objects = queryTools.scopeObjects;
+  if (queryTools.lastPacket) payload.previous_packet = queryTools.lastPacket;
   return payload;
 }
 
@@ -259,7 +262,8 @@ async function buildContextPreview(event) {
     const result = await api("/api/context/preview", payload);
     if (request !== queryTools.previewRequest || !$("#context-dialog").open) return;
     queryTools.packet = result.packet;
-    renderContextPreview(result.packet);
+    renderContextPreview(result.packet, result.brief, result.delta || null);
+    queryTools.lastPacket = result.packet;
     $("#context-request-status").textContent = "Packet ready. This is metadata context, not an analytical answer.";
   } catch (error) {
     if (request !== queryTools.previewRequest) return;
@@ -270,7 +274,7 @@ async function buildContextPreview(event) {
   }
 }
 
-function renderContextPreview(packet) {
+function renderContextPreview(packet, brief, delta) {
   const stable = packet.stable;
   const dynamic = packet.dynamic;
   const omissions = dynamic.omissions;
@@ -280,15 +284,19 @@ function renderContextPreview(packet) {
   const hintOmissions = Object.entries(dynamic.logical_hints?.omissions || {}).filter(([, count]) => count > 0);
   const hintWarnings = dynamic.logical_hints?.warnings || [];
   const selections = new Map((dynamic.selection || []).map(item => [item.id, item]));
+  const briefGaps = brief?.gaps || [];
+  const scopeLabel = brief?.scope?.label || stable.graph?.name || "Current context";
   const container = $("#context-result");
   container.hidden = false;
   container.innerHTML = `<div class="context-result-heading"><h3>Compiled context</h3><div><button id="copy-context" class="quiet-button">Copy JSON</button><button id="download-context" class="quiet-button">Download JSON</button></div></div>
-    <div class="context-counts">${fact("Objects", stable.objects.length)}${fact("Fields", fieldCount)}${fact("Joins", stable.joins.length)}${fact("Characters", `${dynamic.budgets.context_characters} / ${dynamic.budgets.max_characters}`)}${fact("Stable token estimate", `≈ ${Math.ceil(dynamic.budgets.stable_characters / 4)}`)}</div>
+    <section class="context-brief"><p class="eyebrow">Current working context</p><h4>${escapeHtml(scopeLabel)}</h4><p><strong>Focus:</strong> ${(brief?.focus || []).length ? brief.focus.map(escapeHtml).join(", ") : "query-independent"}</p><p><strong>Coverage:</strong> ${brief?.coverage ? `${brief.coverage.described_objects}/${brief.coverage.objects} ${contextNoun(brief.coverage.objects, "object")} and ${brief.coverage.described_fields}/${brief.coverage.fields} ${contextNoun(brief.coverage.fields, "field")} described` : "not available"}</p><p><strong>Continuity:</strong> ${escapeHtml(String(brief?.continuity?.packet_hash || packet.identity.packet_hash || "unknown").slice(0, 12))} · stable ${escapeHtml(String(brief?.continuity?.stable_hash || packet.identity.stable_hash || "unknown").slice(0, 12))}</p></section>
+    ${delta ? renderContextDelta(delta) : ""}
+    <div class="context-counts">${fact("Objects", stable.objects.length)}${fact("Fields", fieldCount)}${fact("Joins", stable.joins.length)}${fact("Characters", `${dynamic.budgets.context_characters} / ${dynamic.budgets.max_characters}`)}${fact("Estimated tokens", `≈ ${brief?.loaded?.estimated_tokens || Math.ceil(Number(dynamic.budgets.context_characters || 0) / 4)}`)}${fact("Stable tokens", `≈ ${brief?.loaded?.stable_estimated_tokens || Math.ceil(Number(dynamic.budgets.stable_characters || 0) / 4)}`)}</div>
     <p class="semantic-origin">Annotations: ${stable.annotation_states.map(escapeHtml).join(", ") || "none"}. Physical structure is independent of annotation approval. Packet ${escapeHtml(packet.identity.packet_hash.slice(0, 12))}.</p>
     ${stable.logical_hints ? `<p class="semantic-origin">Logical hints: ${hints.length} · ${escapeHtml(stable.logical_hints.mode)}. Metadata only; no entity-resolution candidates or executable family expansion.</p>` : ""}
     ${hints.some(item => item.usage === "exploratory_only") ? '<p class="logical-warning">This packet contains exploratory logical hints. Validate them before analytical use.</p>' : ""}
     ${!stable.objects.length ? '<p class="logical-warning">No physical objects were selected. This packet is not a sufficient basis for a data query.</p>' : ""}
-    <section class="context-omissions"><strong>${omitted.length || hintOmissions.length ? "Bounded context · omissions" : "No omissions reported by the compiler"}</strong><p>${omitted.map(([name, count]) => `${escapeHtml(name)}: ${count}`).join(" · ")}</p>${omissions.reasons.length ? `<ul>${omissions.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${hintOmissions.length ? `<p>Logical hints omitted: ${hintOmissions.map(([reason, count]) => `${escapeHtml(reason)}: ${count}`).join(" · ")}</p>` : ""}${hintWarnings.map(warning => `<p class="logical-warning">${escapeHtml(warning)}</p>`).join("")}</section>
+    <section class="context-omissions"><strong>${briefGaps.length ? `${briefGaps.length} context gap${briefGaps.length === 1 ? "" : "s"}` : "No context gaps detected"}</strong>${briefGaps.map(gap => `<article class="context-gap"><span>${escapeHtml(gap.category)} · ${gap.count}</span><p>${escapeHtml(gap.message)}</p><small>Next: ${escapeHtml(gap.action)}</small></article>`).join("")}<details class="optional-details"><summary><span>Compiler omissions and warnings</span></summary><div class="optional-body"><p>${omitted.map(([name, count]) => `${escapeHtml(name)}: ${count}`).join(" · ") || "No bounded metadata omissions."}</p>${omissions.reasons.length ? `<ul>${omissions.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${hintOmissions.length ? `<p>Logical hints omitted: ${hintOmissions.map(([reason, count]) => `${escapeHtml(reason)}: ${count}`).join(" · ")}</p>` : ""}${hintWarnings.map(warning => `<p class="logical-warning">${escapeHtml(warning)}</p>`).join("")}</div></details></section>
     <details class="optional-details" open><summary><span>Selected objects · ${stable.objects.length}</span></summary><div class="optional-body context-object-list">${stable.objects.map(item => { const omittedFields = selections.get(item.id)?.omitted_fields || 0; return `<article><strong>${escapeHtml(item.label)}</strong><small>${item.fields.length} fields · Source review state: ${escapeHtml(item.annotation_state || "not recorded")}</small>${item.description ? `<p>${escapeHtml(item.description)}</p>` : '<p>Semantic text not included.</p>'}${omittedFields ? `<button class="quiet-button" data-expand-context-object="${escapeHtml(item.id)}">Load fuller field list · ${omittedFields} omitted</button>` : ""}</article>`; }).join("")}</div></details>
     <section id="context-expansion" hidden></section>
     <details class="optional-details"><summary><span>Exact CLI / SDK packet</span><small>${escapeHtml(packet.contract_version)}</small></summary><div class="optional-body"><pre id="context-json" tabindex="0"></pre></div></details>`;
@@ -296,6 +304,43 @@ function renderContextPreview(packet) {
   $("#copy-context").addEventListener("click", copyContextPacket);
   $("#download-context").addEventListener("click", downloadContextPacket);
   $$('[data-expand-context-object]').forEach(button => button.addEventListener("click", () => expandContextObject(button.dataset.expandContextObject, button)));
+}
+
+function renderContextDelta(delta) {
+  const identity = delta.identity || {};
+  if (identity.identical) return '<section class="context-delta"><strong>Context unchanged</strong><p>The existing packet and stable prefix remain reusable.</p></section>';
+  const objects = delta.objects || {};
+  const fields = delta.fields || {};
+  const joins = delta.joins || {};
+  const gaps = delta.gaps || {};
+  const change = (objectNames, fieldNames, joinNames) => {
+    const parts = [];
+    if (objectNames?.length) parts.push(objectNames.slice(0, 3).map(escapeHtml).join(", ") + (objectNames.length > 3 ? ` +${objectNames.length - 3}` : ""));
+    if (fieldNames?.length) parts.push(`${fieldNames.length} ${contextNoun(fieldNames.length, "field")}`);
+    if (joinNames?.length) parts.push(`${joinNames.length} ${contextNoun(joinNames.length, "join")}`);
+    return parts.join(" · ") || "none";
+  };
+  const gapChanges = [
+    ...(gaps.added || []).map(item => `+${item.code} (${item.count})`),
+    ...(gaps.resolved || []).map(item => `−${item.code}`),
+    ...(gaps.changed || []).map(item => item.before === item.after
+      ? `${item.code} evidence changed`
+      : `${item.code} ${item.before}→${item.after}`),
+  ];
+  const tokenDelta = delta.size?.estimated_token_delta || 0;
+  const kept = Number(objects.preserved || 0);
+  const changed = change(objects.changed, fields.changed, joins.changed);
+  const changeSignals = changed === "none" ? [] : [changed];
+  if (delta.graph_revision_changed) changeSignals.push("graph revision");
+  if (delta.logical_hints_changed) changeSignals.push("logical hints");
+  if (delta.request?.retrieval_changed) changeSignals.push("retrieval");
+  if (delta.request?.selection_changed) changeSignals.push("selection evidence");
+  const changedSummary = changeSignals.join(" · ") || "none";
+  return `<section class="context-delta"><p class="eyebrow">Since the previous packet</p><p><strong>Added:</strong> ${change(objects.added, fields.added, joins.added)}</p><p><strong>Kept:</strong> ${kept} ${contextNoun(kept, "object")}</p><p><strong>Removed:</strong> ${change(objects.removed, fields.removed, joins.removed)}</p><p><strong>Changed:</strong> ${changedSummary}</p><p><strong>Size:</strong> ${tokenDelta > 0 ? "+" : ""}${tokenDelta} estimated ${contextNoun(Math.abs(tokenDelta), "token")} · ${identity.stable_prefix_reusable ? "stable prefix reusable" : "stable prefix changed"}</p><p><strong>Gaps:</strong> ${gapChanges.length ? gapChanges.map(escapeHtml).join(" · ") : "unchanged"}</p></section>`;
+}
+
+function contextNoun(count, singular) {
+  return Number(count) === 1 ? singular : `${singular}s`;
 }
 
 async function expandContextObject(objectId, button) {

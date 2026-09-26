@@ -136,6 +136,18 @@ class ArchitectureReviewTests(TestCase):
         for route in ("/api/architecture/connection", "/api/manual/job", "/api/search"):
             status, _ = self.post(server, route, b"{}", length=256 * 1024 + 1)
             self.assertEqual(status, 413, route)
+        context_payload = json.dumps(
+            {"padding": "é" * 140_000}, ensure_ascii=False,
+        ).encode()
+        self.assertGreater(len(context_payload), 256 * 1024)
+        self.assertLess(len(context_payload), 512 * 1024)
+        status, result = self.post(server, "/api/context/preview", context_payload)
+        self.assertEqual(status, 400, result)
+        self.assertEqual(result["error"]["code"], "invalid_query_request")
+        status, _ = self.post(
+            server, "/api/context/preview", b"{}", length=512 * 1024 + 1,
+        )
+        self.assertEqual(status, 413)
         status, _ = self.post(server, "/api/architecture/layout", b"{}", length=5 * 1024 * 1024)
         self.assertEqual(status, 413)
         status, _ = self.post(

@@ -71,7 +71,8 @@ class UIQueryToolsTests(TestCase):
         self.assertEqual(len(result["scope_identity"]), 64)
 
     def test_preview_exactly_matches_sdk_and_cli_json(self):
-        actual = self._preview()["packet"]
+        response = self._preview()
+        actual = response["packet"]
         self.assertEqual(
             actual, self.sdk.context.graph("sales", "DateKey", validated_only=True).to_dict()
         )
@@ -83,6 +84,30 @@ class UIQueryToolsTests(TestCase):
             status = main(["context", "sales", "DateKey", "--validated-only", "--format", "json"])
         self.assertEqual(status, 0)
         self.assertEqual(json.loads(output.getvalue()), actual)
+        self.assertEqual(
+            response["brief"], self.sdk.context.brief(actual).to_dict()
+        )
+
+    def test_preview_compares_with_the_previous_validated_packet(self):
+        previous = self._preview(max_fields_per_object=1)["packet"]
+
+        current = self._preview(
+            query="DateKey sales", max_fields_per_object=10, previous_packet=previous,
+        )
+
+        self.assertEqual(current["delta"]["identity"]["previous_packet_hash"],
+                         previous["identity"]["packet_hash"])
+        self.assertGreaterEqual(current["delta"]["objects"]["preserved"], 1)
+        self.assertIn("gaps", current["delta"])
+
+    def test_preview_rejects_a_tampered_previous_packet(self):
+        previous = self._preview()["packet"]
+        previous["dynamic"]["query"] = "tampered"
+
+        with self.assertRaises(UIQueryFailure) as error:
+            self._preview(previous_packet=previous)
+
+        self.assertEqual(error.exception.code, "invalid_previous_context")
 
     def test_review_filter_hides_unreviewed_semantics_not_physical_tables(self):
         reviewed = self._preview()["packet"]

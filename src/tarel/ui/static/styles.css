@@ -385,9 +385,17 @@ dialog::backdrop { background: rgb(0 0 0 / 70%); }
 #context-result { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 16px; }
 .context-result-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .context-result-heading > div { display: flex; gap: 6px; }
+.context-brief, .context-delta { margin-bottom: 12px; padding: 11px 12px; border: 1px solid var(--line); background: var(--surface); }
+.context-brief h4 { margin: 2px 0 8px; overflow-wrap: anywhere; }
+.context-brief p, .context-delta p { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.context-delta { border-left: 3px solid var(--indigo); }
 .context-counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; border: 1px solid var(--line); background: var(--line); }
 .context-omissions { margin-top: 12px; color: var(--muted); font-size: 12px; }
 .context-omissions ul { padding-left: 20px; }
+.context-gap { margin-top: 8px; padding: 8px 9px; border-left: 2px solid #fbbf24; background: var(--surface); }
+.context-gap span { color: #fbbf24; font-size: 10px; text-transform: uppercase; }
+.context-gap p { margin-top: 3px; color: var(--text); }
+.context-gap small { color: var(--muted); }
 .context-object-list { display: grid; gap: 10px; }
 .context-object-list article { border-top: 1px solid var(--line); padding-top: 8px; }
 .context-object-list strong, .context-object-list small { display: block; }

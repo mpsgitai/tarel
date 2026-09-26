@@ -102,6 +102,9 @@ from tarel.ui.query_tools import (
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 
 _MAX_REQUEST_BYTES = 256 * 1024
+# Context packets are bounded by 100,000 Unicode characters in the UI. Allow
+# their UTF-8 representation plus the small preview or expansion envelope.
+_MAX_CONTEXT_REQUEST_BYTES = 512 * 1024
 # A full positions map fits within the sidecar cap, plus the JSON/revision envelope.
 _MAX_LAYOUT_REQUEST_BYTES = MAX_SIDECAR_BYTES + 1024
 _OPTIONAL_KINDS = ("identity", "mappings", "coverage", "imports")
@@ -1009,11 +1012,12 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            limit = (
-                _MAX_LAYOUT_REQUEST_BYTES
-                if path == "/api/architecture/layout" and self.server.backend.architecture
-                else _MAX_REQUEST_BYTES
-            )
+            if path == "/api/architecture/layout" and self.server.backend.architecture:
+                limit = _MAX_LAYOUT_REQUEST_BYTES
+            elif path in {"/api/context/preview", "/api/context/expand"}:
+                limit = _MAX_CONTEXT_REQUEST_BYTES
+            else:
+                limit = _MAX_REQUEST_BYTES
             if length < 0 or length > limit:
                 raise UIFailure("request_too_large", "UI request is too large.", status=413)
             payload = json.loads(self.rfile.read(length))

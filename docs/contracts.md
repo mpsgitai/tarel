@@ -526,6 +526,50 @@ SDK consumers can alternatively split a retrieved packet with `tarel.context.spl
 resulting stable and dynamic JSON blocks carry the same hashes as the original packet; TAREL does
 not add provider-specific cache headers or claim that a provider accepted a cache write.
 
+### Compact orientation and conversation continuity
+
+Context guidance uses the derived `tarel.context-brief.v0.1` and `tarel.context-delta.v0.1` views
+over validated packets. It does not enter `stable`, `dynamic`, or either hash. Build a compact view
+directly or summarize a saved packet:
+
+```bash
+tarel context build warehouse "revenue by product" --brief
+tarel context brief context.json
+tarel context diff context-before.json context-after.json
+```
+
+The brief reports the exact workspace, graph, system, area, schema, zone, or focus selectors already
+present in the packet; loaded object, field, join, character, and approximate token counts; query
+terms or explicit scope labels; description coverage; evidence-backed gaps; and packet/stable hashes.
+The token estimate is `ceil(context_characters / 4)`. It is a quick harness-planning heuristic, not a
+provider tokenizer result.
+
+Gaps stay tied to packet evidence. TAREL can report missing included descriptions, bounded compiler
+omissions, absent included relationships, scope warnings, annotation warnings, logical-hint limits,
+and an empty physical selection. It does not infer a missing source, ambiguous business definition,
+or relationship merely from a question when the packet carries no such evidence. Each reported gap
+contains a next action suitable for CLI, SDK, and browser display.
+
+`context diff` retains its technical identity comparison and adds a `guidance` section in JSON. Its
+text output leads with added, kept, removed, and changed objects, fields, and joins; graph-revision,
+logical-hint, retrieval, and selection-evidence changes; size and gap movement; and whether the exact
+stable prefix remains reusable. Scope warning text and its derived identity are gap evidence and do
+not by themselves change the explicit scope boundary. Exact reuse requires both the same packet
+contract and the same stable hash. The SDK exposes the same projections:
+
+```python
+brief = tarel.context.brief(packet)
+delta = tarel.context.compare(previous_packet, packet)
+```
+
+`brief.continuity` carries packet and stable hashes plus selected object IDs. A harness can retain
+that small state beside its own conversation note for choices such as currency, period, or preferred
+measure. Those analytical choices remain outside the graph because they belong to the conversation,
+not to source-owned metadata.
+
+The browser keeps the last successful preview in the page and sends it with the next preview request
+to render the same delta. The server stores no conversation or packet session state.
+
 ### Optional logical hints
 
 Logical topology, object families and reference mappings remain separate artifacts, not physical

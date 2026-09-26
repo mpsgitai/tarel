@@ -30,6 +30,8 @@ from tarel.application import (
     compile_workspace_context_prefix_use_case,
     compile_workspace_context_use_case,
     configure_provider_use_case,
+    context_packet_brief_use_case,
+    context_packet_diff_views_use_case,
     context_packet_impact_use_case,
     create_demo_use_case,
     create_workspace_use_case,
@@ -39,7 +41,7 @@ from tarel.application import (
     define_workspace_area_use_case,
     define_workspace_system_use_case,
     define_workspace_zone_use_case,
-    diff_context_packets_use_case,
+    describe_context_use_case,
     discover_catalog_use_case,
     discover_relationships_use_case,
     download_embedding_model_use_case,
@@ -86,6 +88,7 @@ from tarel.connectors.contracts import (
     SampleResult,
 )
 from tarel.context import DEFAULT_MAX_CONTEXT_CHARACTERS, ContextFailure, ContextResult
+from tarel.context_guidance import ContextBrief, ContextDelta
 from tarel.context_output import canonical_json
 from tarel.demo import DemoFailure
 from tarel.discovery.cli import add_discovery_commands, dispatch_discovery
@@ -876,6 +879,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_annotation_state_arguments(context_build)
     _add_logical_hint_arguments(context_build)
+    context_build.add_argument(
+        "--brief", action="store_true",
+        help="Print only compact orientation, coverage, gaps, and continuity identity.",
+    )
     _add_format_argument(context_build)
 
     context_prefix = context_commands.add_parser(
@@ -894,7 +901,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_retrieval_scope_arguments(context_prefix)
     _add_annotation_state_arguments(context_prefix)
     _add_logical_hint_arguments(context_prefix)
+    context_prefix.add_argument(
+        "--brief", action="store_true",
+        help="Print only compact orientation, coverage, gaps, and continuity identity.",
+    )
     _add_format_argument(context_prefix)
+
+    context_brief = context_commands.add_parser(
+        "brief",
+        help="Summarize one saved context packet for a continuing conversation.",
+    )
+    context_brief.add_argument("packet", type=Path)
+    _add_format_argument(context_brief)
 
     context_diff = context_commands.add_parser(
         "diff",
@@ -1180,7 +1198,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if (
         len(arguments) >= 2
         and arguments[0] == "context"
-        and arguments[1] not in {"build", "prefix", "diff", "impact", "expand", "-h", "--help"}
+        and arguments[1]
+        not in {"build", "prefix", "brief", "diff", "impact", "expand", "-h", "--help"}
     ):
         arguments.insert(1, "build")
     args = parser.parse_args(arguments)
@@ -2022,7 +2041,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ),
                     **context_arguments,
                 )
-            _render_context(result, output_format=args.format)
+            _render_context(result, output_format=args.format, brief_only=args.brief)
             return 0
 
         if args.command == "context" and args.context_command == "prefix":
@@ -2065,12 +2084,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ),
                     **prefix_arguments,
                 )
-            _render_context(result, output_format=args.format)
+            _render_context(result, output_format=args.format, brief_only=args.brief)
+            return 0
+
+        if args.command == "context" and args.context_command == "brief":
+            result = context_packet_brief_use_case(args.packet)
+            _render_context_brief(result, output_format=args.format)
             return 0
 
         if args.command == "context" and args.context_command == "diff":
-            result = diff_context_packets_use_case(args.left, args.right)
-            _render_context_diff(result.to_dict(), output_format=args.format)
+            result, guidance = context_packet_diff_views_use_case(args.left, args.right)
+            _render_context_diff(
+                result.to_dict(), guidance=guidance, output_format=args.format,
+            )
             return 0
 
         if args.command == "context" and args.context_command == "impact":
@@ -2580,6 +2606,8 @@ def _render_search_results(results: SearchResults, *, output_format: str) -> Non
     print(f"Mode: {results.mode}")
     print(f"Annotation states: {', '.join(sorted(results.annotation_states))}")
     print(f"Terms: {', '.join(results.terms)}")
+    for warning in results.warnings:
+        print(f"Scope warning: {warning}")
     if results.inventory:
         print(
             "Objects: "
@@ -2615,7 +2643,12 @@ def _render_search_results(results: SearchResults, *, output_format: str) -> Non
             print(f"  Fields: {fields}")
 
 
-def _render_context(result: ContextResult, *, output_format: str) -> None:
+def _render_context(
+    result: ContextResult, *, output_format: str, brief_only: bool = False,
+) -> None:
+    if brief_only:
+        _render_context_brief(describe_context_use_case(result), output_format=output_format)
+        return
     if output_format == "json":
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return
@@ -2629,6 +2662,8 @@ def _render_context(result: ContextResult, *, output_format: str) -> None:
         print(f"Workspace: {result.scope.workspace}")
         print(f"Scope hash: {result.scope.scope_hash}")
         print(f"Graphs: {', '.join(result.scope.graphs)}")
+    for warning in result.scope.warnings:
+        print(f"Scope warning: {warning}")
     print(f"Annotation states: {', '.join(sorted(result.annotation_states))}")
 
     print("\n## Stable objects")
@@ -2717,10 +2752,26 @@ def _render_grounding(result: GroundingBundle, *, output_format: str) -> None:
     print(result.dynamic_prompt(), end="")
 
 
-def _render_context_diff(payload: dict[str, object], *, output_format: str) -> None:
+def _render_context_brief(result: ContextBrief, *, output_format: str) -> None:
     if output_format == "json":
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return
+    print(result.text())
+    for gap in result.gaps[:3]:
+        print(f"- [{gap.category}] {gap.message} Next: {gap.action}")
+    if len(result.gaps) > 3:
+        print(f"- +{len(result.gaps) - 3} more gap types; use --format json for every action.")
+
+
+def _render_context_diff(
+    payload: dict[str, object], *, guidance: ContextDelta, output_format: str,
+) -> None:
+    if output_format == "json":
+        print(json.dumps({**payload, "guidance": guidance.to_dict()}, indent=2, sort_keys=True))
+        return
+    print("# Context update")
+    print(guidance.text())
+    print("\n## Packet identity")
     print(f"Identical: {'yes' if payload['identical'] else 'no'}")
     print(f"Stable changed: {'yes' if payload['stable_changed'] else 'no'}")
     if "logical_hints_changed" in payload:

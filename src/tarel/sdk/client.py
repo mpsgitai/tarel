@@ -28,10 +28,12 @@ from tarel.application import (
     build_graph_use_case,
     build_retrieval_index_use_case,
     check_relationship_use_case,
+    compare_context_use_case,
     compile_context_prefix_use_case,
     compile_context_use_case,
     compile_workspace_context_prefix_use_case,
     compile_workspace_context_use_case,
+    context_packet_brief_use_case,
     context_packet_impact_use_case,
     create_workspace_use_case,
     current_focus_use_case,
@@ -41,6 +43,7 @@ from tarel.application import (
     define_workspace_area_use_case,
     define_workspace_system_use_case,
     define_workspace_zone_use_case,
+    describe_context_use_case,
     diff_context_packets_use_case,
     discover_relationships_use_case,
     download_embedding_model_use_case,
@@ -77,6 +80,7 @@ from tarel.connectors.contracts import (
 )
 from tarel.context import ContextResult
 from tarel.context_caching import ContextCacheParts, split_context_packet
+from tarel.context_guidance import ContextBrief, ContextDelta
 from tarel.context_output import DEFAULT_MAX_CONTEXT_CHARACTERS
 from tarel.context_packets import ContextPacketDiff, ContextPacketImpact, ContextPacketSnapshot
 from tarel.discovery.application import (
@@ -1110,6 +1114,25 @@ class ContextAPI(_RuntimeAPI):
 
     def split(self, packet: ContextResult) -> ContextCacheParts:
         return split_context_packet(packet)
+
+    def brief(
+        self,
+        packet: ContextResult | ContextPacketSnapshot | dict[str, object] | str | Path,
+    ) -> ContextBrief:
+        """Summarize scope, size, coverage, gaps, and continuity identity."""
+        if isinstance(packet, (str, Path)):
+            return context_packet_brief_use_case(Path(packet))
+        return describe_context_use_case(packet)
+
+    def compare(
+        self,
+        previous: ContextResult | ContextPacketSnapshot | dict[str, object] | str | Path,
+        current: ContextResult | ContextPacketSnapshot | dict[str, object] | str | Path,
+    ) -> ContextDelta:
+        """Describe context additions, removals, gap changes, and cache reuse."""
+        left = Path(previous) if isinstance(previous, str) else previous
+        right = Path(current) if isinstance(current, str) else current
+        return compare_context_use_case(left, right)
 
     def diff(self, left: str | Path, right: str | Path) -> ContextPacketDiff:
         return diff_context_packets_use_case(Path(left), Path(right))
