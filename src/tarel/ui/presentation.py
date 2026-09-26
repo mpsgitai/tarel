@@ -975,6 +975,7 @@ def _object_payload(
             _field_payload(
                 field,
                 graph.name,
+                parent_label=node.label,
                 source_semantics=semantic_bindings.get((graph.name, field.id), ()),
             )
             for field in sorted(
@@ -1005,6 +1006,7 @@ def _field_payload(
     node: GraphNode,
     graph_name: str,
     *,
+    parent_label: str,
     source_semantics: Iterable[dict[str, object]] = (),
 ) -> dict[str, object]:
     return {
@@ -1017,6 +1019,7 @@ def _field_payload(
         "is_nullable": node.metadata.get("is_nullable"),
         "label": node.label,
         "position": node.metadata.get("position"),
+        "reference": f"{parent_label}.{node.label}",
         "review": node.metadata.get("annotation_review"),
         "semantic_type": node.metadata.get("semantic_type"),
         "source_semantics": list(source_semantics),

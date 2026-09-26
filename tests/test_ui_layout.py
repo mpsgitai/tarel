@@ -31,6 +31,9 @@ class FocusedLayoutTests(TestCase):
         for name in ("open-objects", "open-inspector", "open-review-queue", "open-evidence"):
             self.assertIn("aria-controls", layout.ids[name])
             self.assertIn("aria-expanded", layout.ids[name])
+        self.assertNotIn("checked", layout.ids["context-reviewed"])
+        self.assertIn("All usable annotations", html)
+        self.assertIn("Optional governance", html)
         self.assertLess(html.index('id="object-list"'), html.index('id="zones-panel"'))
 
     @skipUnless(shutil.which("node"), "Node.js is only needed for renderer regressions")
@@ -138,6 +141,30 @@ assert.ok(html.includes('Fields · 0'));
 assert.ok(!html.includes('do-not-show'));
 assert.ok(!html.includes('Entity candidates'));
 assert.ok(html.includes('Close object details'));
+""")
+
+    @skipUnless(shutil.which("node"), "Node.js is only needed for renderer regressions")
+    def test_missing_field_editor_and_advanced_annotation_details_are_progressive(self) -> None:
+        self._script(r"""
+state.selectedId = 'a';
+state.data = {editable:true,revisions:{sales:'revision'},objects:[{
+  id:'a',object_id:'a',graph:'sales',type:'table',namespace:'dbo',name:'Orders',
+  label:'dbo.Orders',primary_key:['id'],source_semantics:[],fields:[
+    {label:'Missing',reference:'dbo.Orders.Missing',data_type:'text',annotation:null},
+    {label:'Revenue',reference:'dbo.Orders.Revenue',data_type:'decimal',semantic_type:'currency',
+      annotation:{description:'Net revenue.',state:'draft',synonyms:['sales'],tags:['financial'],
+        evidence:[],provenance:{source:'provider'}}}
+  ],annotation:{description:'Orders.',state:'draft'},
+}],edges:[],lineages:[],semantic_imports:[],semantic_models:[]};
+mountOptionalInformation = () => {};
+renderInspector();
+const html = $('#inspector').innerHTML;
+assert.ok(html.includes('class="field-quick-annotation"'));
+assert.ok(html.includes('data-reference="dbo.Orders.Missing"'));
+assert.ok(html.includes('Optional synonyms &amp; tags'));
+assert.ok(html.includes('Evidence &amp; technical detail'));
+assert.ok(html.includes('Net revenue.'));
+assert.ok(!html.includes('<details class="field-advanced" open'));
 """)
 
     def _script(self, assertions: str) -> None:

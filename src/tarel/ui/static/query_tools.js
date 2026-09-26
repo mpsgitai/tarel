@@ -177,7 +177,7 @@ function clearContextPreview(message = "Options changed. Build a new project con
   $("#build-context").disabled = !queryTools.scope;
   const reviewed = $("#context-reviewed").checked;
   const logical = $("#context-logical-hints").value;
-  $("#context-policy-summary").textContent = `${reviewed ? "Reviewed annotations" : "Draft annotations allowed"} · ${logical === "include_candidates" ? "exploratory hints" : logical === "confirmed_only" ? "reviewed hints" : "logical hints off"}`;
+  $("#context-policy-summary").textContent = `${reviewed ? "Reviewed annotations only" : "All usable annotations"} · ${logical === "include_candidates" ? "exploratory hints" : logical === "confirmed_only" ? "reviewed hints" : "logical hints off"}`;
   $("#context-policy-summary").className = !reviewed || logical === "include_candidates" ? "caution" : "";
 }
 

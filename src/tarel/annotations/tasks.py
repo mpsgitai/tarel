@@ -8,7 +8,7 @@ from collections.abc import Mapping
 
 from tarel.annotations.contracts import AnnotationFailure, AnnotationTask
 from tarel.connectors.contracts import ObjectProfileResult, SampleResult
-from tarel.graph.contracts import GraphDocument, GraphNode
+from tarel.graph.contracts import GraphDocument, GraphEdge, GraphNode
 from tarel.knowledge.contracts import KnowledgeContext
 from tarel.providers.contracts import Message, StructuredRequest
 
@@ -52,6 +52,23 @@ def plan_annotation_tasks(
     profiles_by_target: dict[str, ObjectProfileResult] | None = None,
     knowledge_by_target: dict[str, KnowledgeContext] | None = None,
 ) -> tuple[AnnotationTask, ...]:
+    nodes_by_id = graph.node_by_id()
+    fields_by_object: dict[str, list[GraphNode]] = {}
+    for node in graph.nodes:
+        object_id = node.metadata.get("object_id")
+        if node.type == "field" and isinstance(object_id, str):
+            fields_by_object.setdefault(object_id, []).append(node)
+    relationships_by_object: dict[str, list[GraphEdge]] = {}
+    for edge in graph.edges:
+        if edge.type != "foreign_key":
+            continue
+        relationships_by_object.setdefault(edge.source_id, []).append(edge)
+        relationships_by_object.setdefault(edge.target_id, []).append(edge)
+    objects_with_missing_fields = {
+        object_id
+        for object_id, fields in fields_by_object.items()
+        if any(field.annotation is None for field in fields)
+    }
     selected: list[GraphNode] = []
     normalized_objects = {item.lower() for item in objects or set()}
     for node in graph.nodes:
@@ -61,7 +78,11 @@ def plan_annotation_tasks(
             continue
         if normalized_objects and not _matches_object(node, normalized_objects):
             continue
-        if missing_only and node.annotation is not None:
+        if (
+            missing_only
+            and node.annotation is not None
+            and node.id not in objects_with_missing_fields
+        ):
             continue
         selected.append(node)
     if limit is not None:
@@ -73,6 +94,10 @@ def plan_annotation_tasks(
         _task_for_object(
             graph,
             node,
+            mode="missing" if missing_only else "full",
+            nodes_by_id=nodes_by_id,
+            object_fields=tuple(fields_by_object.get(node.id, ())),
+            object_relationships=tuple(relationships_by_object.get(node.id, ())),
             sample=samples.get(node.id),
             profile=profiles.get(node.id),
             knowledge=knowledge.get(node.id),
@@ -81,11 +106,23 @@ def plan_annotation_tasks(
     )
 
 
-def annotation_task_for_target(graph: GraphDocument, target_id: str) -> AnnotationTask:
+def annotation_task_for_target(
+    graph: GraphDocument,
+    target_id: str,
+    *,
+    mode: str = "full",
+) -> AnnotationTask:
+    if mode not in {"full", "missing"}:
+        raise AnnotationFailure("invalid_annotation_mode", f"Unsupported mode: {mode}")
     node = graph.node_by_id().get(target_id)
     if node is None or node.type not in {"table", "view"}:
         raise AnnotationFailure("target_not_found", f"Annotatable object not found: {target_id}")
-    return _task_for_object(graph, node)
+    if mode == "missing" and not _has_missing_annotations(graph, node):
+        raise AnnotationFailure(
+            "annotation_complete",
+            f"Object has no missing annotations: {node.label}",
+        )
+    return _task_for_object(graph, node, mode=mode)
 
 
 def validate_annotation_samples(
@@ -208,16 +245,39 @@ def _task_for_object(
     graph: GraphDocument,
     node: GraphNode,
     *,
+    mode: str = "full",
+    nodes_by_id: dict[str, GraphNode] | None = None,
+    object_fields: tuple[GraphNode, ...] | None = None,
+    object_relationships: tuple[GraphEdge, ...] | None = None,
     sample: SampleResult | None = None,
     profile: ObjectProfileResult | None = None,
     knowledge: KnowledgeContext | None = None,
 ) -> AnnotationTask:
-    node_by_id = graph.node_by_id()
-    fields = [
-        candidate
-        for candidate in graph.nodes
-        if candidate.type == "field" and candidate.metadata.get("object_id") == node.id
-    ]
+    node_by_id = nodes_by_id or graph.node_by_id()
+    all_fields = (
+        list(object_fields)
+        if object_fields is not None
+        else [
+            candidate
+            for candidate in graph.nodes
+            if candidate.type == "field" and candidate.metadata.get("object_id") == node.id
+        ]
+    )
+    relationships = (
+        object_relationships
+        if object_relationships is not None
+        else tuple(
+            edge
+            for edge in graph.edges
+            if edge.type == "foreign_key" and node.id in {edge.source_id, edge.target_id}
+        )
+    )
+    include_object = mode == "full" or node.annotation is None
+    fields = (
+        all_fields
+        if mode == "full"
+        else [candidate for candidate in all_fields if candidate.annotation is None]
+    )
     context = {
         "catalog": graph.catalog,
         "dialect": graph.dialect,
@@ -250,10 +310,22 @@ def _task_for_object(
                 ].label,
                 "to_fields": edge.metadata.get("to_fields", []),
             }
-            for edge in graph.edges
-            if edge.type == "foreign_key" and node.id in {edge.source_id, edge.target_id}
+            for edge in relationships
         ],
     }
+    if mode == "missing":
+        context["annotation_scope"] = {
+            "include_object": include_object,
+            "mode": mode,
+            "requested_fields": [item.label for item in fields],
+        }
+        if node.annotation is not None:
+            context["existing_object_annotation"] = {
+                "description": node.annotation.description,
+                "role": node.annotation.role,
+                "synonyms": list(node.annotation.synonyms),
+                "tags": list(node.annotation.tags),
+            }
     technical_context = json.dumps(
         context,
         ensure_ascii=False,
@@ -297,7 +369,14 @@ def _task_for_object(
                     role="user",
                     content=(
                         "Propose a draft annotation for this object and every supplied field. "
-                        "Return only the requested structured result.\n\n"
+                        + (
+                            "This is a missing-only delta. Only the fields listed in the "
+                            "annotation scope will be applied; an existing object annotation "
+                            "is context and will not be replaced. "
+                            if mode == "missing" and not include_object
+                            else ""
+                        )
+                        + "Return only the requested structured result.\n\n"
                         + serialized
                         + (
                             "\n\nOBSERVED-VALUE POLICY: Samples and profile values are sensitive "
@@ -312,6 +391,9 @@ def _task_for_object(
             schema_name="TarelObjectAnnotation",
             schema=annotation_schema(),
         ),
+        mode=mode,
+        include_object=include_object,
+        field_names=tuple(item.label for item in fields),
         context_documents=knowledge.references if knowledge is not None else (),
         protected_values=tuple(
             sorted(set(_protected_values(sample)) | set(_protected_profile_values(profile)))
@@ -388,6 +470,7 @@ def annotation_schema() -> dict[str, object]:
             "role": {"enum": [*_FIELD_ROLES, None]},
             "semantic_type": {"type": ["string", "null"]},
             "synonyms": {"items": {"type": "string"}, "type": "array"},
+            "tags": {"items": {"type": "string"}, "type": "array"},
             "warnings": {"items": {"type": "string"}, "type": "array"},
         },
         "required": [
@@ -396,6 +479,7 @@ def annotation_schema() -> dict[str, object]:
             "role",
             "semantic_type",
             "synonyms",
+            "tags",
             "warnings",
             "confidence",
             "confidence_reason",
@@ -414,6 +498,7 @@ def annotation_schema() -> dict[str, object]:
             "grain": {"type": ["string", "null"]},
             "role": {"enum": [*_OBJECT_ROLES, None]},
             "synonyms": {"items": {"type": "string"}, "type": "array"},
+            "tags": {"items": {"type": "string"}, "type": "array"},
             "warnings": {"items": {"type": "string"}, "type": "array"},
         },
         "required": [
@@ -421,6 +506,7 @@ def annotation_schema() -> dict[str, object]:
             "role",
             "grain",
             "synonyms",
+            "tags",
             "warnings",
             "confidence",
             "confidence_reason",
@@ -441,3 +527,14 @@ def _matches_object(node: GraphNode, values: set[str]) -> bool:
 
 def graph_catalog(node: GraphNode) -> str:
     return str(node.metadata.get("catalog", ""))
+
+
+def _has_missing_annotations(graph: GraphDocument, node: GraphNode) -> bool:
+    if node.annotation is None:
+        return True
+    return any(
+        candidate.type == "field"
+        and candidate.metadata.get("object_id") == node.id
+        and candidate.annotation is None
+        for candidate in graph.nodes
+    )

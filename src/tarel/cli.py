@@ -986,7 +986,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicitly allow small-domain values in ephemeral annotation input.",
     )
     graph_annotate.add_argument("--config", type=Path, help="Private connector configuration.")
-    graph_annotate.add_argument("--include-annotated", action="store_true")
+    graph_annotate.add_argument(
+        "--include-annotated",
+        action="store_true",
+        help="Re-annotate complete objects instead of filling only missing annotations.",
+    )
     graph_annotate.add_argument("--dry-run", action="store_true")
     _add_annotation_knowledge_arguments(graph_annotate)
     _add_format_argument(graph_annotate)
@@ -1006,19 +1010,27 @@ def build_parser() -> argparse.ArgumentParser:
     annotation_plan.add_argument("--namespace", "--schema", dest="namespace")
     annotation_plan.add_argument("--object", action="append", dest="objects")
     annotation_plan.add_argument("--limit", type=int)
-    annotation_plan.add_argument("--include-annotated", action="store_true")
+    annotation_plan.add_argument(
+        "--include-annotated",
+        action="store_true",
+        help="Plan complete objects instead of filling only missing annotations.",
+    )
     _add_annotation_knowledge_arguments(annotation_plan)
     _add_format_argument(annotation_plan)
 
     annotation_next = annotation_commands.add_parser(
         "next",
-        help="Return the next full annotation task as JSON for the coding agent.",
+        help="Return the next scoped annotation task as JSON for the coding agent.",
     )
     annotation_next.add_argument("name", nargs="?", help="Graph name.")
     annotation_next.add_argument("--focus", help="Return the next task inside this focus.")
     annotation_next.add_argument("--namespace", "--schema", dest="namespace")
     annotation_next.add_argument("--object", action="append", dest="objects")
-    annotation_next.add_argument("--include-annotated", action="store_true")
+    annotation_next.add_argument(
+        "--include-annotated",
+        action="store_true",
+        help="Return a complete-object task instead of a missing-only delta.",
+    )
     annotation_next.add_argument("--samples", type=int, default=0)
     annotation_next.add_argument("--profile-rows", type=int, default=0)
     annotation_next.add_argument(
@@ -1063,7 +1075,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     annotation_edit = annotation_commands.add_parser(
         "edit",
-        help="Apply a bounded JSON patch to one annotation proposal.",
+        help="Create or update one bounded object or field annotation.",
     )
     annotation_edit.add_argument("name")
     annotation_edit.add_argument("target", help="Object, field, or stable node ID.")
@@ -3112,8 +3124,11 @@ def _render_annotation_plan(
                             "context_documents": [
                                 item.to_dict() for item in task.context_documents
                             ],
+                            "field_names": list(task.field_names),
                             "graph_name": task.graph_name,
                             "id": task.id,
+                            "include_object": task.include_object,
+                            "mode": task.mode,
                             "target": task.target_label,
                             "target_id": task.target_id,
                         }
@@ -3127,7 +3142,8 @@ def _render_annotation_plan(
         return
     print(f"Annotation tasks: {len(tasks)}")
     for task in tasks:
-        print(f"{task.id}  {task.graph_name}:{task.target_label}")
+        scope = "object + fields" if task.include_object else f"{len(task.field_names)} fields"
+        print(f"{task.id}  {task.graph_name}:{task.target_label}  [{task.mode}; {scope}]")
 
 
 def _render_knowledge(payload: dict[str, object], *, output_format: str) -> None:

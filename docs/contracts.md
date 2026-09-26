@@ -365,6 +365,64 @@ endpoint validation can still use full graph reads. Supplying an already loaded 
 redundant nested derived-graph load, without relaxing validation.
 
 
+## Annotation metadata and delta enrichment
+
+TAREL annotations are optional metadata on an existing table, view, or field. The source remains
+the calculation authority. An annotation may add a description, role, synonyms, free-text tags,
+warnings, evidence, confidence, provenance, and review state. Grain and semantic type remain small
+typed hints on the corresponding graph node. These records do not define executable measures,
+aggregation rules, calendars, currency conversions, or query-result caches.
+
+Draft, deferred, and validated annotations are usable by the default search, retrieval, and context
+policies. A project may opt into validated-only consumption; human approval is not required for a
+small autonomous project to begin using clearly labelled provider drafts. The browser therefore
+shows description, synonyms, and tags first and keeps confidence, evidence, provenance, and review
+details behind an explicit disclosure.
+
+### Missing-only delta
+
+Annotation planning and provider batches are missing-only by default. Missing-only applies at both
+levels:
+
+- a table without an annotation requests the object annotation;
+- every field without an annotation is requested independently;
+- an annotated table with one or more unannotated fields still receives a task;
+- existing object and field annotations are never overwritten by that task.
+
+The task carries `mode=missing`, `include_object`, and the exact `field_names` scope. A coding-agent
+submission returns the same `mode`; older full submissions without it remain accepted as
+`mode=full`. Task identity binds the requested delta to the current technical context and missing
+set, so a proposal becomes stale if another run fills the same gap first. `--include-annotated` or
+`missing_only=False` deliberately requests the older complete-object behavior and retains the
+existing protection against overwriting human-reviewed annotations.
+
+This makes interrupted or repeated broad runs naturally resumable through the graph itself. It is
+not a patch log and does not store provider prompts, sample rows, profiles, or observed values.
+Samples and profiles remain bounded, protected, ephemeral inputs under the existing source policy.
+
+### Direct SDK and CLI edit
+
+The same bounded edit application path can create a previously missing annotation when its patch
+contains a non-empty `description`, or update an existing annotation. For example:
+
+```python
+result = tarel.annotation.edit(
+    "warehouse",
+    "mart.sales.NET_SALES",
+    {
+        "description": "Net sales in the reporting currency.",
+        "synonyms": ["revenue", "net revenue"],
+        "tags": ["metric", "financial"],
+    },
+    reason="Project-specific usage guidance.",
+)
+```
+
+The CLI accepts the same patch through `tarel annotation edit`. A created or edited annotation is
+a human-authored `draft`, immediately usable under the normal policy and optionally validatable
+later. The local UI exposes a compact field form only in `--edit` mode.
+
+
 ## Schema changes and stale claims
 
 `tarel graph refresh NAME` compares a fresh connector observation with the current local graph. It
@@ -771,7 +829,7 @@ the rebuildable vector-index checkpoint.
 ### Data boundary
 
 Retrieval documents are constructed from an allowlist. They may contain names, data types, key
-flags, technical descriptions, annotation descriptions, roles, synonyms, and semantic types. They
+flags, technical descriptions, annotation descriptions, roles, synonyms, tags, and semantic types. They
 never copy samples, connection strings, arbitrary metadata dictionaries, evidence values, or
 provenance payloads. Generated indexes, index checkpoints, and downloaded GGUF files are excluded
 from Git and package builds. The default projection includes draft, deferred, and validated

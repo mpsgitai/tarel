@@ -75,6 +75,7 @@ def run_annotation_batch(
                     task_id=task.id,
                     target_id=task.target_id,
                     annotation=ObjectAnnotationProposal.from_dict(raw),
+                    mode=task.mode,
                     context_documents=task.context_documents,
                 )
                 current_graph = apply_annotation_proposal(
@@ -153,6 +154,7 @@ def _validate_generated_proposal(
         task_id=task.id,
         target_id=task.target_id,
         annotation=ObjectAnnotationProposal.from_dict(raw),
+        mode=task.mode,
         context_documents=task.context_documents,
     )
     apply_annotation_proposal(

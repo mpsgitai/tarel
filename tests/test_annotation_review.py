@@ -17,10 +17,62 @@ from tarel.context import compile_context
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import AnnotationProvenance, GraphAnnotation, GraphDocument
 from tarel.graph.store import FileGraphStore
+from tarel.retrieval.documents import build_retrieval_documents
 from tarel.search import search_graph
 
 
 class AnnotationReviewTests(TestCase):
+    def test_empty_tags_do_not_rewrite_legacy_annotation_payloads(self) -> None:
+        legacy = GraphAnnotation(description="Existing annotation.").to_dict()
+
+        self.assertNotIn("tags", legacy)
+        self.assertEqual(GraphAnnotation.from_dict(legacy).to_dict(), legacy)
+
+    def test_edit_creates_missing_field_annotation_with_optional_tags(self) -> None:
+        graph = build_graph_from_catalog(
+            "create_demo",
+            CatalogResult(
+                connector="test",
+                source_type="database",
+                catalog="CreateDemo",
+                dialect="ansi",
+                objects=(
+                    CatalogObject(
+                        namespace="warehouse",
+                        name="Sales",
+                        kind="table",
+                        fields=(CatalogField("NetSales", 1, "decimal", False),),
+                    ),
+                ),
+            ),
+        )
+
+        updated, record = edit_annotation(
+            graph,
+            "warehouse.Sales.NetSales",
+            {
+                "description": "Net sales in the reporting currency.",
+                "synonyms": ["revenue"],
+                "tags": ["metric", "financial"],
+            },
+            reason="Added a project-specific usage hint.",
+        )
+
+        annotation = record.node.annotation
+        self.assertIsNotNone(annotation)
+        assert annotation is not None
+        self.assertEqual(annotation.tags, ("metric", "financial"))
+        self.assertEqual(annotation.synonyms, ("revenue",))
+        self.assertEqual(annotation.provenance.source, "human")
+        self.assertEqual(annotation.state, "draft")
+        restored = GraphDocument.from_dict(updated.to_dict())
+        self.assertEqual(restored.to_dict(), updated.to_dict())
+        self.assertEqual(search_graph(updated, "financial").hits[0].label, "warehouse.Sales")
+        field_document = next(
+            item for item in build_retrieval_documents(updated) if item.field_id is not None
+        )
+        self.assertIn("Tags: metric, financial", field_document.text)
+
     def test_edit_preserves_original_proposal_and_validate_appends_review(self) -> None:
         graph = _review_graph()
 

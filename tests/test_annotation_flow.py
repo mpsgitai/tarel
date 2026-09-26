@@ -1,6 +1,7 @@
 import json
 import os
 import stat
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -21,6 +22,7 @@ from tarel.connectors.contracts import (
     ValueCount,
 )
 from tarel.graph.build import build_graph_from_catalog
+from tarel.graph.contracts import AnnotationProvenance, GraphAnnotation
 from tarel.providers.config import (
     check_openrouter,
     check_provider,
@@ -33,6 +35,111 @@ from tarel.providers.contracts import ProviderFailure
 
 
 class AnnotationFlowTests(TestCase):
+    def test_missing_only_task_fills_field_delta_without_replacing_existing_semantics(self) -> None:
+        graph = build_graph_from_catalog(
+            "delta_demo",
+            CatalogResult(
+                connector="test",
+                source_type="database",
+                catalog="Demo",
+                dialect="ansi",
+                objects=(
+                    CatalogObject(
+                        namespace="sales",
+                        name="Order",
+                        kind="table",
+                        fields=(
+                            CatalogField("OrderId", 1, "integer", False),
+                            CatalogField("NetSales", 2, "decimal", False),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        object_node = next(node for node in graph.nodes if node.type == "table")
+        existing_field = next(node for node in graph.nodes if node.label == "OrderId")
+        existing_object_annotation = GraphAnnotation(
+            description="Sales orders.",
+            tags=("transaction",),
+            provenance=AnnotationProvenance(source="human"),
+            state="validated",
+        )
+        existing_field_annotation = GraphAnnotation(
+            description="Stable order identifier.",
+            provenance=AnnotationProvenance(source="human"),
+            state="validated",
+        )
+        graph = replace(
+            graph,
+            nodes=tuple(
+                replace(node, annotation=existing_object_annotation)
+                if node.id == object_node.id
+                else replace(node, annotation=existing_field_annotation)
+                if node.id == existing_field.id
+                else node
+                for node in graph.nodes
+            ),
+        )
+
+        tasks = plan_annotation_tasks(graph)
+
+        self.assertEqual(len(tasks), 1)
+        task = tasks[0]
+        self.assertEqual(task.mode, "missing")
+        self.assertFalse(task.include_object)
+        self.assertEqual(task.field_names, ("NetSales",))
+        self.assertEqual(task.to_dict()["submission_template"]["mode"], "missing")
+        envelope = AnnotationProposalEnvelope.from_dict(
+            {
+                "annotation": {
+                    "confidence": 0.8,
+                    "confidence_reason": "Technical field name.",
+                    "description": "Ignored object proposal.",
+                    "evidence": [_evidence("object_name", "sales.Order")],
+                    "fields": [
+                        {
+                            "confidence": 0.85,
+                            "confidence_reason": "Technical field name.",
+                            "description": "Net sales amount.",
+                            "evidence": [_evidence("field_name", "NetSales")],
+                            "name": "NetSales",
+                            "role": "measure",
+                            "semantic_type": "currency",
+                            "synonyms": ["revenue"],
+                            "tags": ["financial"],
+                            "warnings": [],
+                        }
+                    ],
+                    "grain": "Ignored.",
+                    "role": "fact",
+                    "synonyms": [],
+                    "tags": [],
+                    "warnings": [],
+                },
+                "mode": "missing",
+                "target_id": task.target_id,
+                "task_id": task.id,
+            }
+        )
+
+        updated = apply_annotation_proposal(graph, envelope, source="agent")
+
+        self.assertEqual(
+            updated.node_by_id()[object_node.id].annotation,
+            existing_object_annotation,
+        )
+        self.assertEqual(
+            updated.node_by_id()[existing_field.id].annotation,
+            existing_field_annotation,
+        )
+        net_sales = next(node for node in updated.nodes if node.label == "NetSales")
+        self.assertEqual(net_sales.annotation.description, "Net sales amount.")
+        self.assertEqual(net_sales.annotation.tags, ("financial",))
+        self.assertEqual(plan_annotation_tasks(updated), ())
+        with self.assertRaises(AnnotationFailure) as stale:
+            apply_annotation_proposal(updated, envelope, source="agent")
+        self.assertEqual(stale.exception.code, "stale_proposal")
+
     def test_task_contains_structural_evidence_and_explicit_sample(self) -> None:
         catalog = CatalogResult(
             connector="test",
