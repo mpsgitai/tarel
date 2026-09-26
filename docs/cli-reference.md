@@ -1660,7 +1660,7 @@ Open the optional local graph, lineage, and annotation browser.
 **Syntax**
 
 ```text
-tarel ui [-h] [--workspace WORKSPACE] [--system SYSTEMS] [--graph GRAPHS] [--area AREAS]
+tarel ui [-h] [--workspace WORKSPACE] [--state-root STATE_ROOT] [--system SYSTEMS] [--graph GRAPHS] [--area AREAS]
                 [--schema SCHEMAS] [--zone ZONES] [--lineage LINEAGES] [--focus FOCUSES] [--edit]
                 [--port PORT] [--no-open] [--families {confirmed_only,include_candidates}]
                 [--search-mode {lexical,bm25,vector,hybrid}] [--model MODEL_PATH]
@@ -1675,6 +1675,7 @@ tarel ui [-h] [--workspace WORKSPACE] [--system SYSTEMS] [--graph GRAPHS] [--are
 | `-h, --help` | flag | optional | — | show this help message and exit |
 | `graph` | text | optional; optional positional | not set | Single local graph to inspect. |
 | `--workspace` | text | optional | not set | Open a workspace across one or more graphs. |
+| `--state-root` | Path | optional | not set | Explicit private TAREL state root; defaults to `.tarel` in the current directory. |
 | `--system` | text | optional; repeatable | not set | Include a system; repeat to include multiple systems. |
 | `--graph` | text | optional; repeatable | not set | Limit the scope to a graph; repeat to include multiple graphs. |
 | `--area` | text | optional; repeatable | not set | Limit to an area (NAME or SYSTEM:NAME); repeat for a union. |
@@ -5791,6 +5792,15 @@ tarel.view.graph(name: 'str', *, lineages: 'tuple[str, ...]' = (), editable: 'bo
 ```python
 tarel.view.workspace(name: 'str', *, lineages: 'tuple[str, ...]' = (), selection: 'ScopeSelection | None' = None, systems: 'tuple[str, ...]' = (), graphs: 'tuple[str, ...]' = (), areas: 'tuple[str, ...]' = (), schemas: 'tuple[str, ...]' = (), zones: 'tuple[str, ...]' = (), editable: 'bool' = False, family_mode: 'str | None' = None, focuses: 'tuple[str, ...]' = ()) -> 'dict[str, object]'
 ```
+
+#### SDK UI
+
+```python
+tarel.ui.serve(graph: 'str | None' = None, *, workspace: 'str | None' = None, systems: 'tuple[str, ...]' = (), graphs: 'tuple[str, ...]' = (), areas: 'tuple[str, ...]' = (), schemas: 'tuple[str, ...]' = (), zones: 'tuple[str, ...]' = (), lineages: 'tuple[str, ...]' = (), focuses: 'tuple[str, ...]' = (), editable: 'bool' = False, family_mode: 'str | None' = None, architecture_file: 'Path | None' = None, architecture_edit: 'bool' = False, port: 'int' = 0, open_browser: 'bool' = True, search_mode: 'str' = 'bm25', model_path: 'Path | None' = None, n_threads: 'int | None' = None) -> 'int'
+```
+
+The browser is loopback-only and uses the explicit state root supplied to `Tarel(...)`. It is
+read-only unless `editable=True` is passed.
 
 #### SDK workspace
 

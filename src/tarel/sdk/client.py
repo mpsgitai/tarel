@@ -312,6 +312,7 @@ class Tarel:
         "semantic",
         "source",
         "topology",
+        "ui",
         "view",
         "workspace",
     )
@@ -343,6 +344,7 @@ class Tarel:
         self.index = IndexAPI(self.runtime)
         self.knowledge = KnowledgeAPI(self.runtime)
         self.view = ViewAPI(self.runtime)
+        self.ui = UIAPI(self.runtime)
 
     @property
     def root(self) -> Path:
@@ -1953,6 +1955,56 @@ class ViewAPI(_RuntimeAPI):
                 "workspace_requires_full_projection"
             )
         return payload
+
+
+class UIAPI(_RuntimeAPI):
+    """Serve TAREL's loopback browser against this client's explicit state root."""
+
+    def serve(
+        self,
+        graph: str | None = None,
+        *,
+        workspace: str | None = None,
+        systems: tuple[str, ...] = (),
+        graphs: tuple[str, ...] = (),
+        areas: tuple[str, ...] = (),
+        schemas: tuple[str, ...] = (),
+        zones: tuple[str, ...] = (),
+        lineages: tuple[str, ...] = (),
+        focuses: tuple[str, ...] = (),
+        editable: bool = False,
+        family_mode: str | None = None,
+        architecture_file: Path | None = None,
+        architecture_edit: bool = False,
+        port: int = 0,
+        open_browser: bool = True,
+        search_mode: str = "bm25",
+        model_path: Path | None = None,
+        n_threads: int | None = None,
+    ) -> int:
+        from tarel.ui.server import run_ui
+
+        return run_ui(
+            graph,
+            workspace=workspace,
+            systems=systems,
+            graphs=graphs,
+            areas=areas,
+            schemas=schemas,
+            zones=zones,
+            lineages=lineages,
+            focuses=focuses,
+            editable=editable,
+            family_mode=family_mode,
+            architecture_file=architecture_file,
+            architecture_edit=architecture_edit,
+            port=port,
+            open_browser=open_browser,
+            search_mode=search_mode,
+            model_path=model_path,
+            n_threads=n_threads,
+            runtime=self._runtime,
+        )
 
 
 class FocusAPI(_RuntimeAPI):

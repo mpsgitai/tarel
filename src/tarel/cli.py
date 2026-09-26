@@ -736,6 +736,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ui.add_argument("graph", nargs="?", help="Single local graph to inspect.")
     ui.add_argument("--workspace", help="Open a workspace across one or more graphs.")
+    ui.add_argument(
+        "--state-root",
+        type=Path,
+        help="Explicit private TAREL state root; defaults to .tarel in the current directory.",
+    )
     _add_scope_arguments(ui)
     ui.add_argument(
         "--lineage",
@@ -1277,6 +1282,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "ui":
+            from tarel.runtime import TarelRuntime
             from tarel.ui.server import UIFailure, run_ui
 
             try:
@@ -1299,6 +1305,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     n_threads=args.n_threads,
                     port=args.port,
                     open_browser=not args.no_open,
+                    runtime=(
+                        TarelRuntime.local(args.state_root)
+                        if args.state_root is not None
+                        else None
+                    ),
                 )
             except UIFailure as exc:
                 print(f"error [{exc.code}]: {exc}", file=sys.stderr)
