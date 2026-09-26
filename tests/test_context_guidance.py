@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import redirect_stdout
+from copy import deepcopy
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
@@ -12,9 +13,15 @@ from unittest.mock import patch
 from test_context import _context_graph
 
 from tarel.cli import main
-from tarel.context import compile_context, compile_context_from_objects, compile_context_prefix
+from tarel.context import (
+    ContextFailure,
+    compile_context,
+    compile_context_from_objects,
+    compile_context_prefix,
+)
 from tarel.context_guidance import context_brief, context_delta
-from tarel.context_output import ContextScope
+from tarel.context_output import ContextScope, canonical_hash
+from tarel.context_packets import context_packet_from_dict
 from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.store import FileGraphStore
 from tarel.sdk import Tarel
@@ -64,6 +71,7 @@ class ContextGuidanceTests(TestCase):
         brief = context_brief(packet)
 
         self.assertIn("enterprise", brief.scope)
+        self.assertIn("graphs=context_demo", brief.scope)
         self.assertIn("systems=adventure, worldwide", brief.scope)
         warning = next(gap for gap in brief.gaps if gap.code == "scope_warnings")
         self.assertEqual(warning.category, "scope")
@@ -76,6 +84,46 @@ class ContextGuidanceTests(TestCase):
 
         self.assertEqual(brief.focus, ())
         self.assertIn("Focus: query-independent", brief.text())
+
+    def test_prefix_uses_explicit_focus_selectors_for_orientation(self) -> None:
+        packet = replace(
+            compile_context_prefix(_context_graph(), max_objects=10),
+            scope=ContextScope(mode="graph_scope_prefix", focuses=("revenue",)),
+        )
+
+        brief = context_brief(packet)
+
+        self.assertEqual(brief.focus, ("revenue",))
+
+    def test_missing_field_references_include_the_owning_object(self) -> None:
+        packet = compile_context(
+            _context_graph(include_geography_fk=True),
+            "sales city",
+            seed_limit=1,
+            max_objects=3,
+            max_fields_per_object=2,
+        )
+
+        gap = next(
+            item for item in context_brief(packet).gaps
+            if item.code == "missing_field_semantics"
+        )
+
+        self.assertIn("sales.FactSales.CustomerKey", gap.references)
+        self.assertIn("sales.DimCustomer.CustomerKey", gap.references)
+
+        previous = packet.to_dict()
+        current = deepcopy(previous)
+        _describe_field(previous, "sales.FactSales", "CustomerKey")
+        _describe_field(current, "sales.DimCustomer", "CustomerKey")
+        _refresh_identity(previous)
+        _refresh_identity(current)
+        change = next(
+            item for item in context_delta(previous, current).gaps_changed
+            if item.code == "missing_field_semantics"
+        )
+        self.assertEqual(change.before, change.after)
+        self.assertTrue(change.evidence_changed)
 
     def test_delta_reports_added_fields_gap_improvement_and_cache_change(self) -> None:
         graph = _context_graph()
@@ -113,7 +161,55 @@ class ContextGuidanceTests(TestCase):
 
         self.assertEqual((change.before, change.after), (1, 1))
         self.assertTrue(change.evidence_changed)
+        self.assertFalse(delta.scope_changed)
         self.assertIn("scope_warnings evidence changed", delta.text())
+
+    def test_delta_reports_logical_hint_changes_without_physical_changes(self) -> None:
+        packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
+        previous = packet.to_dict()
+        previous["stable"]["logical_hints"] = {"mode": "confirmed", "items": ["metric_a"]}
+        _refresh_identity(previous)
+        current = deepcopy(previous)
+        current["stable"]["logical_hints"]["items"] = ["metric_b"]
+        _refresh_identity(current)
+
+        delta = context_delta(previous, current)
+
+        self.assertTrue(delta.logical_hints_changed)
+        self.assertTrue(delta.to_dict()["logical_hints_changed"])
+        self.assertEqual(delta.objects_changed, ())
+        self.assertIn("Changed: logical hints", delta.text())
+
+    def test_logical_omission_reasons_distinguish_equal_counts(self) -> None:
+        packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
+        previous = packet.to_dict()
+        previous["dynamic"]["logical_hints"] = {
+            "omissions": {"review_policy": 1},
+            "warnings": [],
+        }
+        _refresh_identity(previous)
+        current = deepcopy(previous)
+        current["dynamic"]["logical_hints"]["omissions"] = {"character_budget": 1}
+        _refresh_identity(current)
+
+        delta = context_delta(previous, current)
+        change = next(item for item in delta.gaps_changed if item.code == "logical_hint_limits")
+        current_gap = next(
+            item for item in context_brief(current).gaps
+            if item.code == "logical_hint_limits"
+        )
+
+        self.assertEqual((change.before, change.after), (1, 1))
+        self.assertTrue(change.evidence_changed)
+        self.assertEqual(current_gap.references, ("character_budget: 1",))
+
+    def test_snapshot_hashes_are_revalidated_before_use(self) -> None:
+        packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
+        snapshot = context_packet_from_dict(packet.to_dict())
+        snapshot.stable["scope"]["namespace"] = "tampered"
+
+        with self.assertRaisesRegex(ContextFailure, "identity hashes"):
+            context_brief(snapshot)
 
     def test_identical_delta_keeps_stable_prefix_reusable(self) -> None:
         packet = compile_context(_context_graph(), "sales", seed_limit=1, max_objects=1)
@@ -244,3 +340,24 @@ class ContextGuidanceTests(TestCase):
         self.assertIn("Loaded: 1 object", output.getvalue())
         self.assertIn("1 selected object has no included description", output.getvalue())
         self.assertNotIn("## Stable objects", output.getvalue())
+
+
+def _refresh_identity(packet: dict[str, object]) -> None:
+    stable_hash = canonical_hash(packet["stable"])
+    dynamic_hash = canonical_hash(packet["dynamic"])
+    packet["identity"] = {
+        "dynamic_hash": dynamic_hash,
+        "packet_hash": canonical_hash({
+            "contract_version": packet["contract_version"],
+            "dynamic_hash": dynamic_hash,
+            "stable_hash": stable_hash,
+        }),
+        "stable_hash": stable_hash,
+    }
+
+
+def _describe_field(packet: dict[str, object], object_label: str, field_name: str) -> None:
+    objects = packet["stable"]["objects"]
+    target = next(item for item in objects if item["label"] == object_label)
+    field = next(item for item in target["fields"] if item["name"] == field_name)
+    field["description"] = "Documented for this packet."

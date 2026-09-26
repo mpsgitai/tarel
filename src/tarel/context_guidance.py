@@ -173,6 +173,7 @@ class ContextDelta:
     current_packet_hash: str
     scope_changed: bool
     query_changed: bool
+    logical_hints_changed: bool | None
     stable_prefix_reusable: bool
     objects_added: tuple[str, ...]
     objects_removed: tuple[str, ...]
@@ -195,7 +196,7 @@ class ContextDelta:
         return self.previous_packet_hash == self.current_packet_hash
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "view_version": CONTEXT_DELTA_VERSION,
             "identity": {
                 "current_packet_hash": self.current_packet_hash,
@@ -233,11 +234,18 @@ class ContextDelta:
                 "resolved": [gap.to_dict() for gap in self.gaps_resolved],
             },
         }
+        if self.logical_hints_changed is not None:
+            payload["logical_hints_changed"] = self.logical_hints_changed
+        return payload
 
     def text(self) -> str:
         added = _change_names(self.objects_added, self.fields_added, self.joins_added)
         removed = _change_names(self.objects_removed, self.fields_removed, self.joins_removed)
         changed = _change_names(self.objects_changed, self.fields_changed, self.joins_changed)
+        if self.logical_hints_changed:
+            changed = (
+                f"{changed} · logical hints" if changed != "none" else "logical hints"
+            )
         gaps = _delta_gap_summary(self)
         cache = "stable prefix reusable" if self.stable_prefix_reusable else "stable prefix changed"
         sign = "+" if self.estimated_token_delta > 0 else ""
@@ -264,14 +272,15 @@ def context_brief(
     object_entities = _entities(stable, "objects")
     objects = list(object_entities.values())
     joins = list(_entities(stable, "joins").values())
-    fields = [field for field, _label in _fields(object_entities).values()]
+    field_entities = list(_fields(object_entities).values())
+    fields = [field for field, _label in field_entities]
     scope = _mapping(stable.get("scope"), "stable.scope")
     budgets = _mapping(dynamic.get("budgets"), "dynamic.budgets")
     context_characters = _integer(budgets.get("context_characters"), "context_characters")
     stable_characters = _integer(budgets.get("stable_characters"), "stable_characters")
     graphs = _graphs(stable, scope)
     focus = _focus(dynamic, objects, scope)
-    gaps = _context_gaps(stable, dynamic, objects, fields, joins)
+    gaps = _context_gaps(stable, dynamic, objects, field_entities, joins)
     return ContextBrief(
         scope=_scope_label(stable, scope, graphs),
         graphs=graphs,
@@ -312,8 +321,16 @@ def context_delta(
     return ContextDelta(
         previous_packet_hash=left.packet_hash,
         current_packet_hash=right.packet_hash,
-        scope_changed=left.stable.get("scope") != right.stable.get("scope"),
+        scope_changed=(
+            _scope_boundary(_mapping(left.stable.get("scope"), "stable.scope"))
+            != _scope_boundary(_mapping(right.stable.get("scope"), "stable.scope"))
+        ),
         query_changed=left.dynamic.get("query") != right.dynamic.get("query"),
+        logical_hints_changed=(
+            left.stable.get("logical_hints") != right.stable.get("logical_hints")
+            if "logical_hints" in left.stable or "logical_hints" in right.stable
+            else None
+        ),
         stable_prefix_reusable=(
             left.contract_version == right.contract_version
             and left.stable_hash == right.stable_hash
@@ -360,7 +377,16 @@ def _snapshot(
     packet: ContextResult | ContextPacketSnapshot | dict[str, object],
 ) -> ContextPacketSnapshot:
     if isinstance(packet, ContextPacketSnapshot):
-        return packet
+        return context_packet_from_dict({
+            "contract_version": packet.contract_version,
+            "dynamic": packet.dynamic,
+            "identity": {
+                "dynamic_hash": packet.dynamic_hash,
+                "packet_hash": packet.packet_hash,
+                "stable_hash": packet.stable_hash,
+            },
+            "stable": packet.stable,
+        })
     if isinstance(packet, ContextResult):
         return context_packet_from_dict(packet.to_dict())
     if isinstance(packet, dict):
@@ -372,7 +398,7 @@ def _context_gaps(
     stable: dict[str, object],
     dynamic: dict[str, object],
     objects: list[dict[str, object]],
-    fields: list[dict[str, object]],
+    fields: list[tuple[dict[str, object], str]],
     joins: list[dict[str, object]],
 ) -> tuple[ContextGap, ...]:
     gaps: list[ContextGap] = []
@@ -396,7 +422,9 @@ def _context_gaps(
             references=missing_objects[:8],
         ))
     missing_fields = tuple(
-        str(field.get("name") or field["id"]) for field in fields if not field.get("description")
+        f"{object_label}.{field.get('name') or field['id']}"
+        for field, object_label in fields
+        if not field.get("description")
     )
     if missing_fields:
         count = len(missing_fields)
@@ -469,17 +497,21 @@ def _context_gaps(
         logical_omissions = _mapping(
             logical_payload.get("omissions", {}), "dynamic.logical_hints.omissions"
         )
-        omitted_hints = sum(
-            _integer(value, f"dynamic.logical_hints.omissions.{key}")
-            for key, value in logical_omissions.items()
+        omission_counts = tuple(
+            (key, _integer(value, f"dynamic.logical_hints.omissions.{key}"))
+            for key, value in sorted(logical_omissions.items())
         )
+        omitted_hints = sum(count for _key, count in omission_counts)
         if logical_warnings or omitted_hints:
+            omission_references = tuple(
+                f"{key}: {count}" for key, count in omission_counts if count
+            )
             gaps.append(ContextGap(
                 code="logical_hint_limits", category="relationship",
                 count=len(logical_warnings) + omitted_hints,
                 message="Logical relationship hints are incomplete or carry warnings.",
                 action="Use confirmed hints only or validate the affected relationship before use.",
-                references=logical_warnings[:8],
+                references=(omission_references + logical_warnings)[:8],
             ))
     if not objects:
         gaps.append(ContextGap(
@@ -507,10 +539,13 @@ def _scope_label(
     workspace = scope.get("workspace")
     root = str(workspace) if isinstance(workspace, str) and workspace else ", ".join(graphs)
     parts = [root]
-    for label, key in (
+    selectors = (
         ("systems", "systems"), ("areas", "areas"), ("schemas", "schemas"),
         ("zones", "zones"), ("focuses", "focuses"),
-    ):
+    )
+    if isinstance(workspace, str) and workspace:
+        selectors = (("graphs", "graphs"),) + selectors
+    for label, key in selectors:
         values = _strings(scope.get(key, []), f"stable.scope.{key}")
         if values:
             parts.append(f"{label}={_bounded_values(values)}")
@@ -529,7 +564,7 @@ def _focus(
     terms = _strings(retrieval.get("terms", []), "dynamic.retrieval.terms")
     candidates = list(terms)
     if not candidates:
-        for key in ("areas", "schemas", "zones", "systems"):
+        for key in ("focuses", "areas", "schemas", "zones", "systems"):
             candidates.extend(_strings(scope.get(key, []), f"stable.scope.{key}"))
     if not candidates and retrieval.get("mode") != "scope":
         for item in objects:
@@ -581,6 +616,11 @@ def _changed_ids(
         if left_value != right_value:
             changed.add(identifier)
     return changed
+
+
+def _scope_boundary(scope: dict[str, object]) -> dict[str, object]:
+    """Return the selection boundary without diagnostic warning text."""
+    return {key: value for key, value in scope.items() if key != "warnings"}
 
 
 def _entity_names(

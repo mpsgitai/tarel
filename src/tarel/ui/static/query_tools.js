@@ -329,7 +329,11 @@ function renderContextDelta(delta) {
   ];
   const tokenDelta = delta.size?.estimated_token_delta || 0;
   const kept = Number(objects.preserved || 0);
-  return `<section class="context-delta"><p class="eyebrow">Since the previous packet</p><p><strong>Added:</strong> ${change(objects.added, fields.added, joins.added)}</p><p><strong>Kept:</strong> ${kept} ${contextNoun(kept, "object")}</p><p><strong>Removed:</strong> ${change(objects.removed, fields.removed, joins.removed)}</p><p><strong>Changed:</strong> ${change(objects.changed, fields.changed, joins.changed)}</p><p><strong>Size:</strong> ${tokenDelta > 0 ? "+" : ""}${tokenDelta} estimated ${contextNoun(Math.abs(tokenDelta), "token")} · ${identity.stable_prefix_reusable ? "stable prefix reusable" : "stable prefix changed"}</p><p><strong>Gaps:</strong> ${gapChanges.length ? gapChanges.map(escapeHtml).join(" · ") : "unchanged"}</p></section>`;
+  const changed = change(objects.changed, fields.changed, joins.changed);
+  const changedSummary = delta.logical_hints_changed
+    ? `${changed === "none" ? "" : `${changed} · `}logical hints`
+    : changed;
+  return `<section class="context-delta"><p class="eyebrow">Since the previous packet</p><p><strong>Added:</strong> ${change(objects.added, fields.added, joins.added)}</p><p><strong>Kept:</strong> ${kept} ${contextNoun(kept, "object")}</p><p><strong>Removed:</strong> ${change(objects.removed, fields.removed, joins.removed)}</p><p><strong>Changed:</strong> ${changedSummary}</p><p><strong>Size:</strong> ${tokenDelta > 0 ? "+" : ""}${tokenDelta} estimated ${contextNoun(Math.abs(tokenDelta), "token")} · ${identity.stable_prefix_reusable ? "stable prefix reusable" : "stable prefix changed"}</p><p><strong>Gaps:</strong> ${gapChanges.length ? gapChanges.map(escapeHtml).join(" · ") : "unchanged"}</p></section>`;
 }
 
 function contextNoun(count, singular) {

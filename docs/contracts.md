@@ -552,8 +552,9 @@ contains a next action suitable for CLI, SDK, and browser display.
 
 `context diff` retains its technical identity comparison and adds a `guidance` section in JSON. Its
 text output leads with added, kept, removed, and changed objects and fields, size movement, gap
-movement, and whether the exact stable prefix remains reusable. Exact reuse requires both the same
-packet contract and the same stable hash. The SDK exposes the same projections:
+movement, logical-hint changes, and whether the exact stable prefix remains reusable. Scope warning
+text is gap evidence and does not by itself change the selected scope boundary. Exact reuse requires
+both the same packet contract and the same stable hash. The SDK exposes the same projections:
 
 ```python
 brief = tarel.context.brief(packet)
