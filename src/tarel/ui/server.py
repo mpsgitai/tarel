@@ -6,6 +6,7 @@ import json
 import secrets
 import threading
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -66,6 +67,7 @@ from tarel.reference_mapping.application import (
 from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
 from tarel.retrieval.contracts import RetrievalFailure
+from tarel.runtime import TarelRuntime
 from tarel.search import SearchFailure
 from tarel.semantic_concepts.contracts import SemanticConceptFailure
 from tarel.semantics.application import (
@@ -143,8 +145,9 @@ class UIConfig:
 
 
 class TarelUIBackend:
-    def __init__(self, config: UIConfig) -> None:
+    def __init__(self, config: UIConfig, *, runtime: TarelRuntime | None = None) -> None:
         self.config = config
+        self.runtime = runtime
         self._lineages = list(config.lineages)
         self.architecture = None
         if config.architecture_edit and not config.architecture_file:
@@ -164,7 +167,7 @@ class TarelUIBackend:
         payload = self._bootstrap(self.config.family_mode)
         if self.architecture:
             snapshot = self.architecture.snapshot()
-            workspace = load_workspace_use_case(self.config.workspace)
+            workspace = load_workspace_use_case(self.config.workspace, **self._runtime_options())
             # The object projection intentionally omits empty catalogs. The
             # authoritative workspace retains them and defines this boundary.
             observed = {
@@ -192,11 +195,16 @@ class TarelUIBackend:
             attempted = try_lazy_family_graph_view_use_case(
                 self._single_graph(), family_mode=family_mode,
                 workspaces=tuple(
-                    load_workspace_use_case(name) for name in list_workspaces_use_case()
+                    load_workspace_use_case(name, **self._runtime_options())
+                    for name in list_workspaces_use_case(**self._runtime_options())
                 ),
-                lineage_documents=tuple(load_lineage_use_case(name) for name in self._lineages),
+                lineage_documents=tuple(
+                    load_lineage_use_case(name, **self._runtime_options())
+                    for name in self._lineages
+                ),
                 editable=self.config.editable,
                 has_focus=bool(names) or bool(self._focus_documents()),
+                **self._runtime_options(),
             )
             if attempted.payload is not None:
                 payload = attempted.payload
@@ -211,24 +219,32 @@ class TarelUIBackend:
                 return payload
             fallback_reason = attempted.fallback_reason or "full_projection_required"
         selected_focuses = self._selected_focus_documents(names) if names else ()
-        documents = tuple(load_lineage_use_case(name) for name in self._lineages)
+        documents = tuple(
+            load_lineage_use_case(name, **self._runtime_options()) for name in self._lineages
+        )
         workspace = None
         scope = None
         if self.config.workspace:
-            workspace = load_workspace_use_case(self.config.workspace)
+            workspace = load_workspace_use_case(self.config.workspace, **self._runtime_options())
             scope = self._scope()
-            graphs = tuple(load_graph_use_case(name) for name in scope.graph_names)
+            graphs = tuple(
+                load_graph_use_case(name, **self._runtime_options()) for name in scope.graph_names
+            )
             families = (
-                project_families_for_graphs_use_case(graphs, mode=family_mode)
+                project_families_for_graphs_use_case(
+                    graphs, mode=family_mode, **self._runtime_options(),
+                )
                 if family_mode is not None else None
             )
             logical_topology_projection = project_logical_topologies_for_graphs_use_case(
-                graphs
+                graphs, **self._runtime_options(),
             ) if family_mode is not None or derived else None
             semantic_imports = tuple(
                 item
                 for graph in graphs
-                for item in list_semantic_imports_use_case(graph_name=graph.name)
+                for item in list_semantic_imports_use_case(
+                    graph_name=graph.name, **self._runtime_options(),
+                )
             ) if family_mode is not None else ()
             payload = browser_workspace(
                 graphs,
@@ -240,13 +256,15 @@ class TarelUIBackend:
                 entity_resolution_matches=tuple(
                     match
                     for graph in graphs
-                    for match in find_entity_resolution_candidates_for_graph_use_case(graph)
+                    for match in find_entity_resolution_candidates_for_graph_use_case(
+                        graph, **self._runtime_options(),
+                    )
                 ) if family_mode is not None else (),
                 query_linked_coverages=tuple(
                     coverage
                     for graph in graphs
                     for coverage in list_query_linked_coverages_use_case(
-                        graph_name=graph.name
+                        graph_name=graph.name, **self._runtime_options(),
                     )
                 ) if family_mode is not None else (),
                 logical_topologies=(
@@ -261,6 +279,7 @@ class TarelUIBackend:
                     for match in find_reference_mapping_candidates_for_graph_use_case(
                         graph,
                         mode="confirmed_then_candidates",
+                        **self._runtime_options(),
                     )
                 ) if family_mode is not None else (),
                 family_mode=family_mode,
@@ -269,17 +288,20 @@ class TarelUIBackend:
                 focus_documents=selected_focuses if family_mode is not None else (),
             )
         else:
-            graph = load_graph_use_case(self._single_graph())
+            graph = load_graph_use_case(self._single_graph(), **self._runtime_options())
             graphs = (graph,)
             families = (
-                project_families_for_graphs_use_case(graphs, mode=family_mode)
+                project_families_for_graphs_use_case(
+                    graphs, mode=family_mode, **self._runtime_options(),
+                )
                 if family_mode is not None else None
             )
             logical_topology_projection = project_logical_topologies_for_graphs_use_case(
-                graphs
+                graphs, **self._runtime_options(),
             ) if family_mode is not None or derived else None
             workspaces = tuple(
-                load_workspace_use_case(name) for name in list_workspaces_use_case()
+                load_workspace_use_case(name, **self._runtime_options())
+                for name in list_workspaces_use_case(**self._runtime_options())
             )
             payload = browser_graph(
                 graph,
@@ -287,14 +309,16 @@ class TarelUIBackend:
                 editable=self.config.editable,
                 lineage_documents=documents,
                 semantic_imports=(
-                    list_semantic_imports_use_case(graph_name=graph.name)
+                    list_semantic_imports_use_case(
+                        graph_name=graph.name, **self._runtime_options(),
+                    )
                     if family_mode is not None else ()
                 ),
                 entity_resolution_matches=find_entity_resolution_candidates_for_graph_use_case(
-                    graph
+                    graph, **self._runtime_options(),
                 ) if family_mode is not None else (),
                 query_linked_coverages=list_query_linked_coverages_use_case(
-                    graph_name=graph.name
+                    graph_name=graph.name, **self._runtime_options(),
                 ) if family_mode is not None else (),
                 logical_topologies=(
                     logical_topology_projection.documents if logical_topology_projection else ()
@@ -305,6 +329,7 @@ class TarelUIBackend:
                 reference_mapping_matches=find_reference_mapping_candidates_for_graph_use_case(
                     graph,
                     mode="confirmed_then_candidates",
+                    **self._runtime_options(),
                 ) if family_mode is not None else (),
                 family_mode=family_mode,
                 object_families=families.families if families else (),
@@ -350,7 +375,7 @@ class TarelUIBackend:
         """Resolve physical ownership before touching any optional artifact store."""
         graph_name = self._payload_graph(payload)
         scope = self._scope() if self.config.workspace else None
-        graphs = tuple(load_graph_use_case(name) for name in (
+        graphs = tuple(load_graph_use_case(name, **self._runtime_options()) for name in (
             scope.graph_names if scope else (self._single_graph(),)
         ))
         graph = next(item for item in graphs if item.name == graph_name)
@@ -389,7 +414,7 @@ class TarelUIBackend:
         graph, allowed, revision = self._optional_scope(payload)
         result = optional_object_metadata(
             graph, _string(payload, "object_id"), allowed_object_ids=allowed,
-            kind=payload["kind"], limit=limit,
+            kind=payload["kind"], limit=limit, **self._runtime_options(),
         )
         # Discard results if source ownership/revisions changed while loading sidecars.
         self._optional_scope(payload)
@@ -399,7 +424,7 @@ class TarelUIBackend:
         self, payload: dict[str, Any], graphs: tuple[GraphDocument, ...],
         workspace: WorkspaceDocument | None,
     ) -> None:
-        knowledge_documents = list_knowledge_documents_use_case()
+        knowledge_documents = list_knowledge_documents_use_case(**self._runtime_options())
         payload["knowledge_documents"] = [
             item.to_dict(include_content=False)
             for item in knowledge_documents
@@ -433,14 +458,18 @@ class TarelUIBackend:
         workspace = None
         if self.config.workspace:
             scope = self._scope()
-            graphs = tuple(load_graph_use_case(name) for name in scope.graph_names)
-            workspace = load_workspace_use_case(self.config.workspace)
+            graphs = tuple(
+                load_graph_use_case(name, **self._runtime_options()) for name in scope.graph_names
+            )
+            workspace = load_workspace_use_case(
+                self.config.workspace, **self._runtime_options(),
+            )
             projection = browser_workspace(
                 graphs, scope, workspace=workspace, editable=self.config.editable,
                 focus_documents=focuses,
             )
         else:
-            graphs = (load_graph_use_case(self._single_graph()),)
+            graphs = (load_graph_use_case(self._single_graph(), **self._runtime_options()),)
             projection = browser_graph(
                 graphs[0], editable=self.config.editable, focus_documents=focuses,
             )
@@ -487,12 +516,14 @@ class TarelUIBackend:
                 if set(payload) - {"scope_objects"}:
                     raise UIFailure("invalid_query_request", "Project scope is server-owned.")
                 objects = _strings(payload, "scope_objects") if "scope_objects" in payload else ()
-                return query_scope_snapshot(scope, scope_objects=objects)
+                return query_scope_snapshot(
+                    scope, scope_objects=objects, **self._runtime_options(),
+                )
             if route == "/api/search":
-                return search_metadata(scope, payload)
+                return search_metadata(scope, payload, **self._runtime_options())
             if route == "/api/context/preview":
-                return preview_context(scope, payload)
-            return preview_expansion(scope, payload)
+                return preview_context(scope, payload, **self._runtime_options())
+            return preview_expansion(scope, payload, **self._runtime_options())
         if route == "/api/review/view":
             names = _strings(payload, "focuses") if "focuses" in payload else self.config.focuses
             return self._review_view(names)
@@ -512,7 +543,7 @@ class TarelUIBackend:
             expected = _optional_string(payload.get("scope_revision"))
             if expected is not None:
                 actual = family_view_scope_revision(
-                    tuple(load_graph_use_case(name) for name in (
+                    tuple(load_graph_use_case(name, **self._runtime_options()) for name in (
                         scope.graph_names if scope else (self._single_graph(),)
                     )), focuses, scope,
                 )
@@ -524,6 +555,7 @@ class TarelUIBackend:
             return logical_metadata_use_case(
                 graph_name, _strings(payload, "object_ids"), allowed_object_ids=allowed,
                 mode=_optional_string(payload.get("mode")) or "include_candidates",
+                **self._runtime_options(),
             )
         if route == "/api/families/view":
             mode = _optional_string(payload.get("mode"))
@@ -556,11 +588,11 @@ class TarelUIBackend:
                 from tarel.object_families.application import _graphs
                 from tarel.ui.presentation import family_view_scope_revision_from_revisions
 
-                header = _graphs(None).header(self._single_graph())
+                header = _graphs(self.runtime).header(self._single_graph())
                 revision = family_view_scope_revision_from_revisions({header.name: header.revision})
             else:
                 revision = family_view_scope_revision(
-                    tuple(load_graph_use_case(name) for name in (
+                    tuple(load_graph_use_case(name, **self._runtime_options()) for name in (
                         scope.graph_names if scope else (self._single_graph(),)
                     )), focuses, scope,
                 )
@@ -579,6 +611,7 @@ class TarelUIBackend:
                 offset=_integer(payload, "offset", default=0, minimum=0, maximum=10_000_000),
                 limit=_integer(payload, "limit", default=50, minimum=1, maximum=100),
                 allowed_object_ids=allowed_ids,
+                **self._runtime_options(),
             ).to_dict()
             page["scope_revision"] = revision
             return page
@@ -594,6 +627,7 @@ class TarelUIBackend:
                 graph_names=self._graph_names(),
                 max_hops=_integer(payload, "max_hops", default=12, minimum=1, maximum=100),
                 states=frozenset(_strings(payload, "states")) or None,
+                **self._runtime_options(),
             )
             return trace.to_dict()
 
@@ -606,11 +640,12 @@ class TarelUIBackend:
                 _string(payload, "reference"),
                 patch,
                 reason=_string(payload, "reason"),
+                **self._runtime_options(),
             )
             return {"record": result.record.to_dict(), "revision": graph_revision(result.graph)}
         if route == "/api/semantic/edit":
             name = _string(payload, "import_name")
-            document = load_semantic_import_use_case(name)
+            document = load_semantic_import_use_case(name, **self._runtime_options())
             if document.graph_name not in self._graph_names():
                 raise UIFailure(
                     "semantic_import_outside_scope",
@@ -622,6 +657,7 @@ class TarelUIBackend:
                 _object(payload, "patch"),
                 reason=_string(payload, "reason"),
                 expected_revision=_string(payload, "revision"),
+                **self._runtime_options(),
             )
             return {
                 "import_name": name,
@@ -636,6 +672,7 @@ class TarelUIBackend:
                 state=_string(payload, "state"),
                 reason=_string(payload, "reason"),
                 include_fields=_boolean(payload, "include_fields", default=False),
+                **self._runtime_options(),
             )
             return {
                 "records": [record.to_dict() for record in result.records],
@@ -648,6 +685,7 @@ class TarelUIBackend:
                 decision=_string(payload, "decision"),
                 reason=_string(payload, "reason"),
                 expected_revision=_string(payload, "revision"),
+                **self._runtime_options(),
             )
             return {
                 "item": result.item.to_dict(),
@@ -664,6 +702,7 @@ class TarelUIBackend:
                 source_reference=_string(payload, "source_reference"),
                 description=_string(payload, "description"),
                 expected_revision=_optional_string(payload.get("revision")),
+                **self._runtime_options(),
             )
             if name not in self._lineages:
                 self._lineages.append(name)
@@ -694,6 +733,7 @@ class TarelUIBackend:
                     maximum=1_000_000,
                 ),
                 expected_revision=_string(payload, "revision"),
+                **self._runtime_options(),
             )
             return {
                 "item": result.item.to_dict(),
@@ -706,8 +746,8 @@ class TarelUIBackend:
     def _focus_documents(self) -> tuple[FocusDocument, ...]:
         graph_names = set(self._graph_names())
         documents: list[FocusDocument] = []
-        for name in list_focuses_use_case():
-            document = load_focus_use_case(name)
+        for name in list_focuses_use_case(**self._runtime_options()):
+            document = load_focus_use_case(name, **self._runtime_options())
             required = {item.name for item in document.sources if item.kind == "graph"}
             if required and required <= graph_names:
                 documents.append(document)
@@ -716,7 +756,7 @@ class TarelUIBackend:
     def _select_focuses(self, names: tuple[str, ...]) -> dict[str, object]:
         focuses = self._selected_focus_documents(names)
         scope = self._scope() if self.config.workspace else None
-        graphs = tuple(load_graph_use_case(name) for name in (
+        graphs = tuple(load_graph_use_case(name, **self._runtime_options()) for name in (
             scope.graph_names if scope else (self._single_graph(),)
         ))
         return {
@@ -766,12 +806,12 @@ class TarelUIBackend:
         missing: dict[tuple[str, str], str] = {}
         for name in graph_names:
             try:
-                graphs[name] = load_graph_use_case(name)
+                graphs[name] = load_graph_use_case(name, **self._runtime_options())
             except GraphFailure:
                 missing[("graph", name)] = f"Missing graph source: {name}"
         for name in lineage_names:
             try:
-                lineages[name] = load_lineage_use_case(name)
+                lineages[name] = load_lineage_use_case(name, **self._runtime_options())
             except LineageFailure:
                 missing[("lineage", name)] = f"Missing lineage source: {name}"
         stale: dict[str, str] = {}
@@ -805,10 +845,14 @@ class TarelUIBackend:
         if not self.config.editable:
             raise UIFailure("read_only", "Restart TAREL UI with --edit to change data.", status=403)
 
+    def _runtime_options(self) -> dict[str, TarelRuntime]:
+        """Preserve legacy call shapes unless an explicit runtime was supplied."""
+        return {"runtime": self.runtime} if self.runtime is not None else {}
+
     def _check_graph_revision(self, payload: dict[str, Any]) -> str:
         graph_name = self._payload_graph(payload)
         expected = _string(payload, "revision")
-        current = graph_revision(load_graph_use_case(graph_name))
+        current = graph_revision(load_graph_use_case(graph_name, **self._runtime_options()))
         if expected != current:
             raise UIFailure(
                 "stale_graph",
@@ -827,6 +871,7 @@ class TarelUIBackend:
             areas=self.config.areas,
             schemas=self.config.schemas,
             zones=self.config.zones,
+            **self._runtime_options(),
         )
 
     def _graph_names(self) -> tuple[str, ...]:
@@ -866,9 +911,9 @@ class TarelUIBackend:
         if not isinstance(members, list) or not members:
             raise UIFailure("empty_zone", "A zone requires at least one table or view.")
 
-        existing_names = set(list_workspaces_use_case())
+        existing_names = set(list_workspaces_use_case(**self._runtime_options()))
         if workspace_name in existing_names:
-            workspace = load_workspace_use_case(workspace_name)
+            workspace = load_workspace_use_case(workspace_name, **self._runtime_options())
             expected = payload.get("workspace_revision")
             if expected is not None and expected != workspace_revision(workspace):
                 raise UIFailure(
@@ -877,8 +922,12 @@ class TarelUIBackend:
                     status=409,
                 )
         else:
-            create_workspace_use_case(workspace_name, description="Created by the local TAREL UI.")
-            workspace = load_workspace_use_case(workspace_name)
+            create_workspace_use_case(
+                workspace_name,
+                description="Created by the local TAREL UI.",
+                **self._runtime_options(),
+            )
+            workspace = load_workspace_use_case(workspace_name, **self._runtime_options())
 
         system = next((item for item in workspace.systems if item.name == system_name), None)
         member_refs = self._zone_member_references(members)
@@ -889,6 +938,7 @@ class TarelUIBackend:
                 system_name,
                 graph_names=member_graphs,
                 description="Local TAREL UI system.",
+                **self._runtime_options(),
             )
         elif not set(member_graphs) <= set(system.graphs):
             define_workspace_system_use_case(
@@ -896,9 +946,10 @@ class TarelUIBackend:
                 system_name,
                 graph_names=tuple(sorted(set(system.graphs) | set(member_graphs))),
                 description=system.description,
+                **self._runtime_options(),
             )
 
-        workspace = load_workspace_use_case(workspace_name)
+        workspace = load_workspace_use_case(workspace_name, **self._runtime_options())
         system = next(item for item in workspace.systems if item.name == system_name)
         assigned = {
             (schema.graph, schema.namespace)
@@ -923,6 +974,7 @@ class TarelUIBackend:
                 area_name,
                 schema_references=tuple(sorted(references)),
                 description=area.description if area else "Schemas assigned by the local TAREL UI.",
+                **self._runtime_options(),
             )
 
         result = define_workspace_zone_use_case(
@@ -933,6 +985,7 @@ class TarelUIBackend:
                 f"{graph_name}:{label}" for graph_name, label, _namespace in member_refs
             ),
             description=description,
+            **self._runtime_options(),
         )
         return {
             "workspace": result.workspace.to_dict(),
@@ -966,7 +1019,7 @@ class TarelUIBackend:
             else:
                 raise UIFailure("invalid_request", "Zone members must be strings or objects.")
 
-            graph = load_graph_use_case(graph_name)
+            graph = load_graph_use_case(graph_name, **self._runtime_options())
             matches = [
                 node
                 for node in graph.nodes
@@ -1099,6 +1152,8 @@ def run_ui(
     search_mode: str = "lexical",
     model_path: Path | None = None,
     n_threads: int | None = None,
+    runtime: TarelRuntime | None = None,
+    on_ready: Callable[[str], None] | None = None,
 ) -> int:
     if port < 0 or port > 65535:
         raise UIFailure("invalid_port", "Port must be between 0 and 65535.")
@@ -1125,7 +1180,8 @@ def run_ui(
             search_mode=search_mode,
             model_path=model_path,
             n_threads=n_threads,
-        )
+        ),
+        runtime=runtime,
     )
     try:
         backend.bootstrap()
@@ -1133,9 +1189,12 @@ def run_ui(
         raise _ui_failure(exc) from exc
     server = _Server(("127.0.0.1", port), backend, secrets.token_urlsafe(32))
     address = f"http://127.0.0.1:{server.server_port}/"
-    mode = "edit" if editable else "read-only"
-    print(f"TAREL UI ({mode}): {address}")
-    print("Press Ctrl+C to stop.")
+    if on_ready is None:
+        mode = "edit" if editable else "read-only"
+        print(f"TAREL UI ({mode}): {address}")
+        print("Press Ctrl+C to stop.")
+    else:
+        on_ready(address)
     if open_browser:
         threading.Timer(0.15, lambda: webbrowser.open(address)).start()
     try:
