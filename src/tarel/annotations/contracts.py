@@ -125,7 +125,7 @@ class AnnotationProposalEnvelope:
                 "Proposal contains an invalid knowledge reference.",
             ) from exc
         mode = data.get("mode", "full")
-        if mode not in {"full", "missing"}:
+        if not isinstance(mode, str) or mode not in {"full", "missing"}:
             raise AnnotationFailure("invalid_proposal", "Proposal mode must be full or missing.")
         return cls(
             task_id=_required_string(data, "task_id"),

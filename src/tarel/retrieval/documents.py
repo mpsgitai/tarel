@@ -104,9 +104,6 @@ def _field_document(
     if flags:
         lines.append(f"Properties: {', '.join(flags)}")
     _append_approved_description(lines, field, annotation_states)
-    tags = _tags(field.annotation, annotation_states)
-    if tags:
-        lines.append(f"Tags: {', '.join(tags)}")
     return RetrievalDocument(
         id=f"field:{field.id}",
         object_id=parent.id,

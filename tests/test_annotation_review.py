@@ -72,6 +72,7 @@ class AnnotationReviewTests(TestCase):
             item for item in build_retrieval_documents(updated) if item.field_id is not None
         )
         self.assertIn("Tags: metric, financial", field_document.text)
+        self.assertEqual(field_document.text.count("Tags: metric, financial"), 1)
 
     def test_edit_preserves_original_proposal_and_validate_appends_review(self) -> None:
         graph = _review_graph()
@@ -170,10 +171,16 @@ class AnnotationReviewTests(TestCase):
             store.save(graph)
             patch_path = root / "patch.json"
             patch_path.write_text(
-                json.dumps({"description": "Reviewed amount field."}),
+                json.dumps(
+                    {
+                        "description": "Reviewed amount field.",
+                        "tags": ["metric", "financial"],
+                    }
+                ),
                 encoding="utf-8",
             )
             output = StringIO()
+            text_output = StringIO()
             with (
                 patch("tarel.application.FileGraphStore", return_value=store),
                 redirect_stdout(output),
@@ -215,13 +222,23 @@ class AnnotationReviewTests(TestCase):
                         "json",
                     ]
                 )
+                with redirect_stdout(text_output):
+                    shown = main(
+                        [
+                            "annotation",
+                            "show",
+                            "review_demo",
+                            "warehouse.T1.C1",
+                        ]
+                    )
 
         documents = [json.loads(item) for item in _split_json_documents(output.getvalue())]
-        self.assertEqual((edited, validated, listed), (0, 0, 0))
+        self.assertEqual((edited, validated, listed, shown), (0, 0, 0, 0))
         self.assertEqual(documents[0]["annotation"]["state"], "draft")
         self.assertEqual(documents[1]["annotation"]["state"], "validated")
         self.assertEqual(documents[2]["count"], 1)
         self.assertEqual(documents[2]["annotations"][0]["reference"], "warehouse.T1.C1")
+        self.assertIn("Tags: metric, financial", text_output.getvalue())
 
     def test_reviewed_annotation_cannot_be_overwritten_without_explicit_reset(self) -> None:
         graph, _record = decide_annotation(

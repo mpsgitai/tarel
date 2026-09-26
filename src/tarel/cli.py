@@ -2639,6 +2639,8 @@ def _render_context(result: ContextResult, *, output_format: str) -> None:
             print(item.description)
         if item.role:
             print(f"Role: {item.role}")
+        if item.tags:
+            print(f"Tags: {', '.join(item.tags)}")
         if item.grain:
             print(f"Grain: {item.grain}")
         for warning in item.warnings:
@@ -2650,6 +2652,8 @@ def _render_context(result: ContextResult, *, output_format: str) -> None:
             print(f"- {field.name}: {field.data_type}{nullable}{detail}")
             if field.description:
                 print(f"  {field.description}")
+            if field.tags:
+                print(f"  Tags: {', '.join(field.tags)}")
 
     print("\n## Stable joins")
     for join in sorted(result.joins, key=lambda candidate: candidate.id):
@@ -3276,6 +3280,9 @@ def _render_annotation_record(payload: dict[str, object], *, output_format: str)
     synonyms = annotation.get("synonyms")
     if isinstance(synonyms, list) and synonyms:
         print(f"Synonyms: {', '.join(str(item) for item in synonyms)}")
+    tags = annotation.get("tags")
+    if isinstance(tags, list) and tags:
+        print(f"Tags: {', '.join(str(item) for item in tags)}")
     warnings = annotation.get("warnings")
     if isinstance(warnings, list) and warnings:
         print(f"Warnings: {', '.join(str(item) for item in warnings)}")

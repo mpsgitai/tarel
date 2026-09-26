@@ -35,6 +35,67 @@ from tarel.providers.contracts import ProviderFailure
 
 
 class AnnotationFlowTests(TestCase):
+    def test_self_referencing_relationship_is_sent_once(self) -> None:
+        graph = build_graph_from_catalog(
+            "self_reference",
+            CatalogResult(
+                connector="test",
+                source_type="database",
+                catalog="Demo",
+                dialect="ansi",
+                objects=(
+                    CatalogObject(
+                        namespace="hr",
+                        name="Employee",
+                        kind="table",
+                        fields=(
+                            CatalogField("EmployeeId", 1, "integer", False),
+                            CatalogField("ManagerId", 2, "integer", True),
+                        ),
+                    ),
+                ),
+                relationships=(
+                    CatalogRelationship(
+                        name="FK_Employee_Manager",
+                        from_namespace="hr",
+                        from_object="Employee",
+                        from_fields=("ManagerId",),
+                        to_namespace="hr",
+                        to_object="Employee",
+                        to_fields=("EmployeeId",),
+                    ),
+                ),
+            ),
+        )
+
+        task = plan_annotation_tasks(graph)[0]
+        context = json.loads(task.request.messages[1].content.split("\n\n", 1)[1])
+
+        self.assertEqual(len(context["relationships"]), 1)
+        self.assertEqual(context["relationships"][0]["name"], "FK_Employee_Manager")
+
+    def test_non_string_proposal_mode_is_rejected_cleanly(self) -> None:
+        proposal = {
+            "annotation": {
+                "confidence": 0.8,
+                "confidence_reason": "Technical name.",
+                "description": "Customer records.",
+                "evidence": [_evidence("object_name", "sales.Customer")],
+                "fields": [],
+                "grain": None,
+                "role": None,
+                "synonyms": [],
+                "warnings": [],
+            },
+            "target_id": "object:demo/sales/Customer",
+            "task_id": "task",
+        }
+
+        for mode in ([], {}):
+            with self.subTest(mode=mode), self.assertRaises(AnnotationFailure) as invalid:
+                AnnotationProposalEnvelope.from_dict({**proposal, "mode": mode})
+            self.assertEqual(invalid.exception.code, "invalid_proposal")
+
     def test_missing_only_task_fills_field_delta_without_replacing_existing_semantics(self) -> None:
         graph = build_graph_from_catalog(
             "delta_demo",

@@ -63,7 +63,8 @@ def plan_annotation_tasks(
         if edge.type != "foreign_key":
             continue
         relationships_by_object.setdefault(edge.source_id, []).append(edge)
-        relationships_by_object.setdefault(edge.target_id, []).append(edge)
+        if edge.target_id != edge.source_id:
+            relationships_by_object.setdefault(edge.target_id, []).append(edge)
     objects_with_missing_fields = {
         object_id
         for object_id, fields in fields_by_object.items()

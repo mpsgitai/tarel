@@ -377,7 +377,9 @@ Draft, deferred, and validated annotations are usable by the default search, ret
 policies. A project may opt into validated-only consumption; human approval is not required for a
 small autonomous project to begin using clearly labelled provider drafts. The browser therefore
 shows description, synonyms, and tags first and keeps confidence, evidence, provenance, and review
-details behind an explicit disclosure.
+details behind an explicit disclosure. Visible tags are carried into stable context objects and
+fields, including the default text rendering, so a tag-based retrieval decision remains explainable
+to the consuming agent.
 
 ### Missing-only delta
 
