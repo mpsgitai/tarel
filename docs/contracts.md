@@ -3832,6 +3832,13 @@ The local browser is a view over TAREL's existing metadata and review applicatio
 analysis executor. Start it with `tarel ui GRAPH`; add `--edit` only when you intend to change
 annotations or workspace metadata. No connector or LLM is invoked merely by opening an object.
 
+Embedded clients must keep the state boundary explicit. `Tarel(STATE_ROOT).ui.serve(...)` serves
+the packaged browser from that client's runtime, independent of the process working directory.
+The CLI offers the equivalent `tarel ui GRAPH --state-root STATE_ROOT`. Omitting `--state-root`
+preserves the CLI's local `.tarel` default. Both forms bind to loopback only; read-only remains the
+default and edit capability still requires the explicit `editable=True` or `--edit` switch.
+Embedded hosts can pass `on_ready` to receive the final loopback URL without parsing console text.
+
 ### Explore first, details when needed
 
 The object list and the selected object's meaning, fields, keys and review state are the primary
