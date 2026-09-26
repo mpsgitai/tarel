@@ -25,6 +25,7 @@ from tarel.graph.contracts import GraphAnnotation, GraphFailure
 from tarel.graph.refresh import refresh_graph
 from tarel.graph.revision import technical_graph_fingerprint
 from tarel.graph.store import FileGraphStore
+from tarel.providers.contracts import ProviderFailure
 from tarel.relationships.core import (
     add_manual_relationship,
     decide_relationship,
@@ -139,6 +140,91 @@ class ChangeRadarTests(TestCase):
 
         self.assertEqual(partial.exception.code, "partial_refresh_scope")
         self.assertEqual(empty.exception.code, "empty_refresh_observation")
+
+    def test_refresh_annotation_batch_touches_only_new_gaps(self) -> None:
+        provider = _DeltaAnnotationProvider()
+        with TemporaryDirectory() as temporary_directory:
+            runtime = TarelRuntime.local(Path(temporary_directory) / ".tarel")
+            runtime.graph_store().save(_annotated_graph())
+
+            with (
+                patch(
+                    "tarel.application.discover_catalog_use_case",
+                    return_value=_catalog(changed=True),
+                ),
+                patch("tarel.application.load_provider", return_value=provider),
+            ):
+                result = refresh_graph_use_case(
+                    "warehouse",
+                    annotate_new_provider="fixture",
+                    annotation_workers=2,
+                    runtime=runtime,
+                )
+
+            fact = next(node for node in result.graph.nodes if node.label == "sales.FactSales")
+            sales_key = next(
+                node
+                for node in result.graph.nodes
+                if node.label == "SalesKey" and node.metadata.get("object_id") == fact.id
+            )
+            external_code = next(
+                node
+                for node in result.graph.nodes
+                if node.label == "ExternalCode" and node.metadata.get("object_id") == fact.id
+            )
+
+        self.assertEqual(result.annotation_run.annotated, 1)
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(fact.annotation.state, "review_required")
+        self.assertIsNone(sales_key.annotation)
+        self.assertEqual(external_code.annotation.state, "draft")
+
+    def test_unchanged_refresh_never_loads_delta_annotation_provider(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            runtime = TarelRuntime.local(Path(temporary_directory) / ".tarel")
+            runtime.graph_store().save(_annotated_graph())
+
+            with (
+                patch(
+                    "tarel.application.discover_catalog_use_case",
+                    return_value=_catalog(changed=False),
+                ),
+                patch("tarel.application.load_provider") as load_provider,
+            ):
+                result = refresh_graph_use_case(
+                    "warehouse",
+                    annotate_new_provider="fixture",
+                    runtime=runtime,
+                )
+
+        load_provider.assert_not_called()
+        self.assertEqual(result.annotation_run.planned, 0)
+
+    def test_provider_failure_keeps_successful_schema_refresh(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            runtime = TarelRuntime.local(Path(temporary_directory) / ".tarel")
+            runtime.graph_store().save(_annotated_graph())
+
+            with (
+                patch(
+                    "tarel.application.discover_catalog_use_case",
+                    return_value=_catalog(changed=True),
+                ),
+                patch(
+                    "tarel.application.load_provider",
+                    side_effect=ProviderFailure("provider_unavailable", "offline"),
+                ),
+                self.assertRaises(ProviderFailure),
+            ):
+                refresh_graph_use_case(
+                    "warehouse",
+                    annotate_new_provider="fixture",
+                    runtime=runtime,
+                )
+            saved = runtime.graph_store().load("warehouse")
+
+        self.assertIn("ExternalCode", {node.label for node in saved.nodes})
+        self.assertNotIn("LegacyCode", {node.label for node in saved.nodes})
 
     def test_refresh_classifies_changes_and_marks_only_affected_validated_claims(self) -> None:
         current = _annotated_graph()
@@ -413,3 +499,43 @@ def _catalog(*, changed: bool) -> CatalogResult:
             ),
         ),
     )
+
+
+class _DeltaAnnotationProvider:
+    name = "delta-fixture"
+    default_model = "fixture-model"
+
+    def __init__(self) -> None:
+        self.requests = []
+
+    def generate_structured(self, request):
+        self.requests.append(request)
+        evidence = {
+            "reason": "The technical field name is direct evidence.",
+            "reference": "ExternalCode",
+            "source": "field_name",
+            "value": None,
+        }
+        return {
+            "confidence": 0.7,
+            "confidence_reason": "Only technical metadata is available.",
+            "description": "Existing sales fact object.",
+            "evidence": [evidence],
+            "fields": [
+                {
+                    "confidence": 0.7,
+                    "confidence_reason": "The technical field name suggests an external code.",
+                    "description": "External reference code.",
+                    "evidence": [evidence],
+                    "name": "ExternalCode",
+                    "role": "key",
+                    "semantic_type": "identifier",
+                    "synonyms": [],
+                    "warnings": ["Business meaning is not verified."],
+                }
+            ],
+            "grain": None,
+            "role": "fact",
+            "synonyms": [],
+            "warnings": ["Object annotation is context only."],
+        }

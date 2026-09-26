@@ -10,7 +10,7 @@ from tarel.annotations.contracts import (
     ObjectAnnotationProposal,
 )
 from tarel.annotations.review import has_human_review
-from tarel.annotations.tasks import annotation_task_for_target
+from tarel.annotations.tasks import annotation_task_for_scope, annotation_task_for_target
 from tarel.graph.contracts import AnnotationProvenance, GraphAnnotation, GraphDocument, GraphNode
 from tarel.knowledge.contracts import KnowledgeReference
 
@@ -25,7 +25,16 @@ def apply_annotation_proposal(
     context_documents: tuple[KnowledgeReference, ...] | None = None,
 ) -> GraphDocument:
     try:
-        task = annotation_task_for_target(graph, envelope.target_id, mode=envelope.mode)
+        task = (
+            annotation_task_for_scope(
+                graph,
+                envelope.target_id,
+                field_names=envelope.field_names,
+                include_object=bool(envelope.include_object),
+            )
+            if envelope.include_object is not None
+            else annotation_task_for_target(graph, envelope.target_id, mode=envelope.mode)
+        )
     except AnnotationFailure as exc:
         if envelope.mode == "missing" and exc.code == "annotation_complete":
             raise AnnotationFailure(

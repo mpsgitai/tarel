@@ -26,7 +26,11 @@ from tarel.annotations.review import (
 )
 from tarel.annotations.runner import run_annotation_batch
 from tarel.annotations.states import selected_annotation_states
-from tarel.annotations.tasks import plan_annotation_tasks, validate_annotation_samples
+from tarel.annotations.tasks import (
+    plan_annotation_delta_tasks,
+    plan_annotation_tasks,
+    validate_annotation_samples,
+)
 from tarel.connectors.authoring import ScaffoldResult, scaffold_connector
 from tarel.connectors.catalog import validate_catalog_result
 from tarel.connectors.contracts import (
@@ -231,6 +235,7 @@ class GraphRefreshResult:
     change_report_path: Path | None
     report: GraphRefreshReport
     workspace_impacts: tuple[WorkspaceChangeImpact, ...]
+    annotation_run: AnnotationRunResult | None = None
 
     @property
     def changed(self) -> bool:
@@ -556,6 +561,10 @@ def refresh_graph_use_case(
     *,
     config_path: Path | None = None,
     namespace: str | None = None,
+    annotate_new_provider: str | None = None,
+    annotation_workers: int = 1,
+    annotation_model: str | None = None,
+    annotation_timeout: float = 120.0,
     runtime: TarelRuntime | None = None,
 ) -> GraphRefreshResult:
     store = _graph_store(runtime)
@@ -585,12 +594,20 @@ def refresh_graph_use_case(
         selected_namespace=selected_namespace,
     )
     if technical_graph_fingerprint(current) == technical_graph_fingerprint(discovered):
-        return GraphRefreshResult(
+        result = GraphRefreshResult(
             graph=current,
             path=store.path(name),
             change_report_path=None,
             report=unchanged_refresh_report(current),
             workspace_impacts=(),
+        )
+        return _annotate_new_refresh_gaps(
+            result,
+            provider_name=annotate_new_provider,
+            workers=annotation_workers,
+            model=annotation_model,
+            timeout=annotation_timeout,
+            runtime=runtime,
         )
     refreshed, report = refresh_graph(current, discovered)
     workspace_store = _workspace_store(runtime)
@@ -609,12 +626,79 @@ def refresh_graph_use_case(
         else None
     )
     path = store.save(refreshed)
-    return GraphRefreshResult(
+    result = GraphRefreshResult(
         graph=refreshed,
         path=path,
         change_report_path=change_report_path,
         report=report,
         workspace_impacts=workspace_impacts,
+    )
+    return _annotate_new_refresh_gaps(
+        result,
+        provider_name=annotate_new_provider,
+        workers=annotation_workers,
+        model=annotation_model,
+        timeout=annotation_timeout,
+        runtime=runtime,
+    )
+
+
+def _annotate_new_refresh_gaps(
+    result: GraphRefreshResult,
+    *,
+    provider_name: str | None,
+    workers: int,
+    model: str | None,
+    timeout: float,
+    runtime: TarelRuntime | None,
+) -> GraphRefreshResult:
+    if provider_name is None:
+        return result
+    nodes = result.graph.node_by_id()
+    object_ids = {
+        change.target_id
+        for change in result.report.changes
+        if change.kind == "object_added"
+    }
+    fields_by_target: dict[str, list[str]] = {object_id: [] for object_id in object_ids}
+    for change in result.report.changes:
+        if change.kind != "field_added" or change.object_id is None:
+            continue
+        field = nodes.get(change.target_id)
+        if field is not None:
+            fields_by_target.setdefault(change.object_id, []).append(field.label)
+    tasks = plan_annotation_delta_tasks(
+        result.graph,
+        {
+            target_id: tuple(sorted(field_names, key=str.casefold))
+            for target_id, field_names in fields_by_target.items()
+        },
+        include_object_targets=frozenset(object_ids),
+    )
+    if not tasks:
+        return replace(
+            result,
+            annotation_run=AnnotationRunResult(planned=0, annotated=0, failed=0),
+        )
+    store = _graph_store(runtime)
+    provider = load_provider(provider_name, timeout=timeout)
+    updated, run = run_annotation_batch(
+        result.graph,
+        tasks,
+        provider,
+        workers=workers,
+        retry=0,
+        retry_backoff=0,
+        skip_errors=False,
+        max_errors=None,
+        model=model,
+        after_annotation=store.save,
+    )
+    return replace(
+        result,
+        graph=updated,
+        path=store.save(updated),
+        annotation_run=run,
     )
 
 

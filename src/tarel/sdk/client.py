@@ -416,11 +416,19 @@ class GraphAPI(_RuntimeAPI):
         *,
         config: str | Path | None = None,
         namespace: str | None = None,
+        annotate_new_provider: str | None = None,
+        annotation_workers: int = 1,
+        annotation_model: str | None = None,
+        annotation_timeout: float = 120.0,
     ) -> GraphRefreshResult:
         return refresh_graph_use_case(
             name,
             config_path=_optional_path(config),
             namespace=namespace,
+            annotate_new_provider=annotate_new_provider,
+            annotation_workers=annotation_workers,
+            annotation_model=annotation_model,
+            annotation_timeout=annotation_timeout,
             runtime=self._runtime,
         )
 
@@ -708,11 +716,19 @@ class SourceAPI(_RuntimeAPI):
         graph: str,
         *,
         namespace: str | None = None,
+        annotate_new_provider: str | None = None,
+        annotation_workers: int = 1,
+        annotation_model: str | None = None,
+        annotation_timeout: float = 120.0,
     ) -> GraphRefreshResult:
         return refresh_source_graph_use_case(
             name,
             graph,
             namespace=namespace,
+            annotate_new_provider=annotate_new_provider,
+            annotation_workers=annotation_workers,
+            annotation_model=annotation_model,
+            annotation_timeout=annotation_timeout,
             runtime=self._runtime,
         )
 
