@@ -84,8 +84,8 @@ from tarel.focus.store import FileFocusStore
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.change_store import FileGraphChangeStore
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphFailure
-from tarel.graph.refresh import GraphRefreshReport, refresh_graph
-from tarel.graph.revision import graph_revision
+from tarel.graph.refresh import GraphRefreshReport, refresh_graph, unchanged_refresh_report
+from tarel.graph.revision import graph_revision, technical_graph_fingerprint
 from tarel.graph.store import FileGraphStore
 from tarel.knowledge.contracts import (
     DEFAULT_MAX_KNOWLEDGE_CHARACTERS,
@@ -231,6 +231,14 @@ class GraphRefreshResult:
     change_report_path: Path | None
     report: GraphRefreshReport
     workspace_impacts: tuple[WorkspaceChangeImpact, ...]
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.report.changes)
+
+    @property
+    def status(self) -> str:
+        return "changed" if self.changed else "unchanged"
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,6 +579,19 @@ def refresh_graph_use_case(
         namespace=selected_namespace,
     )
     discovered = build_graph_from_catalog(name, catalog)
+    _validate_refresh_observation(
+        current,
+        discovered,
+        selected_namespace=selected_namespace,
+    )
+    if technical_graph_fingerprint(current) == technical_graph_fingerprint(discovered):
+        return GraphRefreshResult(
+            graph=current,
+            path=store.path(name),
+            change_report_path=None,
+            report=unchanged_refresh_report(current),
+            workspace_impacts=(),
+        )
     refreshed, report = refresh_graph(current, discovered)
     workspace_store = _workspace_store(runtime)
     workspace_impacts = tuple(
@@ -595,6 +616,47 @@ def refresh_graph_use_case(
         report=report,
         workspace_impacts=workspace_impacts,
     )
+
+
+def _validate_refresh_observation(
+    current: GraphDocument,
+    discovered: GraphDocument,
+    *,
+    selected_namespace: str | None,
+) -> None:
+    current_objects = tuple(
+        node for node in current.nodes if node.type in {"table", "view"}
+    )
+    discovered_objects = tuple(
+        node for node in discovered.nodes if node.type in {"table", "view"}
+    )
+    if current_objects and not discovered_objects:
+        raise GraphFailure(
+            "empty_refresh_observation",
+            "Refresh returned no objects for a non-empty graph; the saved graph was not changed.",
+        )
+    if selected_namespace is None:
+        return
+    current_namespaces = {
+        str(node.metadata.get("namespace"))
+        for node in current_objects
+        if node.metadata.get("namespace")
+    }
+    if current_namespaces - {selected_namespace}:
+        raise GraphFailure(
+            "partial_refresh_scope",
+            "A namespace-scoped refresh cannot replace a graph that contains other namespaces.",
+        )
+    discovered_namespaces = {
+        str(node.metadata.get("namespace"))
+        for node in discovered_objects
+        if node.metadata.get("namespace")
+    }
+    if discovered_namespaces != {selected_namespace}:
+        raise GraphFailure(
+            "refresh_scope_mismatch",
+            "The connector observation did not match the requested namespace scope.",
+        )
 
 
 def list_graphs_use_case(*, runtime: TarelRuntime | None = None) -> tuple[str, ...]:

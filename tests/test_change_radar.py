@@ -6,8 +6,10 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from tarel.annotations.review import decide_annotation
+from tarel.application import refresh_graph_use_case
 from tarel.cli import main
 from tarel.connectors.contracts import (
     CatalogField,
@@ -19,14 +21,16 @@ from tarel.context import compile_context
 from tarel.context_packets import context_packet_from_dict, context_packet_impact
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.change_store import FileGraphChangeStore
-from tarel.graph.contracts import GraphAnnotation
+from tarel.graph.contracts import GraphAnnotation, GraphFailure
 from tarel.graph.refresh import refresh_graph
+from tarel.graph.revision import technical_graph_fingerprint
 from tarel.graph.store import FileGraphStore
 from tarel.relationships.core import (
     add_manual_relationship,
     decide_relationship,
     relationship_pair,
 )
+from tarel.runtime import TarelRuntime
 from tarel.workspaces.contracts import (
     Area,
     SchemaReference,
@@ -39,6 +43,103 @@ from tarel.workspaces.impact import workspace_change_impacts
 
 
 class ChangeRadarTests(TestCase):
+    def test_technical_fingerprint_ignores_semantics_but_tracks_source_metadata(self) -> None:
+        graph = build_graph_from_catalog("warehouse", _catalog(changed=False))
+        annotated = replace(
+            graph,
+            nodes=tuple(
+                replace(
+                    node,
+                    annotation=GraphAnnotation(
+                        description="A local semantic description.",
+                        state="draft",
+                    ),
+                )
+                if node.type == "field"
+                else node
+                for node in graph.nodes
+            ),
+        )
+        changed_description = replace(
+            graph,
+            nodes=tuple(
+                replace(
+                    node,
+                    metadata={**node.metadata, "technical_description": "Source comment."},
+                )
+                if node.label == "Amount"
+                else node
+                for node in graph.nodes
+            ),
+        )
+        without_declared_relationship = replace(
+            graph,
+            edges=tuple(edge for edge in graph.edges if edge.type != "foreign_key"),
+        )
+
+        self.assertEqual(
+            technical_graph_fingerprint(graph),
+            technical_graph_fingerprint(annotated),
+        )
+        self.assertNotEqual(
+            technical_graph_fingerprint(graph),
+            technical_graph_fingerprint(changed_description),
+        )
+        self.assertNotEqual(
+            technical_graph_fingerprint(graph),
+            technical_graph_fingerprint(without_declared_relationship),
+        )
+
+    def test_application_no_op_refresh_does_not_rewrite_graph(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            runtime = TarelRuntime.local(Path(temporary_directory) / ".tarel")
+            graph = _annotated_graph()
+            path = runtime.graph_store().save(graph)
+            stable_time = 1_700_000_000_000_000_000
+            os.utime(path, ns=(stable_time, stable_time))
+
+            with patch(
+                "tarel.application.discover_catalog_use_case",
+                return_value=_catalog(changed=False),
+            ):
+                result = refresh_graph_use_case(graph.name, runtime=runtime)
+
+            self.assertEqual(path.stat().st_mtime_ns, stable_time)
+            self.assertEqual(result.status, "unchanged")
+            self.assertFalse(result.changed)
+            self.assertEqual(result.graph, graph)
+            self.assertIsNone(result.change_report_path)
+            self.assertEqual(result.workspace_impacts, ())
+
+    def test_application_rejects_partial_or_empty_refresh_observations(self) -> None:
+        graph = _annotated_graph()
+        catalog = _catalog(changed=False)
+        sales_catalog = replace(
+            catalog,
+            objects=tuple(item for item in catalog.objects if item.namespace == "sales"),
+        )
+        empty_catalog = replace(catalog, objects=(), relationships=())
+        with TemporaryDirectory() as temporary_directory:
+            runtime = TarelRuntime.local(Path(temporary_directory) / ".tarel")
+            path = runtime.graph_store().save(graph)
+            original = path.read_bytes()
+
+            with patch(
+                "tarel.application.discover_catalog_use_case",
+                return_value=sales_catalog,
+            ), self.assertRaises(GraphFailure) as partial:
+                refresh_graph_use_case(graph.name, namespace="sales", runtime=runtime)
+            with patch(
+                "tarel.application.discover_catalog_use_case",
+                return_value=empty_catalog,
+            ), self.assertRaises(GraphFailure) as empty:
+                refresh_graph_use_case(graph.name, runtime=runtime)
+
+            self.assertEqual(path.read_bytes(), original)
+
+        self.assertEqual(partial.exception.code, "partial_refresh_scope")
+        self.assertEqual(empty.exception.code, "empty_refresh_observation")
+
     def test_refresh_classifies_changes_and_marks_only_affected_validated_claims(self) -> None:
         current = _annotated_graph()
         pair = relationship_pair(current, "sales.FactSales.Amount", "sales.DimAccount.AccountKey")

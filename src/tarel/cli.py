@@ -1398,6 +1398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "graph": result.graph.to_dict(),
                             "path": str(result.path),
                             "refresh": result.report.to_dict(),
+                            "status": result.status,
                         },
                         indent=2,
                         sort_keys=True,
@@ -1405,6 +1406,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             else:
                 _render_graph_summary(result.graph, output_format="text", path=result.path)
+                print(f"Status: {result.status}")
                 print(f"Changes: {len(result.report.changes)}")
             return 0
 
@@ -1844,12 +1846,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "graph": result.graph.name,
                 "path": str(result.path),
                 "refresh": result.report.to_dict(),
+                "status": result.status,
                 "workspace_impacts": [impact.to_dict() for impact in result.workspace_impacts],
             }
             if args.format == "json":
                 print(json.dumps(payload, indent=2, sort_keys=True))
             else:
-                print(f"Refreshed graph: {result.graph.name}")
+                print(f"Refreshed graph: {result.graph.name} ({result.status})")
                 print(f"Changes: {len(result.report.changes)}")
                 for change in result.report.changes:
                     values = ""

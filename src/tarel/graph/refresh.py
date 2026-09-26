@@ -299,6 +299,28 @@ def refresh_graph(
     return refreshed, report
 
 
+def unchanged_refresh_report(graph: GraphDocument) -> GraphRefreshReport:
+    """Describe a fingerprint-identical observation without rebuilding the graph."""
+    revision = graph_revision(graph)
+    return GraphRefreshReport(
+        before_revision=revision,
+        after_revision=revision,
+        changes=(),
+        stale_claims=(),
+        carried_annotations=sum(node.annotation is not None for node in graph.nodes),
+        carried_relationships=sum(
+            edge.type == "relationship_candidate" for edge in graph.edges
+        ),
+        removed_annotated_nodes=0,
+        removed_relationships=0,
+        superseded_relationships=0,
+        review_required_annotations=0,
+        review_required_relationships=0,
+        added_nodes=0,
+        removed_nodes=0,
+    )
+
+
 def _stale_reasons_by_node(changes: tuple[GraphChange, ...]) -> dict[str, tuple[str, ...]]:
     reasons: dict[str, set[str]] = {}
     stale_kinds = {

@@ -45,7 +45,7 @@ from tarel.entity_resolution.contracts import (
     SelfEntityMatch,
 )
 from tarel.expansion.contracts import ContextExpansion, ExpansionInput, ExpansionTarget
-from tarel.graph.revision import physical_graph_revision
+from tarel.graph.revision import physical_graph_revision, technical_graph_fingerprint
 from tarel.graph.selective import GraphHeader, GraphObjectPage, GraphSlice
 from tarel.grounding import GroundingAsset, GroundingBundle, LineageTarget, SourceTarget
 from tarel.knowledge.contracts import KnowledgeContext, KnowledgeDocument, KnowledgeReference
@@ -150,6 +150,7 @@ __all__ = [
     "GroundingAsset",
     "GroundingBundle",
     "physical_graph_revision",
+    "technical_graph_fingerprint",
     "LineageTarget",
     "KnowledgeContext",
     "KnowledgeDocument",
