@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from tarel.application import (
+    compare_context_use_case,
     compile_context_prefix_use_case,
     compile_context_use_case,
     compile_workspace_context_prefix_use_case,
     compile_workspace_context_use_case,
+    describe_context_use_case,
     load_focus_use_case,
     load_workspace_use_case,
     resolve_graph_object_scope_use_case,
@@ -18,6 +20,7 @@ from tarel.application import (
     search_graph_use_case,
     search_workspace_use_case,
 )
+from tarel.context import ContextFailure
 from tarel.context_output import canonical_hash
 from tarel.expansion.application import expand_context_use_case
 from tarel.expansion.contracts import ExpansionTarget
@@ -191,7 +194,7 @@ def preview_context(
         payload,
         {
             "query", "kind", "object_ids", "scope_objects",
-            "reviewed_annotations_only", "logical_hints",
+            "reviewed_annotations_only", "logical_hints", "previous_packet",
         }
         | _EXPECTED_KEYS | _BUDGETS.keys(),
     )
@@ -219,6 +222,11 @@ def preview_context(
         logical_hints = None
     if logical_hints not in (None, "confirmed_only", "include_candidates"):
         raise UIQueryFailure("invalid_query_policy", "Unsupported logical hint policy.")
+    previous_packet = payload.get("previous_packet")
+    if previous_packet is not None and not isinstance(previous_packet, dict):
+        raise UIQueryFailure(
+            "invalid_previous_context", "Previous context must be a complete context packet."
+        )
     budgets = {
         name: _integer(payload, name, default=default, minimum=minimum, maximum=maximum)
         for name, (default, minimum, maximum) in _BUDGETS.items()
@@ -269,7 +277,18 @@ def preview_context(
             ),
         )
     _check_unchanged(scope, before, runtime, scope_objects=scope_objects)
-    return {**before, "packet": result.to_dict()}
+    packet = result.to_dict()
+    response: dict[str, object] = {
+        **before,
+        "brief": describe_context_use_case(result).to_dict(),
+        "packet": packet,
+    }
+    if previous_packet is not None:
+        try:
+            response["delta"] = compare_context_use_case(previous_packet, result).to_dict()
+        except ContextFailure as exc:
+            raise UIQueryFailure("invalid_previous_context", str(exc)) from exc
+    return response
 
 
 def preview_expansion(

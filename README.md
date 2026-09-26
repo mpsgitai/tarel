@@ -83,6 +83,10 @@ In the CLI, SDK, and browser you can set a hard working scope, filter physical c
 ranking, inspect why each result matched, turn exact results into a stable context packet, and load
 bounded metadata deltas later without replacing the cacheable base.
 
+Every packet also has a compact brief for agent conversations: current area, loaded size, semantic
+coverage, evidence-backed gaps, and stable continuity IDs. Comparing packets explains what was
+added, kept, removed, or resolved instead of forcing a person or agent to interpret raw JSON.
+
 Your agent receives a focused slice with source identity, SQL dialect, evidence, and visible gaps.
 The same graph supports many questions without sending the entire estate into every conversation.
 

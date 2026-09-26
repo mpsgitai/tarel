@@ -1,6 +1,13 @@
 """Small embedded Python surface over TAREL application use cases."""
 
 from tarel.context_caching import ContextCacheParts
+from tarel.context_guidance import (
+    ContextBrief,
+    ContextContinuity,
+    ContextDelta,
+    ContextGap,
+    ContextGapChange,
+)
 from tarel.discovery.contracts import (
     DiscoveryCandidate,
     DiscoveryExecution,
@@ -102,6 +109,11 @@ __all__ = [
     "GraphObjectPage",
     "GraphSlice",
     "ContextCacheParts",
+    "ContextBrief",
+    "ContextContinuity",
+    "ContextDelta",
+    "ContextGap",
+    "ContextGapChange",
     "FamilyAttribute",
     "FamilyField",
     "FamilyMember",
