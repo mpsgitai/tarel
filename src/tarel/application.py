@@ -2087,7 +2087,18 @@ def _embedding_backend(
     n_threads: int | None,
 ) -> LlamaCppEmbedding:
     if runtime is None:
-        return LlamaCppEmbedding(model_path, n_threads=n_threads)
+        if sha256_file(model_path) != model_sha256:
+            raise RetrievalFailure(
+                "model_changed_during_load",
+                "Embedding model changed before it could be loaded.",
+            )
+        backend = LlamaCppEmbedding(model_path, n_threads=n_threads)
+        if sha256_file(model_path) != model_sha256:
+            raise RetrievalFailure(
+                "model_changed_during_load",
+                "Embedding model changed while it was being loaded.",
+            )
+        return backend
     return cast(
         LlamaCppEmbedding,
         runtime.embedding_backend(

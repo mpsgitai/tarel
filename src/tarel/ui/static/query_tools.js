@@ -16,14 +16,19 @@ const queryTools = {
   scopeObjects: [],
   selectedObjects: new Set(),
   indexStatus: null,
+  indexStatusRequest: 0,
   indexBuilding: false,
 };
 
 async function loadIndexStatus() {
+  const request = ++queryTools.indexStatusRequest;
   try {
-    queryTools.indexStatus = await api("/api/index/status");
+    const status = await api("/api/index/status");
+    if (request !== queryTools.indexStatusRequest) return;
+    queryTools.indexStatus = status;
     renderIndexStatus();
   } catch (error) {
+    if (request !== queryTools.indexStatusRequest) return;
     $("#index-health-label").textContent = `Local search status unavailable: ${error.message}`;
     $("#index-health-dot").className = "is-error";
   }
@@ -55,7 +60,9 @@ async function updateIndex() {
   $("#index-health-label").textContent = "Updating one local-search graph…";
   try {
     const result = await api("/api/index/build", {});
-    queryTools.indexStatus = result.status || await api("/api/index/status");
+    const status = result.status || await api("/api/index/status");
+    queryTools.indexStatusRequest += 1;
+    queryTools.indexStatus = status;
     renderIndexStatus();
     const changed = result.built_graphs ?? 1;
     const remaining = result.remaining_graphs;
@@ -249,6 +256,7 @@ function queryToolsScopeChanged() {
   clearContextPreview("Project view reloaded. Reload the project scope before building context.");
   if (projectSearchActive()) scheduleProjectSearch();
   if ($("#context-dialog").open) loadContextScope();
+  loadIndexStatus();
 }
 
 async function openContextDialog() {

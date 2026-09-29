@@ -111,6 +111,112 @@ class RetrievalTests(TestCase):
         self.assertEqual(rebuilt.embedded_documents, 0)
         self.assertEqual(rebuilt.reused_documents, initial.metadata.document_count)
 
+    def test_incremental_build_reuses_identical_model_bytes_from_a_new_path(self) -> None:
+        graph = _retrieval_graph()
+        fact = next(node for node in graph.nodes if node.label == "dbo.FactInternetSales")
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            original = root / "original.gguf"
+            moved = root / "moved.gguf"
+            original.write_bytes(b"test model")
+            moved.write_bytes(original.read_bytes())
+            store = FileRetrievalIndex(root / "indexes")
+            initial = store.build(
+                graph, embedder=_FakeEmbedding(), model_path=original,
+                model_id=original.name,
+            )
+            changed = replace(
+                graph,
+                nodes=tuple(
+                    replace(
+                        node,
+                        annotation=GraphAnnotation(description="Updated internet sales facts."),
+                    )
+                    if node.id == fact.id else node
+                    for node in graph.nodes
+                ),
+            )
+            changes = store.changes(changed)
+            embedder = _FakeEmbeddingWithCalls()
+
+            rebuilt = store.build(
+                changed,
+                embedder=embedder,
+                model_path=moved,
+                model_id=moved.name,
+                model_sha256=initial.metadata.model_sha256,
+            )
+
+        self.assertEqual(rebuilt.embedded_documents, changes.requires_embedding)
+        self.assertEqual(rebuilt.reused_documents, changes.unchanged_documents)
+        self.assertEqual(len(embedder.texts), changes.requires_embedding)
+
+    def test_rebuild_recovers_from_incomplete_existing_vector_coverage(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            store = FileRetrievalIndex(root / "indexes")
+            initial = store.build(graph, embedder=_FakeEmbedding(), model_path=model)
+            with sqlite3.connect(initial.path) as connection:
+                connection.execute(
+                    "DELETE FROM vectors WHERE document_id="
+                    "(SELECT document_id FROM vectors LIMIT 1)"
+                )
+
+            rebuilt = store.build(graph, embedder=_FakeEmbedding(), model_path=model)
+            metadata, documents, vectors = store.load(graph, model_path=model)
+
+        self.assertEqual(rebuilt.embedded_documents, initial.metadata.document_count)
+        self.assertEqual(rebuilt.reused_documents, 0)
+        self.assertEqual(len(documents), metadata.document_count)
+        self.assertEqual(len(vectors), metadata.document_count)
+
+    def test_empty_native_scope_still_validates_index_state(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            store = FileRetrievalIndex(root / "indexes")
+
+            with self.assertRaises(RetrievalFailure) as missing:
+                store.rank(
+                    graph, model_path=model, query_vector=(1.0, 0.0), limit=10,
+                    object_ids=frozenset(), backend="sqlite-vec",
+                )
+            built = store.build(graph, embedder=_FakeEmbedding(), model_path=model)
+            fact = next(node for node in graph.nodes if node.label == "dbo.FactInternetSales")
+            changed = replace(
+                graph,
+                nodes=tuple(
+                    replace(
+                        node,
+                        annotation=GraphAnnotation(description="Changed retrieval text."),
+                    )
+                    if node.id == fact.id else node
+                    for node in graph.nodes
+                ),
+            )
+            with self.assertRaises(RetrievalFailure) as stale:
+                store.rank(
+                    changed, model_path=model, model_sha256=built.metadata.model_sha256,
+                    query_vector=(1.0, 0.0), limit=10,
+                    object_ids=frozenset(), backend="sqlite-vec",
+                )
+            different_model = root / "different.gguf"
+            different_model.write_bytes(b"different model")
+            with self.assertRaises(RetrievalFailure) as mismatch:
+                store.rank(
+                    graph, model_path=different_model, query_vector=(1.0, 0.0), limit=10,
+                    object_ids=frozenset(), backend="sqlite-vec",
+                )
+
+        self.assertEqual(missing.exception.code, "index_not_found")
+        self.assertEqual(stale.exception.code, "stale_index")
+        self.assertEqual(mismatch.exception.code, "model_index_mismatch")
+
     def test_workspace_index_status_and_bounded_update_share_one_model(self) -> None:
         first = _retrieval_graph()
         second = replace(first, name="retrieval_demo_2", catalog="AdventureWorksDW2")
@@ -435,6 +541,70 @@ class RetrievalTests(TestCase):
         self.assertEqual(status_exit, 1)
         self.assertEqual(status["ready_graphs"], 1)
         self.assertEqual(status["pending_graphs"], 1)
+
+    def test_index_status_cli_fails_when_recorded_model_bytes_changed(self) -> None:
+        graph = _retrieval_graph()
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            model = project / "model.gguf"
+            model.write_bytes(b"model A")
+            sdk = Tarel(project / ".tarel")
+            sdk.runtime.graph_store().save(graph)
+            sdk.runtime.retrieval_index().build(
+                graph, embedder=_FakeEmbedding(), model_path=model,
+            )
+            model.write_bytes(b"model B")
+            output = StringIO()
+            try:
+                os.chdir(project)
+                with redirect_stdout(output):
+                    result = main(["index", "status", graph.name, "--format", "json"])
+            finally:
+                os.chdir(previous)
+
+        status = json.loads(output.getvalue())
+        self.assertEqual(result, 1)
+        self.assertTrue(status["current"])
+        self.assertFalse(status["ready"])
+        self.assertEqual(status["state"], "model_mismatch")
+
+    def test_single_graph_cli_detects_model_replacement_during_load(self) -> None:
+        graph = _retrieval_graph()
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            model = project / "model.gguf"
+            model.write_bytes(b"model A")
+            sdk = Tarel(project / ".tarel")
+            sdk.runtime.graph_store().save(graph)
+
+            def replace_model_during_load(*_args, **_kwargs):
+                model.write_bytes(b"model B")
+                return _FakeEmbedding()
+
+            errors = StringIO()
+            try:
+                os.chdir(project)
+                with (
+                    patch(
+                        "tarel.application.LlamaCppEmbedding",
+                        side_effect=replace_model_during_load,
+                    ),
+                    redirect_stdout(StringIO()),
+                    redirect_stderr(errors),
+                ):
+                    result = main([
+                        "index", "build", graph.name, "--model", str(model),
+                        "--format", "json",
+                    ])
+            finally:
+                os.chdir(previous)
+            index_exists = sdk.runtime.retrieval_index().path(graph.name).exists()
+
+        self.assertEqual(result, 2)
+        self.assertIn("changed while it was being loaded", errors.getvalue())
+        self.assertFalse(index_exists)
 
     def test_incremental_build_removes_documents_without_loading_the_model(self) -> None:
         graph = _retrieval_graph()

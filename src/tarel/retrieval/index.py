@@ -81,7 +81,6 @@ class FileRetrievalIndex:
         reusable, previous_ids, reusable_dimensions = self._reusable_document_ids(
             graph.name,
             documents=documents,
-            model_id=selected_model_id,
             model_sha256=selected_model_sha256,
             annotation_states=annotation_states,
         )
@@ -308,21 +307,21 @@ class FileRetrievalIndex:
         name: str,
         *,
         documents: tuple[RetrievalDocument, ...],
-        model_id: str,
         model_sha256: str,
         annotation_states: frozenset[str],
     ) -> tuple[set[str], set[str], int | None]:
         path = self.path(name, annotation_states=annotation_states)
         if not path.is_file():
             return set(), set(), None
-        metadata = self.metadata(name, annotation_states=annotation_states)
+        previous_ids: set[str] = set()
         try:
+            metadata = self.metadata(name, annotation_states=annotation_states)
             with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
-                _validate_index_storage(connection, metadata)
                 previous_ids = {
                     str(row[0]) for row in connection.execute("SELECT id FROM documents")
                 }
-                if metadata.model_id != model_id or metadata.model_sha256 != model_sha256:
+                _validate_index_storage(connection, metadata)
+                if metadata.model_sha256 != model_sha256:
                     return set(), previous_ids, None
                 columns = {
                     str(row[1]) for row in connection.execute("PRAGMA table_info(documents)")
@@ -340,8 +339,12 @@ class FileRetrievalIndex:
                     if current.get(identifier) == actual_digest:
                         reusable.add(identifier)
                 return reusable, previous_ids, metadata.dimensions if reusable else None
-        except sqlite3.Error as exc:
-            raise RetrievalFailure("invalid_index", "Could not reuse retrieval vectors.") from exc
+        except RetrievalFailure as exc:
+            if exc.code in {"invalid_index", "unsupported_index"}:
+                return set(), previous_ids, None
+            raise
+        except sqlite3.Error:
+            return set(), previous_ids, None
 
     def metadata(
         self, name: str, *,
@@ -494,8 +497,6 @@ class FileRetrievalIndex:
         object_ids: frozenset[str] | None,
         annotation_states: frozenset[str],
     ) -> tuple[RankedDocument, ...]:
-        if object_ids is not None and not object_ids:
-            return ()
         metadata = self.metadata(graph.name, annotation_states=annotation_states)
         if not _retrieval_projection_current(
             metadata, graph, annotation_states=annotation_states,

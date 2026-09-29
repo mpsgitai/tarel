@@ -1889,7 +1889,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         f"{checkpoint['completed_documents']}/{checkpoint['document_count']}"
                     )
                 print(f"Path: {payload['path']}")
-            return 0 if payload["current"] else 1
+            return 0 if payload["ready"] else 1
 
         if args.command == "graph" and args.graph_command == "build":
             result = build_graph_use_case(
