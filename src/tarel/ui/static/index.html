@@ -50,7 +50,11 @@
             <div class="pane-heading"><div><p class="eyebrow">Estate explorer</p><h1>Objects</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button></div>
             <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Search names, fields, meaning…" autocomplete="off" /></label>
             <div id="project-search-status" class="project-search-status" role="status" aria-live="polite" hidden></div>
-            <div class="retrieval-workspace"><strong id="retrieval-workspace-label">Working scope: project</strong><div><button id="search-here" class="quiet-button">Search here</button><button id="search-project" class="quiet-button" hidden>Search project</button></div></div>
+            <div class="retrieval-workspace">
+              <strong id="retrieval-workspace-label">Working scope: project</strong>
+              <div><button id="search-here" class="quiet-button">Search here</button><button id="search-project" class="quiet-button" hidden>Search project</button></div>
+              <div class="index-health"><span id="index-health-dot" aria-hidden="true"></span><span id="index-health-label" role="status" aria-live="polite">Checking local search…</span><button id="update-index" class="quiet-button" hidden>Update</button></div>
+            </div>
             <details class="search-filter-panel"><summary>Refine results <small id="search-filter-summary">No filters</small></summary><div>
               <label>Object type<select id="search-object-type"><option value="">Tables and views</option><option value="table">Tables</option><option value="view">Views</option></select></label>
               <label>Documented role<input id="search-role" maxlength="100" placeholder="fact" /></label>

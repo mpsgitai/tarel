@@ -10,6 +10,20 @@ STATIC = Path(__file__).parents[1] / "src/tarel/ui/static"
 
 @skipUnless(shutil.which("node"), "Node.js is needed for optional browser regressions")
 class ProjectQueryLayoutTests(TestCase):
+    def test_failed_index_update_keeps_error_visible_and_allows_retry(self) -> None:
+        self._script(r"""
+(async () => {
+  queryTools.indexStatus = {ready:false, state:'missing'};
+  api = async () => { throw new Error('Embedding model unavailable'); };
+  await updateIndex();
+  assert.equal(queryTools.indexBuilding, false);
+  assert.equal($('#update-index').disabled, false);
+  assert.equal($('#update-index').textContent, 'Update');
+  assert.equal($('#index-health-label').textContent, 'Embedding model unavailable');
+  assert.equal($('#index-health-dot').className, 'is-error');
+})()
+""")
+
     def test_search_here_builds_qualified_scope_for_a_single_graph(self) -> None:
         self._script(r"""
 visibleObjects = () => [

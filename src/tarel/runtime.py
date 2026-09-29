@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from threading import RLock
+from typing import TYPE_CHECKING, Any
 
 from tarel.discovery.store import FileDiscoveryStore
 from tarel.entity_resolution.store import FileEntityResolutionStore
@@ -32,6 +34,15 @@ class TarelRuntime:
     """Filesystem-backed TAREL state rooted at one explicit ``.tarel`` directory."""
 
     root: Path
+    _embedding_backends: dict[tuple[str, int | None, str], Any] = field(
+        default_factory=dict, compare=False, repr=False,
+    )
+    _model_hashes: dict[tuple[str, int, int, int, int, int], str] = field(
+        default_factory=dict, compare=False, repr=False,
+    )
+    _embedding_cache_lock: Any = field(
+        default_factory=RLock, compare=False, repr=False,
+    )
 
     @classmethod
     def local(cls, root: str | Path) -> TarelRuntime:
@@ -67,6 +78,61 @@ class TarelRuntime:
     def retrieval_index(self) -> FileRetrievalIndex:
         return FileRetrievalIndex(self.root / "indexes")
 
+    def embedding_backend(
+        self,
+        model_path: Path,
+        n_threads: int | None,
+        model_sha256: str,
+        factory: Callable[[], Any],
+    ) -> Any:
+        """Reuse one loaded local model for this long-lived SDK or UI runtime."""
+        from tarel.retrieval.contracts import RetrievalFailure
+
+        resolved = str(model_path.resolve())
+        key = (resolved, n_threads, model_sha256)
+        with self._embedding_cache_lock:
+            if self.model_sha256(model_path) != model_sha256:
+                raise RetrievalFailure(
+                    "model_changed_during_load",
+                    "Embedding model changed before it could be loaded.",
+                )
+            if key not in self._embedding_backends:
+                self._embedding_backends[key] = factory()
+                if self.model_sha256(model_path) != model_sha256:
+                    del self._embedding_backends[key]
+                    raise RetrievalFailure(
+                        "model_changed_during_load",
+                        "Embedding model changed while it was being loaded.",
+                    )
+            selected = self._embedding_backends[key]
+            stale = [
+                cached_key for cached_key in self._embedding_backends
+                if cached_key[:2] == key[:2] and cached_key != key
+            ]
+            for cached_key in stale:
+                del self._embedding_backends[cached_key]
+            return selected
+
+    def model_sha256(self, model_path: Path) -> str:
+        """Hash a model once per unchanged file in this runtime."""
+        from tarel.retrieval.contracts import RetrievalFailure
+        from tarel.retrieval.local import sha256_file
+
+        resolved = model_path.resolve()
+        with self._embedding_cache_lock:
+            before = _model_file_key(resolved)
+            if before in self._model_hashes:
+                return self._model_hashes[before]
+            digest = sha256_file(resolved)
+            after = _model_file_key(resolved)
+            if before != after:
+                raise RetrievalFailure(
+                    "model_changed_during_hash",
+                    "Embedding model changed while its identity was being verified.",
+                )
+            self._model_hashes[before] = digest
+            return digest
+
     def source_store(self) -> FileSourceStore:
         return FileSourceStore(self.root / "sources")
 
@@ -93,3 +159,15 @@ class TarelRuntime:
         from tarel.object_families.store import FileObjectFamilyStore
 
         return FileObjectFamilyStore(self.root / "object-families")
+
+
+def _model_file_key(path: Path) -> tuple[str, int, int, int, int, int]:
+    stat = path.stat()
+    return (
+        str(path),
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_ctime_ns,
+        stat.st_mtime_ns,
+        stat.st_size,
+    )

@@ -125,7 +125,12 @@ from tarel.relationships.core import (
     relationship_pair,
 )
 from tarel.retrieval.contracts import IndexBuildResult, RetrievalFailure
-from tarel.retrieval.index import FileRetrievalIndex, search_retrieval, validate_bm25_weight
+from tarel.retrieval.index import (
+    FileRetrievalIndex,
+    search_retrieval,
+    sqlite_vec_available,
+    validate_bm25_weight,
+)
 from tarel.retrieval.local import (
     DEFAULT_MODEL_NAME,
     LlamaCppEmbedding,
@@ -1192,9 +1197,16 @@ def search_workspace_use_case(
         validated_only=validated_only,
     )
     resolved_model = resolve_model_path(model_path) if mode in {"vector", "hybrid"} else None
-    embedder = (
-        LlamaCppEmbedding(resolved_model, n_threads=n_threads)
+    model_sha256 = (
+        _embedding_model_sha256(runtime, resolved_model)
         if resolved_model is not None
+        else None
+    )
+    embedder = (
+        _embedding_backend(
+            runtime, resolved_model, model_sha256=model_sha256, n_threads=n_threads,
+        )
+        if resolved_model is not None and model_sha256 is not None
         else None
     )
     query_vector = embedder.embed_query(query) if embedder is not None else None
@@ -1216,7 +1228,7 @@ def search_workspace_use_case(
         result = _search_loaded_graph(
             loaded[name], query, limit=100, object_ids=object_ids,
             mode=mode, bm25_weight=bm25_weight, resolved_model=resolved_model,
-            embedder=embedder, query_vector=query_vector,
+            model_sha256=model_sha256, embedder=embedder, query_vector=query_vector,
             annotation_states=selected_states, runtime=runtime,
         )
         results_list.append(describe_search_results(
@@ -1269,6 +1281,7 @@ def _search_loaded_graph(
     mode: str,
     model_path: Path | None = None,
     resolved_model: Path | None = None,
+    model_sha256: str | None = None,
     embedder: LlamaCppEmbedding | None = None,
     query_vector: tuple[float, ...] | None = None,
     n_threads: int | None = None,
@@ -1297,7 +1310,10 @@ def _search_loaded_graph(
             bm25_weight=bm25_weight,
         )
     selected_model = resolved_model or resolve_model_path(model_path)
-    selected_embedder = embedder or LlamaCppEmbedding(selected_model, n_threads=n_threads)
+    selected_model_sha256 = model_sha256 or _embedding_model_sha256(runtime, selected_model)
+    selected_embedder = embedder or _embedding_backend(
+        runtime, selected_model, model_sha256=selected_model_sha256, n_threads=n_threads,
+    )
     return search_retrieval(
         graph,
         query,
@@ -1311,6 +1327,7 @@ def _search_loaded_graph(
         bm25_weight=bm25_weight,
         store=_retrieval_index(runtime),
         query_vector=query_vector,
+        model_sha256=selected_model_sha256,
     )
 
 
@@ -1841,11 +1858,38 @@ def build_retrieval_index_use_case(
     selected_states = selected_annotation_states(
         annotation_states, validated_only=validated_only,
     )
-    resolved_model = resolve_model_path(model_path)
-    return _retrieval_index(runtime).build(
+    store = _retrieval_index(runtime)
+    changes = store.changes(graph, annotation_states=selected_states)
+    metadata = None
+    try:
+        metadata = store.metadata(name, annotation_states=selected_states)
+    except RetrievalFailure as exc:
+        if exc.code != "index_not_found":
+            raise
+    if (
+        model_path is None
+        and metadata is not None
+        and Path(metadata.model_path).is_file()
+    ):
+        resolved_model = Path(metadata.model_path)
+    else:
+        resolved_model = resolve_model_path(model_path)
+    model_sha256 = _embedding_model_sha256(runtime, resolved_model)
+    model_matches = metadata is not None and metadata.model_sha256 == model_sha256
+    needs_embedding = not model_matches or changes.requires_embedding > 0
+    embedder = (
+        _embedding_backend(
+            runtime, resolved_model, model_sha256=model_sha256, n_threads=n_threads,
+        )
+        if needs_embedding else None
+    )
+    model_id = embedder.model_id if embedder is not None else metadata.model_id
+    return store.build(
         graph,
-        embedder=LlamaCppEmbedding(resolved_model, n_threads=n_threads),
+        embedder=embedder,
         model_path=resolved_model,
+        model_id=model_id,
+        model_sha256=model_sha256,
         batch_size=batch_size,
         resume=resume,
         progress=progress,
@@ -1856,35 +1900,215 @@ def build_retrieval_index_use_case(
 def retrieval_index_status_use_case(
     name: str,
     *,
+    model_path: Path | None = None,
     runtime: TarelRuntime | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
+    _selected_model: tuple[Path, str] | None = None,
 ) -> dict[str, object]:
     graph = _graph_store(runtime).load(name)
     store = _retrieval_index(runtime)
     selected_states = selected_annotation_states(
         annotation_states, validated_only=validated_only,
     )
+    selected_model = _selected_model or _selected_retrieval_model(runtime, model_path)
     checkpoint = store.checkpoint_status(name, annotation_states=selected_states)
+    changes = store.changes(graph, annotation_states=selected_states)
     try:
         metadata = store.metadata(name, annotation_states=selected_states)
     except RetrievalFailure as exc:
-        if exc.code != "index_not_found" or checkpoint is None:
+        if exc.code != "index_not_found":
             raise
         return {
+            "state": "building" if checkpoint else "missing",
             "checkpoint": checkpoint,
             "current": False,
+            "ready": False,
+            "changes": changes.to_dict(),
             "index": None,
             "model_available": None,
+            "model_matches": None,
             "path": str(store.path(name, annotation_states=selected_states)),
+            "vector_backend": "sqlite-vec" if sqlite_vec_available() else "python",
         }
+    current = (
+        changes.current
+        if metadata.documents_sha256
+        else metadata.graph_hash == graph_revision(graph)
+    )
+    stored_model_available = Path(metadata.model_path).is_file()
+    model_available = stored_model_available
+    if selected_model is None and stored_model_available:
+        stored_model = Path(metadata.model_path)
+        selected_model = (stored_model, _embedding_model_sha256(runtime, stored_model))
+    model_matches = selected_model is None or metadata.model_sha256 == selected_model[1]
+    ready = current and model_available and model_matches
     return {
+        "state": (
+            "ready" if ready
+            else "model_mismatch" if current and model_available and not model_matches
+            else "model_missing" if current
+            else "update_required"
+        ),
         "checkpoint": checkpoint,
-        "current": metadata.graph_hash == graph_revision(graph),
+        "current": current,
+        "ready": ready,
+        "changes": changes.to_dict(),
         "index": metadata.to_dict(),
-        "model_available": Path(metadata.model_path).is_file(),
+        "model_available": model_available,
+        "model_matches": model_matches,
         "path": str(store.path(name, annotation_states=selected_states)),
+        "vector_backend": "sqlite-vec" if sqlite_vec_available() else "python",
     }
+
+
+def retrieval_workspace_status_use_case(
+    workspace_name: str,
+    *,
+    systems: tuple[str, ...] = (),
+    graphs: tuple[str, ...] = (),
+    areas: tuple[str, ...] = (),
+    schemas: tuple[str, ...] = (),
+    zones: tuple[str, ...] = (),
+    model_path: Path | None = None,
+    annotation_states: frozenset[str] | None = None,
+    validated_only: bool = False,
+    runtime: TarelRuntime | None = None,
+) -> dict[str, object]:
+    runtime = runtime or TarelRuntime.local(Path.cwd() / ".tarel")
+    selected_model = _selected_retrieval_model(runtime, model_path)
+    scope = resolve_workspace_scope_use_case(
+        workspace_name, systems=systems, graphs=graphs, areas=areas,
+        schemas=schemas, zones=zones, runtime=runtime,
+    )
+    graph_names = scope.graph_names
+    if areas or schemas or zones:
+        graph_names = tuple(sorted({item.graph for item in scope.objects}))
+    statuses = tuple(
+        retrieval_index_status_use_case(
+            name, annotation_states=annotation_states, validated_only=validated_only,
+            runtime=runtime, _selected_model=selected_model,
+        ) | {"graph": name}
+        for name in graph_names
+    )
+    ready = sum(status["ready"] is True for status in statuses)
+    missing = sum(status["state"] == "missing" for status in statuses)
+    documents = sum(
+        int(status["index"]["document_count"])
+        for status in statuses if isinstance(status.get("index"), dict)
+    )
+    pending = len(statuses) - ready
+    state = (
+        "ready" if pending == 0
+        else "missing" if missing == len(statuses)
+        else "update_required"
+    )
+    return {
+        "workspace": workspace_name,
+        "state": state,
+        "current": pending == 0,
+        "ready": pending == 0,
+        "graph_count": len(statuses),
+        "ready_graphs": ready,
+        "pending_graphs": pending,
+        "missing_graphs": missing,
+        "document_count": documents,
+        "vector_backend": "sqlite-vec" if sqlite_vec_available() else "python",
+        "graphs": list(statuses),
+    }
+
+
+def build_retrieval_workspace_indexes_use_case(
+    workspace_name: str,
+    *,
+    systems: tuple[str, ...] = (),
+    graphs: tuple[str, ...] = (),
+    areas: tuple[str, ...] = (),
+    schemas: tuple[str, ...] = (),
+    zones: tuple[str, ...] = (),
+    model_path: Path | None = None,
+    batch_size: int = 16,
+    n_threads: int | None = None,
+    resume: bool = False,
+    max_graphs: int = 8,
+    progress: Callable[[int, int, str], None] | None = None,
+    annotation_states: frozenset[str] | None = None,
+    validated_only: bool = False,
+    runtime: TarelRuntime | None = None,
+) -> dict[str, object]:
+    if not 1 <= max_graphs <= 100:
+        raise RetrievalFailure("invalid_graph_limit", "Graph limit must be between 1 and 100.")
+    runtime = runtime or TarelRuntime.local(Path.cwd() / ".tarel")
+    before = retrieval_workspace_status_use_case(
+        workspace_name, systems=systems, graphs=graphs, areas=areas,
+        schemas=schemas, zones=zones, model_path=model_path,
+        annotation_states=annotation_states,
+        validated_only=validated_only, runtime=runtime,
+    )
+    pending = [
+        str(status["graph"]) for status in before["graphs"]
+        if not status["ready"]
+    ]
+    builds = []
+    for name in pending[:max_graphs]:
+        result = build_retrieval_index_use_case(
+            name, model_path=model_path, batch_size=batch_size, n_threads=n_threads,
+            resume=resume, progress=progress, annotation_states=annotation_states,
+            validated_only=validated_only, runtime=runtime,
+        )
+        builds.append({
+            "graph": name,
+            "documents": result.metadata.document_count,
+            "embedded_documents": result.embedded_documents,
+            "reused_documents": result.reused_documents,
+            "removed_documents": result.removed_documents,
+            "path": str(result.path),
+        })
+    after = retrieval_workspace_status_use_case(
+        workspace_name, systems=systems, graphs=graphs, areas=areas,
+        schemas=schemas, zones=zones, model_path=model_path,
+        annotation_states=annotation_states,
+        validated_only=validated_only, runtime=runtime,
+    )
+    return {
+        "workspace": workspace_name,
+        "built": builds,
+        "built_graphs": len(builds),
+        "remaining_graphs": after["pending_graphs"],
+        "status": after,
+    }
+
+
+def _embedding_backend(
+    runtime: TarelRuntime | None,
+    model_path: Path,
+    *,
+    model_sha256: str,
+    n_threads: int | None,
+) -> LlamaCppEmbedding:
+    if runtime is None:
+        return LlamaCppEmbedding(model_path, n_threads=n_threads)
+    return cast(
+        LlamaCppEmbedding,
+        runtime.embedding_backend(
+            model_path, n_threads, model_sha256,
+            lambda: LlamaCppEmbedding(model_path, n_threads=n_threads),
+        ),
+    )
+
+
+def _embedding_model_sha256(runtime: TarelRuntime | None, model_path: Path) -> str:
+    return runtime.model_sha256(model_path) if runtime is not None else sha256_file(model_path)
+
+
+def _selected_retrieval_model(
+    runtime: TarelRuntime | None,
+    model_path: Path | None,
+) -> tuple[Path, str] | None:
+    if model_path is None:
+        return None
+    resolved = resolve_model_path(model_path)
+    return resolved, _embedding_model_sha256(runtime, resolved)
 
 
 def add_relationship_use_case(

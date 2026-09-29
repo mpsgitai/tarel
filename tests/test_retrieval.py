@@ -1,8 +1,13 @@
 import hashlib
 import json
 import os
+import sqlite3
+import struct
 import sys
-from contextlib import redirect_stdout
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -40,6 +45,430 @@ from tarel.workspaces.core import create_workspace, define_system
 
 
 class RetrievalTests(TestCase):
+    def test_incremental_build_embeds_only_changed_documents(self) -> None:
+        graph = _retrieval_graph()
+        fact = next(node for node in graph.nodes if node.label == "dbo.FactInternetSales")
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            store = FileRetrievalIndex(root / "indexes")
+            initial_embedder = _FakeEmbeddingWithCalls()
+            initial = store.build(graph, embedder=initial_embedder, model_path=model)
+
+            unchanged = store.build(
+                graph, embedder=None, model_path=model,
+                model_id=initial.metadata.model_id,
+                model_sha256=initial.metadata.model_sha256,
+            )
+            changed_graph = replace(
+                graph,
+                nodes=tuple(
+                    replace(
+                        node,
+                        annotation=GraphAnnotation(description="Internet revenue facts."),
+                    )
+                    if node.id == fact.id else node
+                    for node in graph.nodes
+                ),
+            )
+            changes = store.changes(changed_graph)
+            delta_embedder = _FakeEmbeddingWithCalls()
+            updated = store.build(
+                changed_graph, embedder=delta_embedder, model_path=model,
+            )
+
+        self.assertEqual(initial.embedded_documents, initial.metadata.document_count)
+        self.assertEqual(unchanged.embedded_documents, 0)
+        self.assertEqual(unchanged.reused_documents, initial.metadata.document_count)
+        self.assertGreater(changes.changed_documents, 0)
+        self.assertLess(changes.changed_documents, initial.metadata.document_count)
+        self.assertEqual(updated.embedded_documents, changes.changed_documents)
+        self.assertEqual(len(delta_embedder.texts), changes.changed_documents)
+
+    def test_incremental_reuse_copies_vector_blobs_without_unpacking_them(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            store = FileRetrievalIndex(root / "indexes")
+            initial = store.build(graph, embedder=_FakeEmbedding(), model_path=model)
+
+            with patch(
+                "tarel.retrieval.index._unpack_vector",
+                side_effect=AssertionError("incremental reuse must keep vectors as blobs"),
+            ):
+                rebuilt = store.build(
+                    graph,
+                    embedder=None,
+                    model_path=model,
+                    model_id=initial.metadata.model_id,
+                    model_sha256=initial.metadata.model_sha256,
+                    batch_size=3,
+                )
+
+        self.assertEqual(rebuilt.embedded_documents, 0)
+        self.assertEqual(rebuilt.reused_documents, initial.metadata.document_count)
+
+    def test_workspace_index_status_and_bounded_update_share_one_model(self) -> None:
+        first = _retrieval_graph()
+        second = replace(first, name="retrieval_demo_2", catalog="AdventureWorksDW2")
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(root / ".tarel")
+            for graph in (first, second):
+                sdk.runtime.graph_store().save(graph)
+            workspace = define_system(
+                create_workspace("multi"), "analytics",
+                graph_names=(first.name, second.name),
+                graphs={first.name: first, second.name: second},
+            )
+            sdk.runtime.workspace_store().save(workspace)
+            embedder = _FakeEmbeddingWithCalls()
+
+            before = sdk.index.status_workspace("multi")
+            with patch("tarel.application.LlamaCppEmbedding", return_value=embedder) as factory:
+                first_batch = sdk.index.build_workspace(
+                    "multi", model_path=model, max_graphs=1,
+                )
+                second_batch = sdk.index.build_workspace(
+                    "multi", model_path=model, max_graphs=1,
+                )
+            after = sdk.index.status_workspace("multi")
+
+        self.assertEqual(before["state"], "missing")
+        self.assertEqual(first_batch["built_graphs"], 1)
+        self.assertEqual(first_batch["remaining_graphs"], 1)
+        self.assertEqual(second_batch["remaining_graphs"], 0)
+        self.assertEqual(after["state"], "ready")
+        self.assertEqual(after["ready_graphs"], 2)
+        self.assertEqual(factory.call_count, 1)
+
+    def test_workspace_update_repairs_a_missing_model_path_with_the_selected_copy(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            original_model = root / "original.gguf"
+            replacement_model = root / "replacement.gguf"
+            original_model.write_bytes(b"test model")
+            replacement_model.write_bytes(original_model.read_bytes())
+            sdk = Tarel(root / ".tarel")
+            sdk.runtime.graph_store().save(graph)
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("multi"),
+                "analytics",
+                graph_names=(graph.name,),
+                graphs={graph.name: graph},
+            ))
+            with patch(
+                "tarel.application.LlamaCppEmbedding",
+                return_value=_FakeEmbedding(),
+            ):
+                sdk.index.build(graph.name, model_path=original_model)
+            original_model.unlink()
+
+            missing = sdk.index.status_workspace("multi")
+            with patch(
+                "tarel.application.LlamaCppEmbedding",
+                side_effect=AssertionError("unchanged vectors must not reload the model"),
+            ):
+                repaired = sdk.index.build_workspace(
+                    "multi", model_path=replacement_model, max_graphs=1,
+                )
+            ready = sdk.index.status_workspace("multi")
+            metadata = sdk.runtime.retrieval_index().metadata(graph.name)
+
+        self.assertEqual(missing["graphs"][0]["state"], "model_missing")
+        self.assertTrue(missing["graphs"][0]["current"])
+        self.assertFalse(missing["graphs"][0]["ready"])
+        self.assertEqual(repaired["built_graphs"], 1)
+        self.assertEqual(repaired["built"][0]["embedded_documents"], 0)
+        self.assertEqual(repaired["remaining_graphs"], 0)
+        self.assertEqual(Path(metadata.model_path), replacement_model.resolve())
+        self.assertTrue(ready["ready"])
+
+    def test_workspace_update_rebuilds_indexes_for_an_explicit_different_model(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            first_model = root / "first.gguf"
+            second_model = root / "second.gguf"
+            first_model.write_bytes(b"first model")
+            second_model.write_bytes(b"second model")
+            sdk = Tarel(root / ".tarel")
+            sdk.runtime.graph_store().save(graph)
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("multi"), "analytics",
+                graph_names=(graph.name,), graphs={graph.name: graph},
+            ))
+            with patch(
+                "tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+            ):
+                sdk.index.build(graph.name, model_path=first_model)
+
+            selected_status = sdk.index.status_workspace(
+                "multi", model_path=second_model,
+            )
+            replacement = _FakeEmbeddingWithCalls()
+            with patch(
+                "tarel.application.LlamaCppEmbedding", return_value=replacement,
+            ):
+                rebuilt = sdk.index.build_workspace(
+                    "multi", model_path=second_model, max_graphs=1,
+                )
+
+        self.assertEqual(selected_status["graphs"][0]["state"], "model_mismatch")
+        self.assertFalse(selected_status["ready"])
+        self.assertEqual(rebuilt["built_graphs"], 1)
+        self.assertEqual(rebuilt["remaining_graphs"], 0)
+        self.assertEqual(rebuilt["built"][0]["embedded_documents"], 8)
+        self.assertEqual(len(replacement.texts), 8)
+
+    def test_workspace_update_detects_replaced_recorded_model_without_explicit_path(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"model A")
+            sdk = Tarel(root / "state")
+            sdk.runtime.graph_store().save(graph)
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("multi"), "analytics",
+                graph_names=(graph.name,), graphs={graph.name: graph},
+            ))
+            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+                sdk.index.build(graph.name, model_path=model)
+            model.write_bytes(b"model B")
+
+            status = sdk.index.status_workspace("multi")
+            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+                updated = sdk.index.build_workspace("multi")
+
+        self.assertEqual(status["graphs"][0]["state"], "model_mismatch")
+        self.assertEqual(updated["built_graphs"], 1)
+        self.assertEqual(updated["built"][0]["embedded_documents"], 8)
+        self.assertTrue(updated["status"]["ready"])
+
+    def test_replacing_model_bytes_reloads_the_runtime_backend(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"model A")
+            sdk = Tarel(root / ".tarel")
+            sdk.runtime.graph_store().save(graph)
+            backends = []
+
+            class FileSensitiveEmbedding(_FakeEmbedding):
+                def __init__(self, path: Path, **_kwargs) -> None:
+                    self.vector = (
+                        (1.0, 0.0) if path.read_bytes().endswith(b"A") else (0.0, 1.0)
+                    )
+                    backends.append(self)
+
+                def embed_documents(self, texts, *, batch_size):
+                    del batch_size
+                    return tuple(self.vector for _ in texts)
+
+            with patch("tarel.application.LlamaCppEmbedding", FileSensitiveEmbedding):
+                sdk.index.build(graph.name, model_path=model)
+                model.write_bytes(b"model B with different bytes")
+                rebuilt = sdk.index.build(graph.name)
+            _metadata, _documents, vectors = sdk.runtime.retrieval_index().load(
+                graph, model_path=model,
+            )
+
+        self.assertEqual(len(backends), 2)
+        self.assertEqual(rebuilt.embedded_documents, 8)
+        self.assertEqual(vectors[0], (0.0, 1.0))
+
+    def test_workspace_cli_rechecks_recorded_model_and_shares_one_loaded_backend(self) -> None:
+        first = _retrieval_graph()
+        second = replace(first, name="retrieval_demo_2")
+        previous = Path.cwd()
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"model A")
+            sdk = Tarel(root / ".tarel")
+            for graph in (first, second):
+                sdk.runtime.graph_store().save(graph)
+                sdk.runtime.retrieval_index().build(
+                    graph, embedder=_FakeEmbedding(), model_path=model,
+                )
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("multi"), "analytics",
+                graph_names=(first.name, second.name),
+                graphs={first.name: first, second.name: second},
+            ))
+            model.write_bytes(b"model B")
+            output = StringIO()
+            try:
+                os.chdir(root)
+                with (
+                    patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding())
+                    as factory,
+                    redirect_stdout(output),
+                    redirect_stderr(StringIO()),
+                ):
+                    result = main(["index", "build", "--workspace", "multi", "--format", "json"])
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(factory.call_count, 1)
+        built = json.loads(output.getvalue())
+        self.assertEqual(built["built_graphs"], 2)
+        self.assertEqual(built["remaining_graphs"], 0)
+        self.assertTrue(all(item["embedded_documents"] == 8 for item in built["built"]))
+
+    def test_cached_backend_initialization_and_calls_are_serialized(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(root / ".tarel")
+            sdk.runtime.graph_store().save(graph)
+            sdk.runtime.retrieval_index().build(
+                graph, embedder=_FakeEmbedding(), model_path=model,
+            )
+            model_sha256 = sdk.runtime.model_sha256(model)
+            factory_calls = 0
+            factory_lock = threading.Lock()
+
+            def factory():
+                nonlocal factory_calls
+                with factory_lock:
+                    factory_calls += 1
+                time.sleep(0.02)
+                return object()
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                cached = tuple(executor.map(
+                    lambda _item: sdk.runtime.embedding_backend(
+                        model, None, model_sha256, factory,
+                    ),
+                    range(2),
+                ))
+            self.assertEqual(factory_calls, 1)
+            self.assertIs(cached[0], cached[1])
+
+            active = 0
+            max_active = 0
+            active_lock = threading.Lock()
+
+            class NativeProbe:
+                def embed(self, _text, **_kwargs):
+                    nonlocal active, max_active
+                    with active_lock:
+                        active += 1
+                        max_active = max(max_active, active)
+                    time.sleep(0.02)
+                    with active_lock:
+                        active -= 1
+                    return [1.0, 0.0]
+
+            backend = object.__new__(LlamaCppEmbedding)
+            backend._model_path = model
+            backend._model = NativeProbe()
+            backend._embedding_lock = threading.Lock()
+            sdk.runtime._embedding_backends.clear()
+            sdk.runtime.embedding_backend(
+                model, None, model_sha256, lambda: backend,
+            )
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                searches = tuple(executor.map(
+                    lambda query: sdk.search.graph(
+                        graph.name, query, mode="vector", model_path=model,
+                    ),
+                    ("sales", "dates"),
+                ))
+
+        self.assertTrue(all(result.hits for result in searches))
+        self.assertEqual(max_active, 1)
+
+    def test_workspace_index_cli_uses_the_same_bounded_status(self) -> None:
+        first = _retrieval_graph()
+        second = replace(first, name="retrieval_demo_2", catalog="AdventureWorksDW2")
+        previous = Path.cwd()
+        with TemporaryDirectory(dir=previous) as temporary_directory:
+            project = Path(temporary_directory)
+            model = project / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(project / ".tarel")
+            for graph in (first, second):
+                sdk.runtime.graph_store().save(graph)
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("multi"), "analytics",
+                graph_names=(first.name, second.name),
+                graphs={first.name: first, second.name: second},
+            ))
+            build_output = StringIO()
+            status_output = StringIO()
+            try:
+                os.chdir(project)
+                with (
+                    patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
+                    redirect_stdout(build_output),
+                    redirect_stderr(StringIO()),
+                ):
+                    build_exit = main([
+                        "index", "build", "--workspace", "multi", "--model", str(model),
+                        "--max-graphs", "1", "--format", "json",
+                    ])
+                with redirect_stdout(status_output):
+                    status_exit = main([
+                        "index", "status", "--workspace", "multi", "--format", "json",
+                    ])
+            finally:
+                os.chdir(previous)
+
+        built = json.loads(build_output.getvalue())
+        status = json.loads(status_output.getvalue())
+        self.assertEqual(build_exit, 0)
+        self.assertEqual(built["built_graphs"], 1)
+        self.assertEqual(built["remaining_graphs"], 1)
+        self.assertEqual(status_exit, 1)
+        self.assertEqual(status["ready_graphs"], 1)
+        self.assertEqual(status["pending_graphs"], 1)
+
+    def test_incremental_build_removes_documents_without_loading_the_model(self) -> None:
+        graph = _retrieval_graph()
+        removed_ids = {
+            "object:AdventureWorksDW/dbo/UnrelatedHelper",
+            "field:AdventureWorksDW/dbo/UnrelatedHelper/Value",
+        }
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            store = FileRetrievalIndex(root / "indexes")
+            initial = store.build(graph, embedder=_FakeEmbedding(), model_path=model)
+            reduced = replace(
+                graph,
+                nodes=tuple(node for node in graph.nodes if node.id not in removed_ids),
+                edges=tuple(
+                    edge for edge in graph.edges
+                    if edge.source_id not in removed_ids and edge.target_id not in removed_ids
+                ),
+            )
+            changes = store.changes(reduced)
+            updated = store.build(
+                reduced, embedder=None, model_path=model,
+                model_id=initial.metadata.model_id,
+                model_sha256=initial.metadata.model_sha256,
+            )
+
+        self.assertEqual(changes.removed_documents, 2)
+        self.assertEqual(changes.requires_embedding, 0)
+        self.assertEqual(updated.embedded_documents, 0)
+        self.assertEqual(updated.removed_documents, 2)
+        self.assertEqual(updated.metadata.document_count, 6)
+
     def test_workspace_vector_search_embeds_the_query_once(self) -> None:
         first = _retrieval_graph()
         second = replace(first, name="retrieval_demo_2", catalog="AdventureWorksDW2")
@@ -420,6 +849,40 @@ class RetrievalTests(TestCase):
 
         self.assertEqual(raised.exception.code, "invalid_index_checkpoint")
 
+    def test_resume_rejects_nonfinite_checkpoint_vectors(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            store = FileRetrievalIndex(root / "indexes")
+            with self.assertRaises(RetrievalFailure):
+                store.build(
+                    graph,
+                    embedder=_FailingEmbedding(fail_on_call=2),
+                    model_path=model,
+                    batch_size=3,
+                    resume=True,
+                )
+            with sqlite3.connect(store.checkpoint_path(graph.name)) as connection:
+                connection.execute(
+                    "UPDATE vectors SET value=? WHERE position=0",
+                    (struct.pack("<2f", float("nan"), 0.0),),
+                )
+
+            with self.assertRaises(RetrievalFailure) as raised:
+                store.build(
+                    graph,
+                    embedder=_FakeEmbedding(),
+                    model_path=model,
+                    batch_size=3,
+                    resume=True,
+                )
+
+            self.assertFalse(store.path(graph.name).exists())
+
+        self.assertEqual(raised.exception.code, "invalid_index_checkpoint")
+
     def test_failed_resumable_rebuild_keeps_the_previous_complete_index(self) -> None:
         graph = _retrieval_graph()
         fact = next(node for node in graph.nodes if node.label == "dbo.FactInternetSales")
@@ -443,11 +906,22 @@ class RetrievalTests(TestCase):
             store = FileRetrievalIndex(root / "indexes")
             store.build(graph, embedder=_FakeEmbedding(), model_path=model)
             original = store.path(graph.name).read_bytes()
+            changed = replace(
+                graph,
+                nodes=tuple(
+                    replace(
+                        node,
+                        annotation=GraphAnnotation(description="CHANGED_RETRIEVAL_TEXT"),
+                    )
+                    if node.id == fact.id else node
+                    for node in graph.nodes
+                ),
+            )
 
             with self.assertRaises(RetrievalFailure):
                 store.build(
-                    graph,
-                    embedder=_FailingEmbedding(fail_on_call=2),
+                    changed,
+                    embedder=_FailingEmbedding(fail_on_call=1),
                     model_path=model,
                     batch_size=3,
                     resume=True,

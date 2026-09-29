@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -11,11 +12,70 @@ from urllib.request import Request, urlopen
 
 from tarel.cli import main
 from tarel.sdk import Tarel
-from tarel.ui.server import TarelUIBackend, UIConfig, _Server
+from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
+from tarel.workspaces.core import create_workspace, define_system
+from tests.test_retrieval import _FakeEmbedding
 from tests.test_ui import _graph
 
 
 class ExplicitUIRuntimeTests(TestCase):
+    def test_index_status_and_update_use_the_ui_runtime(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(root / "state")
+            sdk.runtime.graph_store().save(_graph())
+            backend = TarelUIBackend(
+                UIConfig(graph="sales", search_mode="hybrid", model_path=model),
+                runtime=sdk.runtime,
+            )
+
+            missing = backend.read("/api/index/status")
+            with patch(
+                "tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+            ):
+                updated = backend.mutate("/api/index/build", {})
+            ready = backend.read("/api/index/status")
+
+        self.assertEqual(missing["state"], "missing")
+        self.assertGreater(updated["embedded_documents"], 0)
+        self.assertEqual(ready["state"], "ready")
+        self.assertTrue(ready["current"])
+
+    def test_workspace_index_update_builds_exactly_one_graph_per_request(self) -> None:
+        first = _graph()
+        second = replace(first, name="sales_2", catalog="DemoDW2")
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(root / "state")
+            for graph in (first, second):
+                sdk.runtime.graph_store().save(graph)
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("estate"),
+                "analytics",
+                graph_names=(first.name, second.name),
+                graphs={first.name: first, second.name: second},
+            ))
+            backend = TarelUIBackend(
+                UIConfig(workspace="estate", search_mode="hybrid", model_path=model),
+                runtime=sdk.runtime,
+            )
+
+            with patch(
+                "tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+            ):
+                result = backend.mutate("/api/index/build", {})
+            with self.assertRaises(UIFailure) as raised:
+                backend.mutate("/api/index/build", {"max_graphs": 2})
+
+        self.assertEqual(result["built_graphs"], 1)
+        self.assertEqual(result["remaining_graphs"], 1)
+        self.assertEqual(result["status"]["ready_graphs"], 1)
+        self.assertEqual(raised.exception.code, "invalid_index_request")
+
     def test_sdk_ui_forwards_the_clients_explicit_runtime(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             sdk = Tarel(Path(temporary_directory) / "state")

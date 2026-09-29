@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 from tarel.annotations.contracts import AnnotationFailure
 from tarel.annotations.review import resolve_annotation_target
 from tarel.application import (
+    build_retrieval_index_use_case,
+    build_retrieval_workspace_indexes_use_case,
     create_workspace_use_case,
     decide_annotation_use_case,
     define_workspace_area_use_case,
@@ -31,6 +33,8 @@ from tarel.application import (
     load_graph_use_case,
     load_workspace_use_case,
     resolve_workspace_scope_use_case,
+    retrieval_index_status_use_case,
+    retrieval_workspace_status_use_case,
 )
 from tarel.context import ContextFailure
 from tarel.discovery.application import list_query_linked_coverages_use_case
@@ -500,6 +504,28 @@ class TarelUIBackend:
                 raise UIFailure("invalid_optional_request", "Unsupported family policy.")
             names = _strings(payload, "focuses") if "focuses" in payload else None
             return self._bootstrap(mode, names, derived=payload["enabled"])
+        if route == "/api/index/build":
+            if payload:
+                raise UIFailure("invalid_index_request", "Index update size is server-owned.")
+            if self.config.workspace:
+                return build_retrieval_workspace_indexes_use_case(
+                    self.config.workspace, systems=self.config.systems,
+                    graphs=self.config.graphs, areas=self.config.areas,
+                    schemas=self.config.schemas, zones=self.config.zones,
+                    model_path=self.config.model_path, n_threads=self.config.n_threads,
+                    max_graphs=1, **self._runtime_options(),
+                )
+            result = build_retrieval_index_use_case(
+                self._single_graph(), model_path=self.config.model_path,
+                n_threads=self.config.n_threads, **self._runtime_options(),
+            )
+            return {
+                "graph": result.metadata.graph,
+                "embedded_documents": result.embedded_documents,
+                "reused_documents": result.reused_documents,
+                "removed_documents": result.removed_documents,
+                "status": self._index_status(),
+            }
         if route in {
             "/api/query/scope", "/api/search", "/api/context/preview",
             "/api/context/expand",
@@ -839,7 +865,23 @@ class TarelUIBackend:
             return self.architecture.snapshot()
         if route == "/api/bootstrap":
             return self.bootstrap()
+        if route == "/api/index/status":
+            return self._index_status()
         raise UIFailure("route_not_found", "Unknown UI API route.", status=404)
+
+    def _index_status(self) -> dict[str, object]:
+        if self.config.workspace:
+            return retrieval_workspace_status_use_case(
+                self.config.workspace, systems=self.config.systems,
+                graphs=self.config.graphs, areas=self.config.areas,
+                schemas=self.config.schemas, zones=self.config.zones,
+                model_path=self.config.model_path,
+                **self._runtime_options(),
+            )
+        return retrieval_index_status_use_case(
+            self._single_graph(), model_path=self.config.model_path,
+            **self._runtime_options(),
+        )
 
     def _require_editable(self) -> None:
         if not self.config.editable:

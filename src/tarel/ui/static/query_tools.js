@@ -15,7 +15,67 @@ const queryTools = {
   expansion: null,
   scopeObjects: [],
   selectedObjects: new Set(),
+  indexStatus: null,
+  indexBuilding: false,
 };
+
+async function loadIndexStatus() {
+  try {
+    queryTools.indexStatus = await api("/api/index/status");
+    renderIndexStatus();
+  } catch (error) {
+    $("#index-health-label").textContent = `Local search status unavailable: ${error.message}`;
+    $("#index-health-dot").className = "is-error";
+  }
+}
+
+function renderIndexStatus() {
+  const status = queryTools.indexStatus;
+  if (!status) return;
+  const workspace = Boolean(status.workspace);
+  const total = workspace ? status.graph_count : 1;
+  const ready = workspace ? status.ready_graphs : status.ready ? 1 : 0;
+  const documents = workspace ? status.document_count : status.index?.document_count || 0;
+  const backend = status.vector_backend === "sqlite-vec" ? "sqlite-vec" : "Python";
+  const label = status.ready
+    ? `Local search ready · ${ready}/${total} graph${total === 1 ? "" : "s"} · ${documents} documents · ${backend}`
+    : `${ready}/${total} graph${total === 1 ? "" : "s"} ready · update local search`;
+  $("#index-health-label").textContent = label;
+  $("#index-health-dot").className = status.ready ? "is-ready" : "is-stale";
+  $("#update-index").hidden = status.ready;
+  $("#update-index").disabled = queryTools.indexBuilding;
+  $("#update-index").textContent = queryTools.indexBuilding ? "Updating…" : "Update";
+}
+
+async function updateIndex() {
+  if (queryTools.indexBuilding) return;
+  queryTools.indexBuilding = true;
+  let failed = false;
+  renderIndexStatus();
+  $("#index-health-label").textContent = "Updating one local-search graph…";
+  try {
+    const result = await api("/api/index/build", {});
+    queryTools.indexStatus = result.status || await api("/api/index/status");
+    renderIndexStatus();
+    const changed = result.built_graphs ?? 1;
+    const remaining = result.remaining_graphs;
+    const suffix = Number.isInteger(remaining) && remaining > 0
+      ? ` ${remaining} remaining.`
+      : "";
+    toast(`Local search updated for ${changed} graph${changed === 1 ? "" : "s"}.${suffix}`);
+  } catch (error) {
+    failed = true;
+    $("#index-health-label").textContent = error.message;
+    $("#index-health-dot").className = "is-error";
+  } finally {
+    queryTools.indexBuilding = false;
+    if (!failed && queryTools.indexStatus) renderIndexStatus();
+    else {
+      $("#update-index").disabled = false;
+      $("#update-index").textContent = "Update";
+    }
+  }
+}
 
 function projectSearchActive() { return Boolean($("#object-search").value.trim()); }
 
@@ -412,6 +472,7 @@ function initializeQueryTools() {
   $("#reload-context-scope").addEventListener("click", loadContextScope);
   $("#search-here").addEventListener("click", applySearchHere);
   $("#search-project").addEventListener("click", searchWholeProject);
+  $("#update-index").addEventListener("click", updateIndex);
   $("#context-kind").addEventListener("change", updateContextKind);
   for (const id of ["#search-object-type", "#search-role", "#search-required-field", "#search-reviewed"]) {
     $(id).addEventListener("change", () => {
@@ -421,4 +482,5 @@ function initializeQueryTools() {
     });
   }
   updateContextKind();
+  loadIndexStatus();
 }
