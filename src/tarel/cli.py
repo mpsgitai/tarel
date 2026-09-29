@@ -22,6 +22,7 @@ from tarel.application import (
     build_focus_use_case,
     build_graph_use_case,
     build_retrieval_index_use_case,
+    build_retrieval_workspace_indexes_use_case,
     check_connector_use_case,
     check_provider_use_case,
     check_relationship_use_case,
@@ -67,6 +68,7 @@ from tarel.application import (
     resolve_knowledge_use_case,
     resolve_workspace_scope_use_case,
     retrieval_index_status_use_case,
+    retrieval_workspace_status_use_case,
     run_annotation_batch_use_case,
     sample_connector_use_case,
     scaffold_connector_use_case,
@@ -665,7 +667,9 @@ def build_parser() -> argparse.ArgumentParser:
         "build",
         help="Embed safe graph metadata into a rebuildable local SQLite index.",
     )
-    index_build.add_argument("name", help="Local graph name.")
+    index_build.add_argument("name", nargs="?", help="Local graph name.")
+    index_build.add_argument("--workspace", help="Build pending graph indexes in a workspace.")
+    _add_scope_arguments(index_build)
     index_build.add_argument("--model", type=Path, dest="model_path")
     index_build.add_argument(
         "--batch-size",
@@ -675,6 +679,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     index_build.add_argument("--threads", type=int, dest="n_threads")
     index_build.add_argument(
+        "--max-graphs", type=int, default=8,
+        help="Maximum pending workspace graphs to update in one run (default: 8).",
+    )
+    index_build.add_argument(
         "--resume",
         action="store_true",
         help="Checkpoint completed embedding batches and resume a matching interrupted build.",
@@ -683,7 +691,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_format_argument(index_build)
 
     index_status = index_commands.add_parser("status", help="Inspect one retrieval index.")
-    index_status.add_argument("name", help="Local graph name.")
+    index_status.add_argument("name", nargs="?", help="Local graph name.")
+    index_status.add_argument("--workspace", help="Inspect index coverage for a workspace.")
+    _add_scope_arguments(index_status)
     _add_annotation_state_arguments(index_status)
     _add_format_argument(index_status)
 
@@ -1786,48 +1796,88 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0 if payload["sha256_valid"] else 1
 
         if args.command == "index" and args.index_command == "build":
-            result = build_retrieval_index_use_case(
-                args.name,
-                model_path=args.model_path,
-                batch_size=args.batch_size,
-                n_threads=args.n_threads,
-                resume=args.resume,
-                progress=_index_build_progress,
-                annotation_states=(
-                    frozenset(args.annotation_states) if args.annotation_states else None
-                ),
-                validated_only=args.validated_only,
+            _require_index_target(args.name, args.workspace)
+            selected_states = (
+                frozenset(args.annotation_states) if args.annotation_states else None
             )
-            payload = {
-                "index": result.metadata.to_dict(),
-                "path": str(result.path),
-                "resumed_documents": result.resumed_documents,
-            }
+            if args.workspace:
+                payload = build_retrieval_workspace_indexes_use_case(
+                    args.workspace, systems=tuple(args.systems or ()),
+                    graphs=tuple(args.graphs or ()), areas=tuple(args.areas or ()),
+                    schemas=tuple(args.schemas or ()), zones=tuple(args.zones or ()),
+                    model_path=args.model_path, batch_size=args.batch_size,
+                    n_threads=args.n_threads, resume=args.resume,
+                    max_graphs=args.max_graphs, progress=_index_build_progress,
+                    annotation_states=selected_states, validated_only=args.validated_only,
+                )
+            else:
+                result = build_retrieval_index_use_case(
+                    args.name, model_path=args.model_path, batch_size=args.batch_size,
+                    n_threads=args.n_threads, resume=args.resume,
+                    progress=_index_build_progress, annotation_states=selected_states,
+                    validated_only=args.validated_only,
+                )
+                payload = {
+                    "index": result.metadata.to_dict(), "path": str(result.path),
+                    "resumed_documents": result.resumed_documents,
+                    "reused_documents": result.reused_documents,
+                    "embedded_documents": result.embedded_documents,
+                    "removed_documents": result.removed_documents,
+                }
             if args.format == "json":
                 print(json.dumps(payload, indent=2, sort_keys=True))
+            elif args.workspace:
+                print(f"Workspace: {args.workspace}")
+                print(f"Updated graphs: {payload['built_graphs']}")
+                print(f"Remaining graphs: {payload['remaining_graphs']}")
+                for built in payload["built"]:
+                    print(
+                        f"  {built['graph']}: {built['embedded_documents']} embedded, "
+                        f"{built['reused_documents']} reused"
+                    )
             else:
                 print(f"Index: {result.metadata.graph}")
                 print(f"Documents: {result.metadata.document_count}")
                 print(f"Dimensions: {result.metadata.dimensions}")
                 print(f"Model: {result.metadata.model_id}")
                 print(f"Resumed documents: {result.resumed_documents}")
+                print(f"Embedded documents: {result.embedded_documents}")
+                print(f"Reused documents: {result.reused_documents}")
+                print(f"Removed documents: {result.removed_documents}")
                 print(f"Path: {result.path}")
             return 0
 
         if args.command == "index" and args.index_command == "status":
-            payload = retrieval_index_status_use_case(
-                args.name,
-                annotation_states=(
-                    frozenset(args.annotation_states) if args.annotation_states else None
-                ),
-                validated_only=args.validated_only,
+            _require_index_target(args.name, args.workspace)
+            selected_states = (
+                frozenset(args.annotation_states) if args.annotation_states else None
             )
+            if args.workspace:
+                payload = retrieval_workspace_status_use_case(
+                    args.workspace, systems=tuple(args.systems or ()),
+                    graphs=tuple(args.graphs or ()), areas=tuple(args.areas or ()),
+                    schemas=tuple(args.schemas or ()), zones=tuple(args.zones or ()),
+                    annotation_states=selected_states, validated_only=args.validated_only,
+                )
+            else:
+                payload = retrieval_index_status_use_case(
+                    args.name, annotation_states=selected_states,
+                    validated_only=args.validated_only,
+                )
             if args.format == "json":
                 print(json.dumps(payload, indent=2, sort_keys=True))
+            elif args.workspace:
+                print(f"Workspace: {args.workspace}")
+                print(f"Status: {payload['state']}")
+                print(f"Graphs: {payload['ready_graphs']}/{payload['graph_count']} ready")
+                print(f"Documents: {payload['document_count']}")
+                print(f"Vector backend: {payload['vector_backend']}")
+                for status in payload["graphs"]:
+                    print(f"  {status['graph']}: {status['state']}")
             else:
                 metadata = payload["index"]
                 print(f"Index: {args.name}")
-                print(f"Status: {'ready' if payload['current'] else 'stale'}")
+                print(f"Status: {payload['state']}")
                 if isinstance(metadata, dict):
                     print(f"Documents: {metadata['document_count']}")
                     print(f"Dimensions: {metadata['dimensions']}")
@@ -1839,7 +1889,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         f"{checkpoint['completed_documents']}/{checkpoint['document_count']}"
                     )
                 print(f"Path: {payload['path']}")
-            return 0 if payload["current"] else 1
+            return 0 if payload["ready"] else 1
 
         if args.command == "graph" and args.graph_command == "build":
             result = build_graph_use_case(
@@ -3483,3 +3533,13 @@ def _index_build_progress(completed: int, total: int, phase: str) -> None:
         print("Retrieval index ready.", file=sys.stderr)
     elif phase == "resuming":
         print(f"Resuming retrieval index: {completed}/{total} already embedded", file=sys.stderr)
+    elif phase == "reusing":
+        print(f"Reusing {total} unchanged retrieval documents.", file=sys.stderr)
+
+
+def _require_index_target(name: str | None, workspace: str | None) -> None:
+    if bool(name) == bool(workspace):
+        raise RetrievalFailure(
+            "invalid_index_target",
+            "Choose exactly one graph name or --workspace.",
+        )

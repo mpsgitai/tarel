@@ -113,14 +113,15 @@ GROUPS = {
     ),
     "index": (
         "Retrieval indexes",
-        "Prepare and inspect rebuildable local retrieval indexes for a graph.",
+        "Prepare and inspect rebuildable local retrieval indexes for a graph or workspace.",
         (
-            "Build writes the index and may perform local CPU embedding compu"
-            "tation. Resume only reuses a compatible checkpoint. Graph, revie"
-            "w, or model changes can require rebuilding."
+            "Build updates only changed retrieval documents and may perform local CPU embedding "
+            "computation. A workspace build processes a bounded graph batch. Resume only reuses "
+            "a compatible checkpoint; model changes require full re-embedding, including a "
+            "replacement at the recorded path. Check ready and remaining_graphs before searching."
         ),
         "local-retrieval.md",
-        "tarel index status warehouse",
+        "tarel index status --workspace enterprise",
     ),
     "graph": (
         "Source graphs",

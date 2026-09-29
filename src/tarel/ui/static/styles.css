@@ -75,6 +75,12 @@ body.inspector-closed .inspector { display: none; }
 .retrieval-workspace { margin: 0 12px 9px; padding: 8px; display: grid; gap: 7px; border: 1px solid var(--line); background: var(--black); font-size: 10px; }
 .retrieval-workspace strong { color: var(--indigo-bright); overflow-wrap: anywhere; }
 .retrieval-workspace > div { display: flex; gap: 6px; }
+.retrieval-workspace .index-health { align-items: center; color: var(--muted); line-height: 1.35; }
+.index-health span:nth-child(2) { flex: 1; overflow-wrap: anywhere; }
+#index-health-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--subtle); }
+#index-health-dot.is-ready { background: #34d399; box-shadow: 0 0 0 2px #34d39922; }
+#index-health-dot.is-stale { background: #fbbf24; box-shadow: 0 0 0 2px #fbbf2422; }
+#index-health-dot.is-error { background: #fb7185; box-shadow: 0 0 0 2px #fb718522; }
 .search-filter-panel { margin: 0 12px 9px; border: 1px solid var(--line); background: var(--black); font-size: 10px; }
 .search-filter-panel summary { padding: 7px; display: flex; justify-content: space-between; cursor: pointer; color: var(--muted); }
 .search-filter-panel > div { padding: 0 7px 7px; display: grid; gap: 6px; }

@@ -58,6 +58,7 @@ class IndexMetadata:
     model_sha256: str
     normalized: bool
     annotation_states: tuple[str, ...] = ()
+    documents_sha256: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -71,6 +72,7 @@ class IndexMetadata:
             "model_sha256": self.model_sha256,
             "normalized": self.normalized,
             "annotation_states": list(self.annotation_states),
+            "documents_sha256": self.documents_sha256,
         }
 
 
@@ -79,3 +81,32 @@ class IndexBuildResult:
     path: Path
     metadata: IndexMetadata
     resumed_documents: int = 0
+    reused_documents: int = 0
+    embedded_documents: int = 0
+    removed_documents: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class IndexChanges:
+    added_documents: int
+    changed_documents: int
+    removed_documents: int
+    unchanged_documents: int
+
+    @property
+    def requires_embedding(self) -> int:
+        return self.added_documents + self.changed_documents
+
+    @property
+    def current(self) -> bool:
+        return self.requires_embedding == 0 and self.removed_documents == 0
+
+    def to_dict(self) -> dict[str, int | bool]:
+        return {
+            "added_documents": self.added_documents,
+            "changed_documents": self.changed_documents,
+            "removed_documents": self.removed_documents,
+            "unchanged_documents": self.unchanged_documents,
+            "requires_embedding": self.requires_embedding,
+            "current": self.current,
+        }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -22,6 +23,7 @@ from tarel.retrieval.bm25 import rank_bm25, tokenize
 from tarel.retrieval.contracts import (
     EmbeddingBackend,
     IndexBuildResult,
+    IndexChanges,
     IndexMetadata,
     RankedDocument,
     RetrievalDocument,
@@ -31,7 +33,8 @@ from tarel.retrieval.documents import build_retrieval_documents
 from tarel.retrieval.local import sha256_file
 from tarel.search import FieldSearchHit, SearchHit, SearchResults
 
-_CONTRACT_VERSION = "tarel.retrieval.v0.2"
+_CONTRACT_VERSION = "tarel.retrieval.v0.3"
+_PREVIOUS_CONTRACT_VERSION = "tarel.retrieval.v0.2"
 _LEGACY_CONTRACT_VERSION = "tarel.retrieval.v0.1"
 _GRAPH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _RRF_K = 60
@@ -56,8 +59,10 @@ class FileRetrievalIndex:
         self,
         graph: GraphDocument,
         *,
-        embedder: EmbeddingBackend,
+        embedder: EmbeddingBackend | None,
         model_path: Path,
+        model_id: str | None = None,
+        model_sha256: str | None = None,
         batch_size: int = 16,
         resume: bool = False,
         progress: Callable[[int, int, str], None] | None = None,
@@ -67,57 +72,39 @@ class FileRetrievalIndex:
             raise RetrievalFailure("invalid_batch_size", "Batch size must be between 1 and 256.")
         documents = build_retrieval_documents(graph, annotation_states=annotation_states)
         total = len(documents)
-        model_sha256 = sha256_file(model_path)
+        selected_model_id = model_id or (embedder.model_id if embedder is not None else None)
+        if selected_model_id is None:
+            raise RetrievalFailure(
+                "missing_embedding_backend", "Index build needs a model identity.",
+            )
+        selected_model_sha256 = model_sha256 or sha256_file(model_path)
+        reusable, previous_ids, reusable_dimensions = self._reusable_document_ids(
+            graph.name,
+            documents=documents,
+            model_sha256=selected_model_sha256,
+            annotation_states=annotation_states,
+        )
         checkpoint = self.checkpoint_path(graph.name, annotation_states=annotation_states)
         resumed_documents = 0
-        vector_batches: list[tuple[float, ...]] = []
+        reused_documents = 0
+        embedded_documents = 0
+        dimensions = reusable_dimensions
         if resume:
-            vector_batches = list(
-                _load_index_checkpoint(
-                    checkpoint,
-                    graph=graph,
-                    documents=documents,
-                    model_id=embedder.model_id,
-                    model_sha256=model_sha256,
-                    annotation_states=annotation_states,
-                )
+            resumed_documents, checkpoint_dimensions = _prepare_index_checkpoint(
+                checkpoint,
+                graph=graph,
+                documents=documents,
+                model_id=selected_model_id,
+                model_sha256=selected_model_sha256,
+                annotation_states=annotation_states,
             )
-            resumed_documents = len(vector_batches)
+            dimensions = _merge_vector_dimensions(
+                dimensions, checkpoint_dimensions, code="invalid_index_checkpoint",
+            )
             if progress is not None:
                 progress(resumed_documents, total, "resuming")
         elif progress is not None:
-            progress(0, total, "embedding")
-        for start in range(resumed_documents, total, batch_size):
-            batch = documents[start : start + batch_size]
-            batch_vectors = embedder.embed_documents(
-                tuple(document.text for document in batch),
-                batch_size=batch_size,
-            )
-            _validate_vector_batch(batch_vectors, existing=tuple(vector_batches))
-            vector_batches.extend(batch_vectors)
-            if resume:
-                _save_index_checkpoint_batch(
-                    checkpoint,
-                    start=start,
-                    documents=batch,
-                    vectors=batch_vectors,
-                )
-            if progress is not None:
-                progress(min(start + len(batch), total), total, "embedding")
-        vectors = tuple(vector_batches)
-        dimensions = _validate_vectors(vectors, expected_count=len(documents))
-        metadata = IndexMetadata(
-            contract_version=_CONTRACT_VERSION,
-            graph=graph.name,
-            graph_hash=graph_revision(graph),
-            document_count=len(documents),
-            dimensions=dimensions,
-            model_id=embedder.model_id,
-            model_path=str(model_path.resolve()),
-            model_sha256=model_sha256,
-            normalized=True,
-            annotation_states=tuple(sorted(annotation_states)),
-        )
+            progress(0, total, "reusing" if len(reusable) == total else "embedding")
         path = self.path(graph.name, annotation_states=annotation_states)
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
@@ -127,19 +114,16 @@ class FileRetrievalIndex:
         )
         os.close(descriptor)
         temporary_path = Path(temporary_name)
+        installed = False
+        metadata: IndexMetadata
         try:
-            if progress is not None:
-                progress(total, total, "writing")
-            with sqlite3.connect(temporary_path) as connection:
-                _create_schema(connection)
-                connection.executemany(
-                    "INSERT INTO metadata(key, value) VALUES (?, ?)",
-                    ((key, json.dumps(value)) for key, value in metadata.to_dict().items()),
-                )
-                connection.executemany(
+            with sqlite3.connect(temporary_path) as destination:
+                _create_schema(destination)
+                destination.executemany(
                     """
-                    INSERT INTO documents(id, object_id, field_id, namespace, label, text)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO documents(
+                        id, object_id, field_id, namespace, label, text, text_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         (
@@ -149,33 +133,218 @@ class FileRetrievalIndex:
                             document.namespace,
                             document.label,
                             document.text,
+                            _text_sha256(document.text),
                         )
                         for document in documents
                     ),
                 )
-                connection.executemany(
-                    "INSERT INTO vectors(document_id, dimensions, value) VALUES (?, ?, ?)",
-                    (
-                        (document.id, dimensions, _pack_vector(vector))
-                        for document, vector in zip(documents, vectors, strict=True)
-                    ),
+                if resumed_documents:
+                    _copy_index_checkpoint_vectors(checkpoint, destination)
+                source = (
+                    sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+                    if reusable else None
                 )
-                connection.commit()
+                try:
+                    for start in range(resumed_documents, total, batch_size):
+                        batch = documents[start : start + batch_size]
+                        missing = tuple(
+                            document for document in batch if document.id not in reusable
+                        )
+                        if missing and embedder is None:
+                            raise RetrievalFailure(
+                                "missing_embedding_backend",
+                                "Changed retrieval documents need the selected embedding model.",
+                            )
+                        rows_by_id: dict[str, tuple[str, int, bytes]] = {}
+                        reusable_batch = tuple(
+                            document for document in batch if document.id in reusable
+                        )
+                        if reusable_batch:
+                            if source is None:
+                                raise RetrievalFailure(
+                                    "invalid_index", "Reusable retrieval vectors are unavailable.",
+                                )
+                            rows_by_id.update(
+                                _read_vector_rows(
+                                    source,
+                                    reusable_batch,
+                                    dimensions=dimensions,
+                                )
+                            )
+                        if missing and embedder is not None:
+                            embedded = embedder.embed_documents(
+                                tuple(document.text for document in missing),
+                                batch_size=batch_size,
+                            )
+                            embedded_dimensions = _validate_vectors(
+                                embedded, expected_count=len(missing),
+                            )
+                            dimensions = _merge_vector_dimensions(
+                                dimensions, embedded_dimensions, code="embedding_failed",
+                            )
+                            rows_by_id.update(
+                                (
+                                    document.id,
+                                    (
+                                        document.id,
+                                        embedded_dimensions,
+                                        _pack_vector(vector),
+                                    ),
+                                )
+                                for document, vector in zip(missing, embedded, strict=True)
+                            )
+                        rows = tuple(rows_by_id[document.id] for document in batch)
+                        dimensions = _validate_vector_rows(rows, dimensions=dimensions)
+                        destination.executemany(
+                            "INSERT INTO vectors(document_id, dimensions, value) VALUES (?, ?, ?)",
+                            rows,
+                        )
+                        reused_documents += len(reusable_batch)
+                        embedded_documents += len(missing)
+                        if resume:
+                            _save_index_checkpoint_batch(
+                                checkpoint, start=start, rows=rows,
+                            )
+                        if progress is not None and missing:
+                            progress(min(start + len(batch), total), total, "embedding")
+                finally:
+                    if source is not None:
+                        source.close()
+                if dimensions is None:
+                    raise RetrievalFailure(
+                        "embedding_failed", "Retrieval index contains no vectors.",
+                    )
+                stored_count = int(
+                    destination.execute("SELECT COUNT(*) FROM vectors").fetchone()[0]
+                )
+                if stored_count != total:
+                    raise RetrievalFailure(
+                        "embedding_failed", "Embedding count does not match documents.",
+                    )
+                metadata = IndexMetadata(
+                    contract_version=_CONTRACT_VERSION,
+                    graph=graph.name,
+                    graph_hash=graph_revision(graph),
+                    document_count=total,
+                    dimensions=dimensions,
+                    model_id=selected_model_id,
+                    model_path=str(model_path.resolve()),
+                    model_sha256=selected_model_sha256,
+                    normalized=True,
+                    annotation_states=tuple(sorted(annotation_states)),
+                    documents_sha256=_documents_sha256(documents),
+                )
+                destination.executemany(
+                    "INSERT INTO metadata(key, value) VALUES (?, ?)",
+                    ((key, json.dumps(value)) for key, value in metadata.to_dict().items()),
+                )
+                if progress is not None:
+                    progress(total, total, "writing")
+                destination.commit()
             os.replace(temporary_path, path)
+            installed = True
             checkpoint.unlink(missing_ok=True)
             if progress is not None:
                 progress(total, total, "ready")
+        except RetrievalFailure:
+            raise
         except (OSError, sqlite3.Error) as exc:
-            temporary_path.unlink(missing_ok=True)
             raise RetrievalFailure(
                 "index_build_failed",
                 "Could not persist retrieval index.",
             ) from exc
+        finally:
+            if not installed:
+                temporary_path.unlink(missing_ok=True)
         return IndexBuildResult(
             path=path,
             metadata=metadata,
             resumed_documents=resumed_documents,
+            reused_documents=reused_documents,
+            embedded_documents=embedded_documents,
+            removed_documents=len(previous_ids - {document.id for document in documents}),
         )
+
+    def changes(
+        self,
+        graph: GraphDocument,
+        *,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> IndexChanges:
+        documents = build_retrieval_documents(graph, annotation_states=annotation_states)
+        path = self.path(graph.name, annotation_states=annotation_states)
+        if not path.is_file():
+            return IndexChanges(len(documents), 0, 0, 0)
+        stored = self._stored_document_hashes(path)
+        current = {document.id: _text_sha256(document.text) for document in documents}
+        shared = stored.keys() & current.keys()
+        return IndexChanges(
+            added_documents=len(current.keys() - stored.keys()),
+            changed_documents=sum(stored[item] != current[item] for item in shared),
+            removed_documents=len(stored.keys() - current.keys()),
+            unchanged_documents=sum(stored[item] == current[item] for item in shared),
+        )
+
+    def _stored_document_hashes(self, path: Path) -> dict[str, str]:
+        try:
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+                columns = {
+                    str(row[1]) for row in connection.execute("PRAGMA table_info(documents)")
+                }
+                if "text_sha256" in columns:
+                    rows = connection.execute("SELECT id, text_sha256 FROM documents")
+                else:
+                    rows = (
+                        (identifier, _text_sha256(text))
+                        for identifier, text in connection.execute("SELECT id, text FROM documents")
+                    )
+                return {str(identifier): str(digest) for identifier, digest in rows}
+        except sqlite3.Error as exc:
+            raise RetrievalFailure("invalid_index", "Could not read indexed documents.") from exc
+
+    def _reusable_document_ids(
+        self,
+        name: str,
+        *,
+        documents: tuple[RetrievalDocument, ...],
+        model_sha256: str,
+        annotation_states: frozenset[str],
+    ) -> tuple[set[str], set[str], int | None]:
+        path = self.path(name, annotation_states=annotation_states)
+        if not path.is_file():
+            return set(), set(), None
+        previous_ids: set[str] = set()
+        try:
+            metadata = self.metadata(name, annotation_states=annotation_states)
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+                previous_ids = {
+                    str(row[0]) for row in connection.execute("SELECT id FROM documents")
+                }
+                _validate_index_storage(connection, metadata)
+                if metadata.model_sha256 != model_sha256:
+                    return set(), previous_ids, None
+                columns = {
+                    str(row[1]) for row in connection.execute("PRAGMA table_info(documents)")
+                }
+                digest = "d.text_sha256" if "text_sha256" in columns else "NULL"
+                rows = connection.execute(
+                    f"SELECT d.id,d.text,{digest} "
+                    "FROM documents d JOIN vectors v ON v.document_id=d.id"
+                )
+                current = {document.id: _text_sha256(document.text) for document in documents}
+                reusable = set()
+                for identifier, text, stored_digest in rows:
+                    identifier = str(identifier)
+                    actual_digest = str(stored_digest) if stored_digest else _text_sha256(str(text))
+                    if current.get(identifier) == actual_digest:
+                        reusable.add(identifier)
+                return reusable, previous_ids, metadata.dimensions if reusable else None
+        except RetrievalFailure as exc:
+            if exc.code in {"invalid_index", "unsupported_index"}:
+                return set(), previous_ids, None
+            raise
+        except sqlite3.Error:
+            return set(), previous_ids, None
 
     def metadata(
         self, name: str, *,
@@ -202,12 +371,18 @@ class FileRetrievalIndex:
                         "index_policy_mismatch", "Retrieval index annotation policy differs."
                     )
                 values["annotation_states"] = sorted(DEFAULT_CONTEXT_ANNOTATION_STATES)
+            if values.get("contract_version") in {
+                _LEGACY_CONTRACT_VERSION, _PREVIOUS_CONTRACT_VERSION,
+            }:
+                values["documents_sha256"] = ""
             if isinstance(values.get("annotation_states"), list):
                 values["annotation_states"] = tuple(values["annotation_states"])
             metadata = IndexMetadata(**values)
         except (TypeError, ValueError) as exc:
             raise RetrievalFailure("invalid_index", "Retrieval index metadata is invalid.") from exc
-        if metadata.contract_version not in {_CONTRACT_VERSION, _LEGACY_CONTRACT_VERSION}:
+        if metadata.contract_version not in {
+            _CONTRACT_VERSION, _PREVIOUS_CONTRACT_VERSION, _LEGACY_CONTRACT_VERSION,
+        }:
             raise RetrievalFailure("unsupported_index", "Retrieval index must be rebuilt.")
         if frozenset(metadata.annotation_states) != annotation_states:
             raise RetrievalFailure(
@@ -215,20 +390,38 @@ class FileRetrievalIndex:
             )
         return metadata
 
+    def storage_complete(
+        self,
+        name: str,
+        *,
+        metadata: IndexMetadata,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> bool:
+        path = self.path(name, annotation_states=annotation_states)
+        try:
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+                _validate_index_storage(connection, metadata)
+        except (sqlite3.Error, RetrievalFailure):
+            return False
+        return True
+
     def load(
         self,
         graph: GraphDocument,
         *,
         model_path: Path,
+        model_sha256: str | None = None,
         annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
     ) -> tuple[IndexMetadata, tuple[RetrievalDocument, ...], tuple[tuple[float, ...], ...]]:
         metadata = self.metadata(graph.name, annotation_states=annotation_states)
-        if metadata.graph_hash != graph_revision(graph):
+        if not _retrieval_projection_current(
+            metadata, graph, annotation_states=annotation_states,
+        ):
             raise RetrievalFailure(
                 "stale_index",
                 f"Graph {graph.name} changed after indexing. Run `tarel index build {graph.name}`.",
             )
-        if metadata.model_sha256 != sha256_file(model_path):
+        if metadata.model_sha256 != (model_sha256 or sha256_file(model_path)):
             raise RetrievalFailure(
                 "model_index_mismatch",
                 "The selected embedding model differs from the indexed model. Rebuild the index.",
@@ -236,6 +429,7 @@ class FileRetrievalIndex:
         path = self.path(graph.name, annotation_states=annotation_states)
         try:
             with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+                _validate_index_storage(connection, metadata)
                 rows = connection.execute(
                     """
                     SELECT d.id, d.object_id, d.field_id, d.namespace, d.label, d.text,
@@ -262,6 +456,126 @@ class FileRetrievalIndex:
         if len(documents) != metadata.document_count:
             raise RetrievalFailure("invalid_index", "Retrieval index document count is invalid.")
         return metadata, documents, vectors
+
+    def rank(
+        self,
+        graph: GraphDocument,
+        *,
+        model_path: Path,
+        model_sha256: str | None = None,
+        query_vector: tuple[float, ...],
+        limit: int,
+        namespace: str | None = None,
+        object_ids: frozenset[str] | None = None,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+        backend: str = "auto",
+    ) -> tuple[RankedDocument, ...]:
+        if backend not in {"auto", "python", "sqlite-vec"}:
+            raise RetrievalFailure("invalid_vector_backend", "Unknown local vector backend.")
+        use_native = backend == "sqlite-vec" or (
+            backend == "auto" and sqlite_vec_available()
+        )
+        if not use_native:
+            metadata, documents, vectors = self.load(
+                graph, model_path=model_path, model_sha256=model_sha256,
+                annotation_states=annotation_states,
+            )
+            if len(query_vector) != metadata.dimensions:
+                raise RetrievalFailure("model_index_mismatch", "Query and index dimensions differ.")
+            indexed = tuple(
+                (document, vector)
+                for document, vector in zip(documents, vectors, strict=True)
+                if namespace is None or document.namespace.casefold() == namespace.casefold()
+                if object_ids is None or document.object_id in object_ids
+            )
+            return _rank_vectors(indexed, query_vector, limit=limit)
+        return self._rank_sqlite_vec(
+            graph,
+            model_path=model_path,
+            model_sha256=model_sha256,
+            query_vector=query_vector,
+            limit=limit,
+            namespace=namespace,
+            object_ids=object_ids,
+            annotation_states=annotation_states,
+        )
+
+    def _rank_sqlite_vec(
+        self,
+        graph: GraphDocument,
+        *,
+        model_path: Path,
+        model_sha256: str | None,
+        query_vector: tuple[float, ...],
+        limit: int,
+        namespace: str | None,
+        object_ids: frozenset[str] | None,
+        annotation_states: frozenset[str],
+    ) -> tuple[RankedDocument, ...]:
+        metadata = self.metadata(graph.name, annotation_states=annotation_states)
+        if not _retrieval_projection_current(
+            metadata, graph, annotation_states=annotation_states,
+        ):
+            raise RetrievalFailure(
+                "stale_index",
+                f"Graph {graph.name} changed after indexing. "
+                f"Run `tarel index build {graph.name}`.",
+            )
+        if metadata.model_sha256 != (model_sha256 or sha256_file(model_path)):
+            raise RetrievalFailure(
+                "model_index_mismatch",
+                "The selected embedding model differs from the indexed model. Rebuild the index.",
+            )
+        if len(query_vector) != metadata.dimensions:
+            raise RetrievalFailure("model_index_mismatch", "Query and index dimensions differ.")
+        path = self.path(graph.name, annotation_states=annotation_states)
+        try:
+            import sqlite_vec
+        except ImportError as exc:
+            raise RetrievalFailure(
+                "missing_sqlite_vec_dependency",
+                "sqlite-vec is unavailable. Install `tarel[vector]` or use the Python backend.",
+            ) from exc
+        parameters: dict[str, object] = {
+            "query": _pack_vector(query_vector), "limit": limit,
+        }
+        clauses = []
+        if namespace is not None:
+            clauses.append("casefold(d.namespace)=:namespace")
+            parameters["namespace"] = namespace.casefold()
+        if object_ids is not None:
+            clauses.append("d.object_id IN (SELECT value FROM json_each(:object_ids))")
+            parameters["object_ids"] = json.dumps(sorted(object_ids))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        try:
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+                _validate_index_storage(connection, metadata)
+                connection.enable_load_extension(True)
+                try:
+                    sqlite_vec.load(connection)
+                finally:
+                    connection.enable_load_extension(False)
+                connection.create_function("casefold", 1, str.casefold, deterministic=True)
+                rows = connection.execute(
+                    "SELECT d.id,d.object_id,d.field_id,d.namespace,d.label,d.text,"
+                    "1.0-vec_distance_cosine(v.value,:query) AS score "
+                    "FROM documents d JOIN vectors v ON v.document_id=d.id "
+                    f"{where} ORDER BY score DESC,casefold(d.label),d.id LIMIT :limit",
+                    parameters,
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise RetrievalFailure("invalid_index", "Could not search retrieval vectors.") from exc
+        return tuple(
+            RankedDocument(
+                document=RetrievalDocument(
+                    id=str(row[0]), object_id=str(row[1]),
+                    field_id=str(row[2]) if row[2] is not None else None,
+                    namespace=str(row[3]), label=str(row[4]), text=str(row[5]),
+                ),
+                score=float(row[6]), sources=("vector",),
+            )
+            for row in rows if math.isfinite(float(row[6]))
+        )
 
     def path(
         self, name: str, *,
@@ -346,15 +660,18 @@ def search_retrieval(
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
     bm25_weight: float | None = None,
     query_vector: tuple[float, ...] | None = None,
+    vector_backend: str = "auto",
+    model_sha256: str | None = None,
 ) -> SearchResults:
     if mode not in {"bm25", "vector", "hybrid"}:
         raise RetrievalFailure("invalid_retrieval_mode", "Mode must be bm25, vector, or hybrid.")
     if not 1 <= limit <= 100:
         raise RetrievalFailure("invalid_limit", "Search limit must be between 1 and 100.")
     weight = validate_bm25_weight(mode, bm25_weight)
+    all_documents = build_retrieval_documents(graph, annotation_states=annotation_states)
     documents = tuple(
         document
-        for document in build_retrieval_documents(graph, annotation_states=annotation_states)
+        for document in all_documents
         if namespace is None or document.namespace.casefold() == namespace.casefold()
         if object_ids is None or document.object_id in object_ids
     )
@@ -366,19 +683,18 @@ def search_retrieval(
     if mode in {"vector", "hybrid"}:
         if embedder is None or model_path is None:
             raise RetrievalFailure("missing_embedding_backend", "Vector retrieval needs a model.")
-        _metadata, indexed_documents, vectors = (store or FileRetrievalIndex()).load(
+        selected_query_vector = query_vector or embedder.embed_query(query)
+        vector_results = (store or FileRetrievalIndex()).rank(
             graph,
             model_path=model_path,
+            model_sha256=model_sha256,
+            query_vector=selected_query_vector,
+            limit=candidate_limit,
+            namespace=namespace,
+            object_ids=object_ids,
             annotation_states=annotation_states,
+            backend=vector_backend,
         )
-        indexed = tuple(
-            (document, vector)
-            for document, vector in zip(indexed_documents, vectors, strict=True)
-            if namespace is None or document.namespace.casefold() == namespace.casefold()
-            if object_ids is None or document.object_id in object_ids
-        )
-        selected_query_vector = query_vector or embedder.embed_query(query)
-        vector_results = _rank_vectors(indexed, selected_query_vector, limit=candidate_limit)
 
     if mode == "bm25":
         ranked = bm25_results
@@ -522,7 +838,7 @@ def _object_results(
     )
 
 
-def _load_index_checkpoint(
+def _prepare_index_checkpoint(
     path: Path,
     *,
     graph: GraphDocument,
@@ -530,7 +846,7 @@ def _load_index_checkpoint(
     model_id: str,
     model_sha256: str,
     annotation_states: frozenset[str],
-) -> tuple[tuple[float, ...], ...]:
+) -> tuple[int, int | None]:
     identity = _checkpoint_identity(
         graph,
         documents,
@@ -568,45 +884,136 @@ def _load_index_checkpoint(
                 str(key): json.loads(value)
                 for key, value in connection.execute("SELECT key, value FROM metadata")
             }
+            if stored_identity != identity:
+                raise RetrievalFailure(
+                    "stale_index_checkpoint",
+                    "The retrieval index checkpoint belongs to different graph documents or "
+                    "model. Run index build without --resume to rebuild and clear it.",
+                )
+            completed = 0
+            vector_dimensions: int | None = None
             rows = connection.execute(
-                "SELECT position, document_id, dimensions, value "
+                "SELECT position,document_id,dimensions,value "
                 "FROM vectors ORDER BY position"
-            ).fetchall()
-    except (OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+            )
+            for expected_position, row in enumerate(rows):
+                position, document_id, dimensions, value = row
+                if (
+                    position != expected_position
+                    or expected_position >= len(documents)
+                    or document_id != documents[expected_position].id
+                ):
+                    raise RetrievalFailure(
+                        "invalid_index_checkpoint",
+                        "Retrieval index checkpoint coverage is not a contiguous document "
+                        "prefix.",
+                    )
+                row_dimensions = int(dimensions)
+                _validated_vector_array(
+                    value, row_dimensions, code="invalid_index_checkpoint",
+                )
+                vector_dimensions = _merge_vector_dimensions(
+                    vector_dimensions,
+                    row_dimensions,
+                    code="invalid_index_checkpoint",
+                )
+                completed += 1
+    except RetrievalFailure:
+        raise
+    except (OSError, sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise RetrievalFailure(
             "invalid_index_checkpoint",
             "Could not read retrieval index checkpoint.",
         ) from exc
-    if stored_identity != identity:
-        raise RetrievalFailure(
-            "stale_index_checkpoint",
-            "The retrieval index checkpoint belongs to different graph documents or model. "
-            "Run index build without --resume to rebuild and clear it.",
-        )
-    vectors: list[tuple[float, ...]] = []
-    for expected_position, row in enumerate(rows):
-        position, document_id, dimensions, value = row
-        if (
-            position != expected_position
-            or expected_position >= len(documents)
-            or document_id != documents[expected_position].id
-        ):
-            raise RetrievalFailure(
-                "invalid_index_checkpoint",
-                "Retrieval index checkpoint coverage is not a contiguous document prefix.",
+    return completed, vector_dimensions
+
+
+def _copy_index_checkpoint_vectors(
+    path: Path,
+    destination: sqlite3.Connection,
+) -> None:
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as source:
+            destination.executemany(
+                "INSERT INTO vectors(document_id, dimensions, value) VALUES (?, ?, ?)",
+                source.execute(
+                    "SELECT document_id,dimensions,value FROM vectors ORDER BY position"
+                ),
             )
-        vectors.append(_unpack_vector(value, dimensions))
-    if vectors:
-        _validate_vectors(tuple(vectors), expected_count=len(vectors))
-    return tuple(vectors)
+    except sqlite3.Error as exc:
+        raise RetrievalFailure(
+            "invalid_index_checkpoint",
+            "Could not copy retrieval index checkpoint vectors.",
+        ) from exc
+
+
+def _read_vector_rows(
+    connection: sqlite3.Connection,
+    documents: tuple[RetrievalDocument, ...],
+    *,
+    dimensions: int | None,
+) -> dict[str, tuple[str, int, bytes]]:
+    identifiers = [document.id for document in documents]
+    try:
+        rows = {
+            str(identifier): (str(identifier), int(dimensions), bytes(value))
+            for identifier, dimensions, value in connection.execute(
+                "SELECT document_id,dimensions,value FROM vectors "
+                "WHERE document_id IN (SELECT value FROM json_each(?))",
+                (json.dumps(identifiers),),
+            )
+        }
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        raise RetrievalFailure("invalid_index", "Could not reuse retrieval vectors.") from exc
+    if set(rows) != set(identifiers):
+        raise RetrievalFailure("invalid_index", "Reusable retrieval vectors are incomplete.")
+    _validate_vector_rows(
+        tuple(rows.values()),
+        dimensions=dimensions,
+        code="invalid_index",
+    )
+    return rows
+
+
+def _merge_vector_dimensions(
+    current: int | None,
+    candidate: int | None,
+    *,
+    code: str,
+) -> int | None:
+    if candidate is None:
+        return current
+    if current is not None and current != candidate:
+        raise RetrievalFailure(code, "Embedding dimensions are inconsistent.")
+    return candidate
+
+
+def _validate_vector_rows(
+    rows: tuple[tuple[str, int, bytes], ...],
+    *,
+    dimensions: int | None,
+    code: str = "embedding_failed",
+) -> int:
+    if not rows:
+        raise RetrievalFailure(code, "Embedding count does not match documents.")
+    selected_dimensions = dimensions
+    for _document_id, row_dimensions, value in rows:
+        _validated_vector_array(value, row_dimensions, code=code)
+        selected_dimensions = _merge_vector_dimensions(
+            selected_dimensions,
+            row_dimensions,
+            code=code,
+        )
+    if selected_dimensions is None:
+        raise RetrievalFailure(code, "Retrieval index contains no vectors.")
+    return selected_dimensions
 
 
 def _save_index_checkpoint_batch(
     path: Path,
     *,
     start: int,
-    documents: tuple[RetrievalDocument, ...],
-    vectors: tuple[tuple[float, ...], ...],
+    rows: tuple[tuple[str, int, bytes], ...],
 ) -> None:
     try:
         with sqlite3.connect(path) as connection:
@@ -614,10 +1021,8 @@ def _save_index_checkpoint_batch(
                 "INSERT INTO vectors(position, document_id, dimensions, value) "
                 "VALUES (?, ?, ?, ?)",
                 (
-                    (start + offset, document.id, len(vector), _pack_vector(vector))
-                    for offset, (document, vector) in enumerate(
-                        zip(documents, vectors, strict=True)
-                    )
+                    (start + offset, document_id, dimensions, value)
+                    for offset, (document_id, dimensions, value) in enumerate(rows)
                 ),
             )
             connection.commit()
@@ -663,19 +1068,6 @@ def _checkpoint_identity(
     }
 
 
-def _validate_vector_batch(
-    vectors: tuple[tuple[float, ...], ...],
-    *,
-    existing: tuple[tuple[float, ...], ...],
-) -> None:
-    dimensions = _validate_vectors(vectors, expected_count=len(vectors))
-    if existing and dimensions != len(existing[0]):
-        raise RetrievalFailure(
-            "embedding_failed",
-            "Embedding dimensions changed while resuming the index.",
-        )
-
-
 def _create_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -689,8 +1081,11 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             field_id TEXT,
             namespace TEXT NOT NULL,
             label TEXT NOT NULL,
-            text TEXT NOT NULL
+            text TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL
         );
+        CREATE INDEX documents_namespace ON documents(namespace);
+        CREATE INDEX documents_object_id ON documents(object_id);
         CREATE TABLE vectors (
             document_id TEXT PRIMARY KEY REFERENCES documents(id),
             dimensions INTEGER NOT NULL,
@@ -740,10 +1135,73 @@ def _pack_vector(vector: tuple[float, ...]) -> bytes:
 
 
 def _unpack_vector(value: bytes, dimensions: int) -> tuple[float, ...]:
+    return tuple(_validated_vector_array(value, dimensions, code="invalid_index"))
+
+
+def _validated_vector_array(value: bytes, dimensions: int, *, code: str) -> array:
+    if dimensions < 1 or len(value) != dimensions * 4:
+        raise RetrievalFailure(code, "Stored vector dimensions are invalid.")
     values = array("f")
-    values.frombytes(value)
+    try:
+        values.frombytes(value)
+    except (TypeError, ValueError) as exc:
+        raise RetrievalFailure(code, "Stored vector data is invalid.") from exc
     if sys.byteorder != "little":
         values.byteswap()
     if len(values) != dimensions:
-        raise RetrievalFailure("invalid_index", "Stored vector dimensions are invalid.")
-    return tuple(values)
+        raise RetrievalFailure(code, "Stored vector dimensions are invalid.")
+    if any(not math.isfinite(item) for item in values):
+        raise RetrievalFailure(code, "Stored vector contains a non-finite number.")
+    return values
+
+
+def _validate_index_storage(
+    connection: sqlite3.Connection,
+    metadata: IndexMetadata,
+) -> None:
+    try:
+        row = connection.execute(
+            "SELECT "
+            "(SELECT COUNT(*) FROM documents),"
+            "(SELECT COUNT(*) FROM vectors),"
+            "(SELECT COUNT(*) FROM documents d JOIN vectors v ON v.document_id=d.id)"
+        ).fetchone()
+    except sqlite3.Error as exc:
+        raise RetrievalFailure("invalid_index", "Could not validate retrieval vectors.") from exc
+    if row != (
+        metadata.document_count,
+        metadata.document_count,
+        metadata.document_count,
+    ):
+        raise RetrievalFailure("invalid_index", "Retrieval index coverage is invalid.")
+
+
+def sqlite_vec_available() -> bool:
+    return importlib.util.find_spec("sqlite_vec") is not None
+
+
+def _text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _documents_sha256(documents: tuple[RetrievalDocument, ...]) -> str:
+    payload = json.dumps(
+        [[document.id, _text_sha256(document.text)] for document in documents],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _retrieval_projection_current(
+    metadata: IndexMetadata,
+    graph: GraphDocument,
+    *,
+    annotation_states: frozenset[str],
+) -> bool:
+    if metadata.graph_hash == graph_revision(graph):
+        return True
+    if not metadata.documents_sha256:
+        return False
+    documents = build_retrieval_documents(graph, annotation_states=annotation_states)
+    return metadata.documents_sha256 == _documents_sha256(documents)

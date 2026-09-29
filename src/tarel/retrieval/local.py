@@ -6,6 +6,7 @@ import hashlib
 import math
 import os
 import tempfile
+import threading
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -197,6 +198,7 @@ class LlamaCppEmbedding:
             ) from exc
         threads = n_threads or max(1, (os.cpu_count() or 2) - 1)
         self._model_path = resolved
+        self._embedding_lock = threading.Lock()
         self._model: Any = Llama(
             model_path=str(resolved),
             n_ctx=n_ctx,
@@ -227,7 +229,8 @@ class LlamaCppEmbedding:
             batch = texts[offset : offset + batch_size]
             for position, text in enumerate(batch, start=offset + 1):
                 try:
-                    embedded = self._model.embed(text, normalize=True, truncate=True)
+                    with self._embedding_lock:
+                        embedded = self._model.embed(text, normalize=True, truncate=True)
                 except Exception as exc:
                     raise RetrievalFailure(
                         "embedding_failed",
@@ -237,11 +240,12 @@ class LlamaCppEmbedding:
         return tuple(vectors)
 
     def embed_query(self, text: str) -> tuple[float, ...]:
-        embedded = self._model.embed(
-            f"{_QUERY_INSTRUCTION}{text.strip()}",
-            normalize=True,
-            truncate=True,
-        )
+        with self._embedding_lock:
+            embedded = self._model.embed(
+                f"{_QUERY_INSTRUCTION}{text.strip()}",
+                normalize=True,
+                truncate=True,
+            )
         return _normalized_vector(embedded)
 
 

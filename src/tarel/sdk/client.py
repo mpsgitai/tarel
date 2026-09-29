@@ -27,6 +27,7 @@ from tarel.application import (
     build_focus_use_case,
     build_graph_use_case,
     build_retrieval_index_use_case,
+    build_retrieval_workspace_indexes_use_case,
     check_relationship_use_case,
     compare_context_use_case,
     compile_context_prefix_use_case,
@@ -66,6 +67,7 @@ from tarel.application import (
     resolve_knowledge_use_case,
     resolve_workspace_scope_use_case,
     retrieval_index_status_use_case,
+    retrieval_workspace_status_use_case,
     run_annotation_batch_use_case,
     search_graph_use_case,
     search_workspace_use_case,
@@ -2712,12 +2714,61 @@ class IndexAPI(_RuntimeAPI):
         )
 
     def status(
-        self, graph: str, *, annotation_states: frozenset[str] | None = None,
+        self, graph: str, *, model_path: str | Path | None = None,
+        annotation_states: frozenset[str] | None = None,
         validated_only: bool = False,
     ) -> dict[str, object]:
         return retrieval_index_status_use_case(
-            graph, annotation_states=annotation_states, validated_only=validated_only,
+            graph, model_path=_optional_path(model_path),
+            annotation_states=annotation_states, validated_only=validated_only,
             runtime=self._runtime,
+        )
+
+    def build_workspace(
+        self,
+        workspace: str,
+        *,
+        systems: tuple[str, ...] = (),
+        graphs: tuple[str, ...] = (),
+        areas: tuple[str, ...] = (),
+        schemas: tuple[str, ...] = (),
+        zones: tuple[str, ...] = (),
+        model_path: str | Path | None = None,
+        batch_size: int = 16,
+        n_threads: int | None = None,
+        resume: bool = False,
+        max_graphs: int = 8,
+        progress: Callable[[int, int, str], None] | None = None,
+        annotation_states: frozenset[str] | None = None,
+        validated_only: bool = False,
+    ) -> dict[str, object]:
+        return build_retrieval_workspace_indexes_use_case(
+            workspace, systems=systems, graphs=graphs, areas=areas,
+            schemas=schemas, zones=zones, model_path=_optional_path(model_path),
+            batch_size=batch_size, n_threads=n_threads, resume=resume,
+            max_graphs=max_graphs, progress=progress,
+            annotation_states=annotation_states, validated_only=validated_only,
+            runtime=self._runtime,
+        )
+
+    def status_workspace(
+        self,
+        workspace: str,
+        *,
+        systems: tuple[str, ...] = (),
+        graphs: tuple[str, ...] = (),
+        areas: tuple[str, ...] = (),
+        schemas: tuple[str, ...] = (),
+        zones: tuple[str, ...] = (),
+        model_path: str | Path | None = None,
+        annotation_states: frozenset[str] | None = None,
+        validated_only: bool = False,
+    ) -> dict[str, object]:
+        return retrieval_workspace_status_use_case(
+            workspace, systems=systems, graphs=graphs, areas=areas,
+            schemas=schemas, zones=zones, model_path=_optional_path(model_path),
+            annotation_states=annotation_states,
+            validated_only=validated_only, runtime=self._runtime,
         )
 
 

@@ -47,6 +47,9 @@ semantic = [
 local-rag = [
   "llama-cpp-python>=0.3.16,<0.4",
 ]
+vector = [
+  "sqlite-vec==0.1.9",
+]
 sql-lineage = [
   "sqlglot>=30.19,<30.20",
 ]
@@ -77,6 +80,7 @@ only-include = [
   "tools/check_docs.py",
   "tools/readme_demo",
   "tools/run_semantic_contract_test.py",
+  "tools/sqlite_vec_trial.py",
 ]
 
 [tool.hatch.build]

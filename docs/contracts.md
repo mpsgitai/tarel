@@ -847,6 +847,11 @@ the default. Lexical, BM25-only, and vector-only search keep their separate mode
 The CLI and SDK reject non-finite, negative, non-hybrid, or values beyond the supported score
 range.
 
+Retrieval returns candidates, including nearby matches when the requested concept is not documented.
+A high rank does not establish a business definition, a valid join, or the presence of an answer.
+Inspect descriptions, grain, fields, and relationship evidence before compiling the selected
+context. Narrowing the working scope helps distinguish equally named objects across systems.
+
 ### Model and runtime
 
 The recommended model is Qwen3-Embedding-0.6B in Q4_K_M GGUF form. TAREL's model registry pins the
@@ -861,14 +866,22 @@ The model runs in-process on the CPU through the optional `llama-cpp-python` pac
 only to questions. `--batch-size` controls document scheduling and progress reporting; llama.cpp
 decodes each document separately because its `n_batch`/`n_ubatch` values describe token capacity,
 not a safe number of document sequences. This avoids multi-sequence decode failures without
-changing the index format. No local generation model, reranker, API server, LlamaIndex, vector
-database, Torch, or Sentence Transformers layer is involved.
+changing the index format. A long-lived SDK or browser runtime keeps one loaded model per resolved
+path, thread setting, and current model SHA-256. Replacing a GGUF at the same path invalidates that
+entry. Creation and calls on the shared llama.cpp instance are serialized because the native
+embedding context is mutable; separate CLI processes remain independent. No local generation
+model, reranker, API server, LlamaIndex, vector database, Torch, or Sentence Transformers layer is
+involved.
 
-An existing GGUF can be used without downloading another copy:
+Install `tarel[local-rag]` for local embeddings, or `tarel[local-rag,vector]` to also enable native
+SQLite ranking. The `vector` extra alone does not provide an embedding model or llama.cpp runtime.
+Neither extra downloads model weights. An existing GGUF can be used without downloading another copy:
 
 ```bash
 tarel index build adventureworks_dw --model /absolute/path/model.gguf
 tarel index build adventureworks_dw --model /absolute/path/model.gguf --resume
+tarel index status --workspace enterprise
+tarel index build --workspace enterprise --model /absolute/path/model.gguf --max-graphs 8
 tarel context adventureworks_dw "sales per year" \
   --mode hybrid \
   --model /absolute/path/model.gguf
@@ -888,11 +901,27 @@ only rebuildable documents, normalized float32 vectors, and compatibility metada
 - retrieval contract version;
 - model identifier, path, and SHA-256;
 - document count and vector dimensions;
+- a stable text hash for each document and a hash of the complete retrieval projection;
 - the exact annotation-state policy used to construct retrieval text.
 
-Any graph or model mismatch is an error requiring an explicit index rebuild. The first version uses
-a transparent linear cosine scan because DWH metadata corpora contain hundreds or a few thousand
-documents, not millions. A specialized vector extension is deferred until measurements justify it.
+An index update compares stable document IDs and text hashes. It embeds only added or changed
+documents, reuses unchanged vectors, and drops removed documents before atomically replacing the
+SQLite file. Reused and resumed vectors are copied as float32 BLOBs in bounded batches; an update
+does not unpack the complete vector corpus into Python memory. Changes outside the allowlisted
+retrieval projection do not invalidate vector search. A different model still requires embedding
+every document.
+
+The base installation performs a transparent exact cosine scan in Python. Installing the optional
+`tarel[vector]` extra adds `sqlite-vec`; TAREL then runs the same exact cosine ranking inside the
+existing SQLite file and applies namespace and object filters before returning candidates. The
+extension is loaded lazily, the core dependency list stays empty, and no second vector database or
+duplicated index lifecycle is introduced. Search falls back to Python when the extension is absent.
+Installing the extra can use an existing compatible index immediately, without re-embedding or
+conversion. It changes the execution of vector ranking, not the embedding model or hybrid weights.
+Small score differences from floating-point arithmetic are possible.
+Both backends reject incomplete document/vector coverage before ranking. Python loading validates
+every stored vector; sqlite-vec rejects an incompatible BLOB while calculating distance. Index
+builds and resumable checkpoints also reject inconsistent dimensions and non-finite vectors.
 
 The broad default policy continues to use `.tarel/indexes/<graph>/index.sqlite`. A narrower
 annotation policy, such as `index build GRAPH --validated-only`, gets a deterministic policy
@@ -921,6 +950,81 @@ Graph documents already use atomic whole-file replacement, so they never expose 
 graph. Annotation batches already save the graph after every successful object; rerunning the normal
 missing-only batch continues with unannotated objects. Those existing behaviors remain separate from
 the rebuildable vector-index checkpoint.
+
+#### Keep workspace indexes ready
+
+For a workspace, `tarel index status --workspace NAME` reports ready, missing, and pending graph
+indexes in one response. `tarel index build --workspace NAME` updates at most eight pending graphs
+per invocation by default; `--max-graphs` changes that explicit bound. Workspace system, graph,
+area, schema, and zone selectors use the same scope resolver as search and context to choose the
+participating graphs. Each selected graph still receives one complete graph index; TAREL does not
+create overlapping partial indexes for areas or schemas. The SDK exposes the same behavior as
+`tarel.index.status_workspace(...)` and
+`tarel.index.build_workspace(...)`. The browser displays this status beside the working scope and
+updates exactly one pending graph per click. This bounds the number of graphs, not the duration of
+the operation: a large graph or a model change can still take time. A failed update keeps its error
+visible and re-enables the Update button for a retry.
+
+An otherwise current index whose recorded GGUF path disappeared has state `model_missing` and
+remains pending. Supplying an in-content identical model copy repairs the stored path while reusing
+all vectors; no embedding runtime is loaded for that repair.
+
+The SDK status methods accept an explicit `model_path`; a current index built with a different model
+then reports `model_mismatch`, and a bounded workspace update rebuilds that graph with the selected
+model rather than treating it as ready.
+Without an explicit model path, status checks the current bytes at the recorded path, so replacing
+that file also makes a workspace index pending. Workspace operations share the model hash cache
+across graphs, including a single CLI invocation.
+
+Graph status separates document freshness (`current`) from model availability and compatibility
+(`ready`). Use `ready` to decide whether a workspace graph needs an update:
+
+| Graph state | Meaning | Next step |
+| --- | --- | --- |
+| `ready` | Retrieval documents and model identity match. | Search with the same model and annotation policy. |
+| `missing` | No complete index or resumable checkpoint exists. | Build the index. |
+| `building` | A checkpoint exists without a complete index. | Resume with the same model and graph documents. |
+| `update_required` | Retrieval documents changed or stored vector coverage is incomplete. | Run a build to embed the delta or repair the index. |
+| `model_missing` | The recorded model file is absent for a current index. | Provide the model path when building. |
+| `model_mismatch` | The selected or recorded model bytes differ from the indexed model. | Rebuild with the intended model. |
+
+`changes.requires_embedding` counts added and changed text documents. A model mismatch additionally
+requires embedding every document, even when that counter is zero. Build results report
+`embedded_documents`, `reused_documents`, and `removed_documents`; workspace results also report
+`remaining_graphs`. An unchanged workspace build performs no graph builds.
+
+The SDK can compare indexes against a selected model before updating a small batch:
+
+```python
+from pathlib import Path
+from tarel.sdk import Tarel
+
+tarel = Tarel("/absolute/private/.tarel")
+model = Path("/absolute/models/model.gguf")
+status = tarel.index.status_workspace("enterprise", model_path=model)
+if not status["ready"]:
+    result = tarel.index.build_workspace(
+        "enterprise", model_path=model, max_graphs=1, n_threads=4,
+    )
+    print(result["remaining_graphs"])
+```
+
+Repeat the bounded update when more graphs remain. A build without `model_path` reuses an existing
+recorded model path when available; pass `model_path` explicitly to change it. Search still resolves
+its model from the caller's path, `TAREL_EMBEDDING_MODEL`, or the default cache, so configure the same
+model for subsequent searches. An incompatible or stale index fails visibly; TAREL does not silently
+replace a requested vector/hybrid search with BM25.
+
+### Performance and evaluation
+
+Measure model loading, query embedding, graph preparation, vector ranking, BM25, and context
+compilation separately as well as together. Native ranking avoids loading the full vector corpus
+into Python, but graph revision checks can still dominate a large graph's search time. A bounded
+workspace update also rewrites each affected SQLite index atomically, even if most vectors are reused.
+
+Compare result order and relevance on the same corpus, model, filters, and annotation policy when
+evaluating a backend change. Faster ranking does not establish better relevance. A stable context
+prefix can help a harness reuse context; actual KV-cache reuse must be measured by the model host.
 
 ### Data boundary
 

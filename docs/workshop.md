@@ -406,12 +406,25 @@ Prepare local vector indexes for the participating graphs using the optional run
 ```bash
 tarel index build dwh-main --model /absolute/path/model.gguf --resume
 tarel index status dwh-main
+tarel index status --workspace enterprise
+tarel index build --workspace enterprise --model /absolute/path/model.gguf
+tarel index build --workspace enterprise --model /absolute/path/model.gguf --validated-only
+tarel index status --workspace enterprise --validated-only --format json
 ```
 
-Repeat for participating graphs and configure the same model for hybrid calls, for example through
-`TAREL_EMBEDDING_MODEL`. Graph/review changes require explicit index rebuilding. At this scale,
-measure preparation time, memory, and retrieval latency: the current vector implementation uses
-a linear scan, not a distributed vector service.
+The workspace command updates a bounded batch of participating graphs and reports how many remain.
+Repeat until each required policy reports ready. The second build prepares a separate reviewed-only
+index for the `--validated-only` context requests above; a broad search uses the default index.
+Configure the same model for hybrid calls, for example through `TAREL_EMBEDDING_MODEL`. Later graph
+updates reuse unchanged vectors and embed only changed retrieval documents. A replaced model requires
+new embeddings even when the graph is unchanged. Use the reported embedded, reused, and remaining
+counts to explain the update to the user.
+
+At this scale, measure preparation time, memory, and retrieval latency; `tarel[vector]` moves exact
+distance calculation and filters into SQLite without introducing a distributed vector service. This
+improves the search execution path; assess relevance separately. Similar candidates can still appear
+for a concept that is not documented, so check their descriptions, grain, and fields before claiming
+that the requested business question is supported.
 
 **Show:** Discover a relevant subject outside the report and explain the evidence required to
 connect it.
