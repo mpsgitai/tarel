@@ -1876,7 +1876,12 @@ def build_retrieval_index_use_case(
         resolved_model = resolve_model_path(model_path)
     model_sha256 = _embedding_model_sha256(runtime, resolved_model)
     model_matches = metadata is not None and metadata.model_sha256 == model_sha256
-    needs_embedding = not model_matches or changes.requires_embedding > 0
+    storage_complete = metadata is not None and store.storage_complete(
+        name, metadata=metadata, annotation_states=selected_states,
+    )
+    needs_embedding = (
+        not model_matches or not storage_complete or changes.requires_embedding > 0
+    )
     embedder = (
         _embedding_backend(
             runtime, resolved_model, model_sha256=model_sha256, n_threads=n_threads,
@@ -1936,18 +1941,21 @@ def retrieval_index_status_use_case(
         if metadata.documents_sha256
         else metadata.graph_hash == graph_revision(graph)
     )
+    storage_complete = store.storage_complete(
+        name, metadata=metadata, annotation_states=selected_states,
+    )
     stored_model_available = Path(metadata.model_path).is_file()
     model_available = stored_model_available
     if selected_model is None and stored_model_available:
         stored_model = Path(metadata.model_path)
         selected_model = (stored_model, _embedding_model_sha256(runtime, stored_model))
     model_matches = selected_model is None or metadata.model_sha256 == selected_model[1]
-    ready = current and model_available and model_matches
+    ready = current and storage_complete and model_available and model_matches
     return {
         "state": (
             "ready" if ready
             else "model_mismatch" if current and model_available and not model_matches
-            else "model_missing" if current
+            else "model_missing" if current and not model_available
             else "update_required"
         ),
         "checkpoint": checkpoint,

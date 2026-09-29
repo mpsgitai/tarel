@@ -390,6 +390,21 @@ class FileRetrievalIndex:
             )
         return metadata
 
+    def storage_complete(
+        self,
+        name: str,
+        *,
+        metadata: IndexMetadata,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> bool:
+        path = self.path(name, annotation_states=annotation_states)
+        try:
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+                _validate_index_storage(connection, metadata)
+        except (sqlite3.Error, RetrievalFailure):
+            return False
+        return True
+
     def load(
         self,
         graph: GraphDocument,

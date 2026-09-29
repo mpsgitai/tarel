@@ -984,7 +984,7 @@ Graph status separates document freshness (`current`) from model availability an
 | `ready` | Retrieval documents and model identity match. | Search with the same model and annotation policy. |
 | `missing` | No complete index or resumable checkpoint exists. | Build the index. |
 | `building` | A checkpoint exists without a complete index. | Resume with the same model and graph documents. |
-| `update_required` | Retrieval documents changed. | Run a build to embed the delta and remove obsolete documents. |
+| `update_required` | Retrieval documents changed or stored vector coverage is incomplete. | Run a build to embed the delta or repair the index. |
 | `model_missing` | The recorded model file is absent for a current index. | Provide the model path when building. |
 | `model_mismatch` | The selected or recorded model bytes differ from the indexed model. | Rebuild with the intended model. |
 

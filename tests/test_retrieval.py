@@ -253,6 +253,45 @@ class RetrievalTests(TestCase):
         self.assertEqual(after["ready_graphs"], 2)
         self.assertEqual(factory.call_count, 1)
 
+    def test_workspace_status_queues_and_repairs_incomplete_vector_coverage(self) -> None:
+        graph = _retrieval_graph()
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            model = root / "model.gguf"
+            model.write_bytes(b"test model")
+            sdk = Tarel(root / ".tarel")
+            sdk.runtime.graph_store().save(graph)
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("multi"), "analytics",
+                graph_names=(graph.name,), graphs={graph.name: graph},
+            ))
+            initial = sdk.runtime.retrieval_index().build(
+                graph, embedder=_FakeEmbedding(), model_path=model,
+            )
+            with sqlite3.connect(initial.path) as connection:
+                connection.execute(
+                    "DELETE FROM vectors WHERE document_id="
+                    "(SELECT document_id FROM vectors LIMIT 1)"
+                )
+
+            before = sdk.index.status_workspace("multi")
+            embedder = _FakeEmbeddingWithCalls()
+            with patch("tarel.application.LlamaCppEmbedding", return_value=embedder) as factory:
+                repaired = sdk.index.build_workspace("multi", max_graphs=1)
+            after = sdk.index.status_workspace("multi")
+
+        self.assertTrue(before["graphs"][0]["current"])
+        self.assertFalse(before["graphs"][0]["ready"])
+        self.assertEqual(before["graphs"][0]["state"], "update_required")
+        self.assertEqual(before["pending_graphs"], 1)
+        self.assertEqual(repaired["built_graphs"], 1)
+        self.assertEqual(repaired["built"][0]["embedded_documents"], 8)
+        self.assertEqual(repaired["built"][0]["reused_documents"], 0)
+        self.assertEqual(repaired["remaining_graphs"], 0)
+        self.assertTrue(after["ready"])
+        self.assertEqual(factory.call_count, 1)
+        self.assertEqual(len(embedder.texts), 8)
+
     def test_workspace_update_repairs_a_missing_model_path_with_the_selected_copy(self) -> None:
         graph = _retrieval_graph()
         with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
