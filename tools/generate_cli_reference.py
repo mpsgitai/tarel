@@ -24,6 +24,17 @@ GROUPS = {
         "",
         "tarel version",
     ),
+    "package": (
+        "Portable packages",
+        "Pack, inspect, verify, and unpack portable metadata snapshots.",
+        (
+            "Pack writes a deterministic .tarel file from authoritative metadata. "
+            "Inspect reads its manifest, verify checks every document and checksum, and "
+            "unpack writes only to a destination that does not exist."
+        ),
+        "package-format.md",
+        "tarel package inspect team.tarel",
+    ),
     "demo": (
         "Demo warehouse",
         "Create a deterministic local source for learning and regression exercises.",
@@ -631,9 +642,14 @@ DOC_TARGETS = {
     "reference-mappings.md": "contracts.md#reference-mappings",
     "family-focus.md": "contracts.md#families-in-report-focus",
     "browser-workflows.md": "contracts.md#browser-scope-and-review",
+    "package-format.md": "package-format.md",
 }
 RESULTS = {
     "version": "Version text; no JSON document.",
+    "package": (
+        "Package path, selected workspace, entry counts by kind, compressed and uncompressed "
+        "sizes, package revision, verification state, and unpack destination when applicable."
+    ),
     "demo": (
         "Created demo paths/configuration and version information. Existi"
         "ng demo replacement requires the command-specific force flag."
@@ -734,6 +750,7 @@ RESULTS = {
     ),
 }
 DOMAIN_CLI = {
+    "package": "packages/cli.py",
     "lineage": "lineage/cli.py",
     "semantic": "semantics/cli.py",
     "entity": "entity_resolution/cli.py",
