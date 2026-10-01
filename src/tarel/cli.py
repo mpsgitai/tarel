@@ -122,6 +122,8 @@ from tarel.object_bindings.cli import add_binding_commands, dispatch_binding
 from tarel.object_bindings.contracts import ObjectBindingFailure
 from tarel.object_families.cli import add_family_commands, dispatch_family
 from tarel.object_families.contracts import ObjectFamilyFailure
+from tarel.packages.application import PackageFailure
+from tarel.packages.cli import add_package_commands, dispatch_package
 from tarel.providers.config import BUILTIN_PROVIDER_ADAPTERS
 from tarel.providers.contracts import ProviderCheck, ProviderFailure
 from tarel.reference_mapping.cli import (
@@ -171,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subcommands = parser.add_subparsers(dest="command")
     subcommands.add_parser("version", help="Print the installed TAREL version.")
+    add_package_commands(subcommands)
 
     demo = subcommands.add_parser(
         "demo",
@@ -1222,6 +1225,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(arguments)
 
     try:
+        package_result = dispatch_package(args)
+        if package_result is not None:
+            return package_result
+
         lineage_result = dispatch_lineage(args)
         if lineage_result is not None:
             return lineage_result
@@ -2511,6 +2518,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         LineageFailure,
         LogicalTopologyFailure,
         ObjectFamilyFailure,
+        PackageFailure,
         ObjectBindingFailure,
         ContextExpansionFailure,
         SemanticConceptFailure,
