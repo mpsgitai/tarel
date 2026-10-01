@@ -240,7 +240,14 @@ def validate_portable_path(name: str) -> None:
     if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise PackageFailure("invalid_package_path", f"Unsafe package path: {name!r}")
     for part in path.parts:
-        if part.endswith((" ", ".")) or part.split(".", 1)[0].upper() in _WINDOWS_RESERVED:
+        has_windows_illegal_character = any(
+            character in '<>:"|?*' or ord(character) < 32 for character in part
+        )
+        if (
+            has_windows_illegal_character
+            or part.endswith((" ", "."))
+            or part.split(".", 1)[0].upper() in _WINDOWS_RESERVED
+        ):
             raise PackageFailure("invalid_package_path", f"Non-portable package path: {name!r}")
 
 

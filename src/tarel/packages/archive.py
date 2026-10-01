@@ -6,6 +6,7 @@ import json
 import stat
 import unicodedata
 import zipfile
+import zlib
 from typing import Any
 
 from tarel.packages.contracts import (
@@ -100,7 +101,7 @@ def read_member(archive: zipfile.ZipFile, name: str, expected_size: int) -> byte
     try:
         with archive.open(name, "r") as handle:
             data = handle.read(expected_size + 1)
-    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+    except (OSError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
         raise PackageFailure("invalid_package", f"Could not read package entry: {name}") from exc
     if len(data) != expected_size:
         raise PackageFailure("invalid_package", f"Package entry size changed while reading: {name}")

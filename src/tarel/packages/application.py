@@ -13,6 +13,7 @@ import shutil
 import tempfile
 import zipfile
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -31,6 +32,7 @@ from tarel.packages.archive import (
     write_manifest,
 )
 from tarel.packages.contracts import (
+    MAX_MEMBER_BYTES,
     MIMETYPE_BYTES,
     MIMETYPE_PATH,
     PACKAGE_CONTRACT_VERSION,
@@ -69,15 +71,16 @@ def pack_workspace(
         raise PackageFailure("invalid_package_path", "Package output must use the .tarel suffix.")
     if output.exists() and not replace:
         raise PackageFailure("package_exists", f"Package already exists: {output}")
-    sources = _select_workspace_documents(state_root, workspace)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=output.parent, prefix=f".{output.stem}-", suffix=".tmp"
-    )
-    os.close(descriptor)
-    temporary = Path(temporary_name)
+    temporary: Path | None = None
     entries: list[PackageEntry] = []
     try:
+        sources = _select_workspace_documents(state_root, workspace)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=output.parent, prefix=f".{output.stem}-", suffix=".tmp"
+        )
+        temporary = Path(temporary_name)
+        os.close(descriptor)
         with zipfile.ZipFile(
             temporary,
             mode="w",
@@ -88,7 +91,7 @@ def pack_workspace(
             write_bytes(archive, MIMETYPE_PATH, MIMETYPE_BYTES, compressed=False)
             for archive_path, source_path in sources:
                 kind, name = entry_identity(archive_path)
-                data = source_path.read_bytes()
+                data = _read_source_document(source_path)
                 contract_version = _validate_document(data, kind, name)
                 digest, size = write_document(archive, archive_path, data)
                 entries.append(
@@ -106,11 +109,14 @@ def pack_workspace(
             write_manifest(archive, manifest)
         verify_package(temporary)
         os.replace(temporary, output)
-    except (OSError, zipfile.BadZipFile) as exc:
-        temporary.unlink(missing_ok=True)
+    except PackageFailure:
+        _remove_temporary(temporary)
+        raise
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        _remove_temporary(temporary)
         raise PackageFailure("package_write_failed", f"Could not write package: {output}") from exc
     except Exception:
-        temporary.unlink(missing_ok=True)
+        _remove_temporary(temporary)
         raise
     return package_report(output, manifest, verified=True)
 
@@ -237,12 +243,32 @@ def _local_names(root: Path, filename: str) -> tuple[str, ...]:
 
 
 def _load_local_document(path: Path, kind: str, name: str) -> object:
+    data = _read_source_document(path)
+    _validate_document(data, kind, name)
+    return _parse_document(data, kind)
+
+
+def _read_source_document(path: Path) -> bytes:
     try:
+        if path.stat().st_size > MAX_MEMBER_BYTES:
+            raise PackageFailure("package_too_large", f"Package source is too large: {path}")
         data = path.read_bytes()
     except FileNotFoundError as exc:
         raise PackageFailure("package_source_missing", f"Package source missing: {path}") from exc
-    _validate_document(data, kind, name)
-    return _parse_document(data, kind)
+    except OSError as exc:
+        raise PackageFailure(
+            "package_source_read_failed", f"Could not read package source: {path}"
+        ) from exc
+    if len(data) > MAX_MEMBER_BYTES:
+        raise PackageFailure("package_too_large", f"Package source is too large: {path}")
+    return data
+
+
+def _remove_temporary(path: Path | None) -> None:
+    if path is None:
+        return
+    with suppress(OSError):
+        path.unlink(missing_ok=True)
 
 
 def _validate_document(data: bytes, kind: str, name: str) -> str:
@@ -261,7 +287,7 @@ def _parse_document(data: bytes, kind: str) -> object:
         return _DOCUMENT_READERS[kind](payload)
     except PackageFailure:
         raise
-    except (RuntimeError, TypeError, ValueError, KeyError) as exc:
+    except (AttributeError, RuntimeError, TypeError, ValueError, KeyError) as exc:
         raise PackageFailure(
             "invalid_package_document", f"Invalid {kind} document: {exc}"
         ) from exc
@@ -284,10 +310,20 @@ def _validate_package_references(
     if not isinstance(workspace, WorkspaceDocument):
         raise PackageFailure("invalid_package_references", "Selected workspace is missing.")
     referenced_graphs = {name for system in workspace.systems for name in system.graphs}
-    if not referenced_graphs.issubset(entries_by_kind.get("graph", set())):
-        missing = sorted(referenced_graphs - entries_by_kind.get("graph", set()))
+    packaged_graphs = entries_by_kind.get("graph", set())
+    if referenced_graphs != packaged_graphs:
+        missing = sorted(referenced_graphs - packaged_graphs)
+        extra = sorted(packaged_graphs - referenced_graphs)
+        detail = "; ".join(
+            item
+            for item in (
+                f"missing={missing}" if missing else "",
+                f"extra={extra}" if extra else "",
+            )
+            if item
+        )
         raise PackageFailure(
-            "invalid_package_references", f"Workspace graph is missing: {', '.join(missing)}"
+            "invalid_package_references", f"Workspace graph membership mismatch: {detail}"
         )
     for entry in manifest.entries:
         if entry.kind != "focus":

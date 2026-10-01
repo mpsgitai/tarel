@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import zipfile
-from contextlib import redirect_stdout
+import zlib
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import MagicMock, patch
 
 from tarel.cli import main
 from tarel.packages.application import (
@@ -17,7 +19,8 @@ from tarel.packages.application import (
     unpack_package,
     verify_package,
 )
-from tarel.packages.contracts import canonical_json, sha256
+from tarel.packages.archive import read_member
+from tarel.packages.contracts import canonical_json, sha256, validate_portable_path
 
 
 class PackageTests(TestCase):
@@ -83,6 +86,63 @@ class PackageTests(TestCase):
             with self.assertRaisesRegex(PackageFailure, "Unsafe package path"):
                 inspect_package(package)
 
+    def test_portable_paths_reject_windows_illegal_characters(self) -> None:
+        for character in ':*?"<>|\x00\x1f':
+            with (
+                self.subTest(character=repr(character)),
+                self.assertRaisesRegex(PackageFailure, "Non-portable package path"),
+            ):
+                validate_portable_path(f"graphs/sales{character}west/graph.json")
+
+    def test_pack_translates_output_setup_io_errors(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            _write_json(state / "graphs/sales/graph.json", _graph_payload())
+            _write_json(state / "workspaces/team/workspace.json", _workspace_payload())
+            blocked_parent = root / "blocked"
+            blocked_parent.write_text("regular file", encoding="utf-8")
+            errors = StringIO()
+
+            with redirect_stderr(errors):
+                exit_code = main(
+                    [
+                        "package",
+                        "pack",
+                        "--state",
+                        str(state),
+                        "--workspace",
+                        "team",
+                        "--output",
+                        str(blocked_parent / "team.tarel"),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("error [package_write_failed]", errors.getvalue())
+
+    def test_pack_rejects_oversized_source_before_reading_it(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            graph = state / "graphs/sales/graph.json"
+            _write_json(graph, _graph_payload())
+            graph.write_bytes(graph.read_bytes() + (b" " * 2_000))
+            _write_json(state / "workspaces/team/workspace.json", _workspace_payload())
+
+            with (
+                patch("tarel.packages.application.MAX_MEMBER_BYTES", 1_024),
+                self.assertRaisesRegex(PackageFailure, "Package source is too large"),
+            ):
+                pack_workspace(state, "team", root / "team.tarel")
+
+    def test_read_member_translates_decompressor_errors(self) -> None:
+        archive = MagicMock()
+        archive.open.side_effect = zlib.error("invalid compressed data")
+
+        with self.assertRaisesRegex(PackageFailure, "Could not read package entry"):
+            read_member(archive, "graphs/sales/graph.json", 10)
+
     def test_verify_rejects_content_with_a_valid_size_but_wrong_checksum(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -130,10 +190,92 @@ class PackageTests(TestCase):
 
             self.assertTrue(verify_package(independent).verified)
 
+    def test_verify_rejects_graphs_outside_the_selected_workspace(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            _write_json(state / "graphs/sales/graph.json", _graph_payload())
+            _write_json(state / "workspaces/team/workspace.json", _workspace_payload())
+            package = root / "team.tarel"
+            pack_workspace(state, "team", package)
+            members = _read_package_members(package)
+            other_payload = _graph_payload()
+            other_payload["name"] = "other"
+            other_path = "graphs/other/graph.json"
+            members[other_path] = _json_bytes(other_payload)
+            _refresh_manifest(
+                members,
+                new_entries=(
+                    {
+                        "contract_version": "tarel.graph.v0.1",
+                        "kind": "graph",
+                        "name": "other",
+                        "path": other_path,
+                        "sha256": sha256(members[other_path]),
+                        "size": len(members[other_path]),
+                    },
+                ),
+            )
+            independent = root / "independent-extra-graph.tarel"
+            _write_package_members(independent, members)
+
+            with self.assertRaisesRegex(PackageFailure, "extra=\\['other'\\]"):
+                verify_package(independent)
+
+    def test_verify_translates_non_object_graph_members(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            _write_json(state / "graphs/sales/graph.json", _graph_payload())
+            _write_json(state / "workspaces/team/workspace.json", _workspace_payload())
+            package = root / "team.tarel"
+            pack_workspace(state, "team", package)
+            members = _read_package_members(package)
+            graph_path = "graphs/sales/graph.json"
+            graph = json.loads(members[graph_path])
+            graph["nodes"] = [1]
+            members[graph_path] = _json_bytes(graph)
+            _refresh_manifest(members)
+            malformed = root / "malformed-graph.tarel"
+            _write_package_members(malformed, members)
+
+            with self.assertRaisesRegex(PackageFailure, "Invalid graph document"):
+                verify_package(malformed)
+
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_bytes(_json_bytes(payload))
+
+
+def _json_bytes(payload: object) -> bytes:
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+
+
+def _read_package_members(path: Path) -> dict[str, bytes]:
+    with zipfile.ZipFile(path) as archive:
+        return {name: archive.read(name) for name in archive.namelist()}
+
+
+def _write_package_members(path: Path, members: dict[str, bytes]) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+
+
+def _refresh_manifest(
+    members: dict[str, bytes], *, new_entries: tuple[dict[str, object], ...] = ()
+) -> None:
+    manifest = json.loads(members["manifest.json"])
+    manifest["entries"].extend(new_entries)
+    for entry in manifest["entries"]:
+        data = members[entry["path"]]
+        entry["sha256"] = sha256(data)
+        entry["size"] = len(data)
+    manifest["entries"].sort(key=lambda entry: entry["path"])
+    unsigned = {key: value for key, value in manifest.items() if key != "package_revision"}
+    manifest["package_revision"] = sha256(canonical_json(unsigned))
+    members["manifest.json"] = _json_bytes(manifest)
 
 
 def _graph_payload() -> dict[str, object]:
