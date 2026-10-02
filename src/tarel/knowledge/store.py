@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Protocol
 
+from tarel.file_lock import state_write_lock
 from tarel.knowledge.contracts import (
     KnowledgeDocument,
     KnowledgeFailure,
@@ -46,7 +47,8 @@ class FileKnowledgeStore:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.write("\n")
-            os.replace(temporary_path, path)
+            with state_write_lock(self.root.parent):
+                os.replace(temporary_path, path)
         except OSError as exc:
             temporary_path.unlink(missing_ok=True)
             raise KnowledgeFailure(
@@ -77,11 +79,7 @@ class FileKnowledgeStore:
         if not self.root.exists():
             return ()
         return tuple(
-            sorted(
-                path.parent.name
-                for path in self.root.glob("*/document.json")
-                if path.is_file()
-            )
+            sorted(path.parent.name for path in self.root.glob("*/document.json") if path.is_file())
         )
 
     def path(self, document_id: str) -> Path:

@@ -533,6 +533,8 @@ def build_graph_use_case(
     namespace: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> GraphBuildResult:
+    store = _graph_store(runtime)
+    previous = store.load(name) if name in store.list() else None
     catalog = discover_catalog_use_case(
         connector_name,
         config_path=config_path,
@@ -540,7 +542,10 @@ def build_graph_use_case(
         namespace=namespace,
     )
     graph = build_graph_from_catalog(name, catalog)
-    path = _graph_store(runtime).save(graph)
+    path = (
+        store.create(graph) if previous is None
+        else store.save(graph, expected_revision=graph_revision(previous))
+    )
     return GraphBuildResult(graph=graph, path=path)
 
 
@@ -558,7 +563,7 @@ def import_catalog_use_case(
         )
     validate_catalog_result(catalog)
     graph = build_graph_from_catalog(name, catalog)
-    return GraphBuildResult(graph=graph, path=store.save(graph))
+    return GraphBuildResult(graph=graph, path=store.create(graph))
 
 
 def refresh_graph_use_case(
@@ -593,50 +598,38 @@ def refresh_graph_use_case(
         namespace=selected_namespace,
     )
     discovered = build_graph_from_catalog(name, catalog)
-    _validate_refresh_observation(
-        current,
-        discovered,
-        selected_namespace=selected_namespace,
-    )
-    if technical_graph_fingerprint(current) == technical_graph_fingerprint(discovered):
-        result = GraphRefreshResult(
-            graph=current,
-            path=store.path(name),
-            change_report_path=None,
-            report=unchanged_refresh_report(current),
-            workspace_impacts=(),
+    observed_fingerprint = technical_graph_fingerprint(current)
+    report: GraphRefreshReport
+    change_report_path: Path | None = None
+    workspace_impacts: tuple[WorkspaceChangeImpact, ...] = ()
+
+    def reconcile(latest: GraphDocument) -> GraphDocument:
+        nonlocal report, change_report_path, workspace_impacts
+        if technical_graph_fingerprint(latest) != observed_fingerprint:
+            raise GraphFailure(
+                "graph_conflict", "Graph schema changed during observation; retry refresh."
+            )
+        _validate_refresh_observation(latest, discovered, selected_namespace=selected_namespace)
+        if technical_graph_fingerprint(latest) == technical_graph_fingerprint(discovered):
+            report = unchanged_refresh_report(latest)
+            return latest
+        refreshed, report = refresh_graph(latest, discovered)
+        workspace_store = _workspace_store(runtime)
+        workspace_impacts = tuple(
+            impact
+            for workspace_name in workspace_store.list()
+            for impact in workspace_change_impacts(
+                workspace_store.load(workspace_name), name, report,
+            )
         )
-        return _annotate_new_refresh_gaps(
-            result,
-            provider_name=annotate_new_provider,
-            workers=annotation_workers,
-            model=annotation_model,
-            timeout=annotation_timeout,
-            runtime=runtime,
-        )
-    refreshed, report = refresh_graph(current, discovered)
-    workspace_store = _workspace_store(runtime)
-    workspace_impacts = tuple(
-        impact
-        for workspace_name in workspace_store.list()
-        for impact in workspace_change_impacts(
-            workspace_store.load(workspace_name),
-            name,
-            report,
-        )
-    )
-    change_report_path = (
-        _graph_change_store(runtime).save(name, report)
-        if report.before_revision != report.after_revision
-        else None
-    )
-    path = store.save(refreshed)
+        if report.before_revision != report.after_revision:
+            change_report_path = _graph_change_store(runtime).save(name, report)
+        return refreshed
+
+    refreshed, path = store.update(name, reconcile)
     result = GraphRefreshResult(
-        graph=refreshed,
-        path=path,
-        change_report_path=change_report_path,
-        report=report,
-        workspace_impacts=workspace_impacts,
+        graph=refreshed, path=path, change_report_path=change_report_path,
+        report=report, workspace_impacts=workspace_impacts,
     )
     return _annotate_new_refresh_gaps(
         result,
@@ -698,12 +691,15 @@ def _annotate_new_refresh_gaps(
             skip_errors=False,
             max_errors=None,
             model=model,
-            after_annotation=store.save,
+            apply_proposal=lambda envelope: _save_provider_annotation(
+                store, result.graph.name, envelope, provider.name, model or provider.default_model,
+            ),
         )
     except AnnotationFailure:
         _align_refresh_report(result, store.load(result.graph.name), runtime=runtime)
         raise
-    path = store.save(updated)
+    updated = store.load(result.graph.name)
+    path = store.path(result.graph.name)
     aligned = _align_refresh_report(result, updated, runtime=runtime)
     return replace(aligned, graph=updated, path=path, annotation_run=run)
 
@@ -2148,7 +2144,7 @@ def add_relationship_use_case(
         reason=reason,
         validated=validated,
     )
-    path = store.save(updated)
+    path = store.save(updated, expected_revision=graph_revision(graph))
     return RelationshipChangeResult(graph=updated, path=path, edge=edge)
 
 
@@ -2228,7 +2224,10 @@ def discover_relationships_use_case(
         min_overlap_count=min_overlap_count,
         min_target_uniqueness=min_target_uniqueness,
     )
-    path = store.save(updated) if persist and candidates else None
+    path = (
+        store.save(updated, expected_revision=graph_revision(graph))
+        if persist and candidates else None
+    )
     return RelationshipDiscoveryResult(
         graph=updated,
         path=path,
@@ -2261,7 +2260,7 @@ def decide_relationship_use_case(
         state=state,
         reason=reason,
     )
-    path = store.save(updated)
+    path = store.save(updated, expected_revision=graph_revision(graph))
     return RelationshipChangeResult(graph=updated, path=path, edge=edge)
 
 
@@ -2479,11 +2478,11 @@ def apply_annotation_use_case(
     runtime: TarelRuntime | None = None,
 ) -> AnnotationApplyResult:
     store = _graph_store(runtime)
-    graph = store.load(name)
     envelope = AnnotationProposalEnvelope.from_dict(payload)
     _validate_knowledge_references(envelope.context_documents, runtime=runtime)
-    updated = apply_annotation_proposal(graph, envelope, source=source)
-    path = store.save(updated)
+    updated, path = store.update(
+        name, lambda graph: apply_annotation_proposal(graph, envelope, source=source)
+    )
     return AnnotationApplyResult(graph=updated, path=path, target_id=envelope.target_id)
 
 
@@ -2516,9 +2515,15 @@ def edit_annotation_use_case(
     runtime: TarelRuntime | None = None,
 ) -> AnnotationReviewResult:
     store = _graph_store(runtime)
-    graph = store.load(name)
-    updated, record = edit_annotation(graph, reference, patch, reason=reason)
-    path = store.save(updated)
+    records: list[AnnotationReviewRecord] = []
+
+    def change(graph: GraphDocument) -> GraphDocument:
+        updated, record = edit_annotation(graph, reference, patch, reason=reason)
+        records.append(record)
+        return updated
+
+    updated, path = store.update(name, change)
+    record = records[0]
     return AnnotationReviewResult(graph=updated, path=path, records=(record,))
 
 
@@ -2532,16 +2537,17 @@ def decide_annotation_use_case(
     runtime: TarelRuntime | None = None,
 ) -> AnnotationReviewResult:
     store = _graph_store(runtime)
-    graph = store.load(name)
-    updated, records = decide_annotation_scope(
-        graph,
-        reference,
-        state=state,
-        reason=reason,
-        include_fields=include_fields,
-    )
-    path = store.save(updated)
-    return AnnotationReviewResult(graph=updated, path=path, records=records)
+    records: list[AnnotationReviewRecord] = []
+
+    def change(graph: GraphDocument) -> GraphDocument:
+        updated, decisions = decide_annotation_scope(
+            graph, reference, state=state, reason=reason, include_fields=include_fields,
+        )
+        records.extend(decisions)
+        return updated
+
+    updated, path = store.update(name, change)
+    return AnnotationReviewResult(graph=updated, path=path, records=tuple(records))
 
 
 def run_annotation_batch_use_case(
@@ -2601,11 +2607,29 @@ def run_annotation_batch_use_case(
         skip_errors=skip_errors,
         max_errors=max_errors,
         model=model,
-        after_annotation=store.save,
+        apply_proposal=lambda envelope: _save_provider_annotation(
+            store, name, envelope, provider.name, model or provider.default_model,
+        ),
         progress=progress,
     )
-    path = store.save(updated)
+    updated = store.load(name)
+    path = store.path(name)
     return AnnotationBatchResult(graph=updated, path=path, run=run)
+
+
+def _save_provider_annotation(
+    store: FileGraphStore,
+    name: str,
+    envelope: AnnotationProposalEnvelope,
+    provider_name: str,
+    model: str | None,
+) -> GraphDocument:
+    updated, _path = store.update(
+        name, lambda graph: apply_annotation_proposal(
+            graph, envelope, source="provider", provider=provider_name, model=model,
+        ),
+    )
+    return updated
 
 
 def _plan_graph_annotations(

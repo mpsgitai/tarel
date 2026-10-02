@@ -11,14 +11,18 @@ from typing import Any
 
 from tarel import __version__
 
-PACKAGE_CONTRACT_VERSION = "tarel.package.v0.1"
+PACKAGE_CONTRACT_VERSION = "tarel.package.v0.2"
 PACKAGE_MEDIA_TYPE = "application/vnd.tarel+zip"
 MIMETYPE_PATH = "mimetype"
 MANIFEST_PATH = "manifest.json"
 MIMETYPE_BYTES = f"{PACKAGE_MEDIA_TYPE}\n".encode()
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
 DOCUMENT_KINDS = frozenset({"focus", "graph", "knowledge", "lineage", "workspace"})
-AUXILIARY_SCOPE = "all lineage and knowledge; compatible focuses"
+AUXILIARY_SCOPE = "workspace knowledge and explicit auxiliaries; compatible focuses"
+_AUXILIARY_SCOPES = {
+    "tarel.package.v0.1": "all lineage and knowledge; compatible focuses",
+    PACKAGE_CONTRACT_VERSION: AUXILIARY_SCOPE,
+}
 OMISSIONS = (
     "analytical result sets and source rows",
     "connector and provider configuration",
@@ -74,11 +78,7 @@ class PackageEntry:
         size = data.get("size")
         if kind not in DOCUMENT_KINDS or not _is_sha256(digest):
             raise PackageFailure("invalid_package_manifest", f"Invalid package entry: {path}")
-        if (
-            not isinstance(size, int)
-            or isinstance(size, bool)
-            or not 0 <= size <= MAX_MEMBER_BYTES
-        ):
+        if not isinstance(size, int) or isinstance(size, bool) or not 0 <= size <= MAX_MEMBER_BYTES:
             raise PackageFailure("invalid_package_manifest", f"Invalid entry size: {path}")
         validate_portable_path(path)
         expected_kind, expected_name = entry_identity(path)
@@ -107,7 +107,7 @@ class PackageManifest:
             "media_type": self.media_type,
             "omissions": list(OMISSIONS),
             "selection": {
-                "auxiliary_scope": AUXILIARY_SCOPE,
+                "auxiliary_scope": _AUXILIARY_SCOPES[self.contract_version],
                 "kind": "workspace",
                 "name": self.workspace,
             },
@@ -134,7 +134,8 @@ class PackageManifest:
         }
         if set(data) != expected:
             raise PackageFailure("invalid_package_manifest", "Invalid package manifest fields.")
-        if data.get("contract_version") != PACKAGE_CONTRACT_VERSION:
+        contract_version = data.get("contract_version")
+        if not isinstance(contract_version, str) or contract_version not in _AUXILIARY_SCOPES:
             raise PackageFailure("unsupported_package", "Unsupported TAREL package contract.")
         if data.get("media_type") != PACKAGE_MEDIA_TYPE:
             raise PackageFailure("invalid_package_manifest", "Invalid TAREL package media type.")
@@ -154,7 +155,7 @@ class PackageManifest:
             raise PackageFailure("invalid_package_manifest", "Invalid package selection.")
         if selection.get("kind") != "workspace":
             raise PackageFailure("invalid_package_manifest", "Package must select one workspace.")
-        if selection.get("auxiliary_scope") != AUXILIARY_SCOPE:
+        if selection.get("auxiliary_scope") != _AUXILIARY_SCOPES[contract_version]:
             raise PackageFailure("invalid_package_manifest", "Invalid package auxiliary scope.")
         workspace = _required_text(selection, "name")
         entry_values = data.get("entries")
@@ -175,6 +176,7 @@ class PackageManifest:
             package_revision=revision,
             producer_name=producer_name,
             producer_version=producer_version,
+            contract_version=contract_version,
         )
         if revision != manifest._with_computed_revision().package_revision:
             raise PackageFailure(
@@ -190,7 +192,23 @@ class PackageManifest:
             package_revision=revision,
             producer_name=self.producer_name,
             producer_version=self.producer_version,
+            contract_version=self.contract_version,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PackagePlan:
+    workspace: str
+    entries: tuple[PackageEntry, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "workspace": self.workspace,
+            "contract_version": PACKAGE_CONTRACT_VERSION,
+            "auxiliary_scope": AUXILIARY_SCOPE,
+            "entries": [entry.to_dict() for entry in self.entries],
+            "uncompressed_bytes": sum(entry.size for entry in self.entries),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,15 +295,13 @@ def package_report(
 
 
 def canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    ).encode("utf-8")
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
 
 
 def pretty_json(value: object) -> bytes:
-    return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
-        "utf-8"
-    )
+    return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
 def sha256(data: bytes) -> str:

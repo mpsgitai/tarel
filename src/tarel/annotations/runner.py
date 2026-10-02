@@ -36,6 +36,7 @@ def run_annotation_batch(
     skip_errors: bool,
     max_errors: int | None,
     model: str | None,
+    apply_proposal: Callable[[AnnotationProposalEnvelope], GraphDocument] | None = None,
     after_annotation: Callable[[GraphDocument], None] | None = None,
     progress: Callable[[int, int, str, str], None] | None = None,
 ) -> tuple[GraphDocument, AnnotationRunResult]:
@@ -80,13 +81,17 @@ def run_annotation_batch(
                     field_names=task.field_names if task.mode == "missing" else (),
                     include_object=task.include_object if task.mode == "missing" else None,
                 )
-                current_graph = apply_annotation_proposal(
-                    current_graph,
-                    envelope,
-                    source="provider",
-                    provider=provider.name,
-                    model=model or provider.default_model,
-                    context_documents=task.context_documents,
+                current_graph = (
+                    apply_proposal(envelope)
+                    if apply_proposal
+                    else apply_annotation_proposal(
+                        current_graph,
+                        envelope,
+                        source="provider",
+                        provider=provider.name,
+                        model=model or provider.default_model,
+                        context_documents=task.context_documents,
+                    )
                 )
             except (AnnotationFailure, ProviderFailure) as exc:
                 failed += 1

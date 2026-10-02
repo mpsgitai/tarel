@@ -8,6 +8,7 @@ import re
 import tempfile
 from pathlib import Path
 
+from tarel.file_lock import state_write_lock
 from tarel.focus.contracts import FocusDocument, FocusFailure, validate_focus
 
 _FOCUS_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -33,7 +34,8 @@ class FileFocusStore:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.write("\n")
-            os.replace(temporary, path)
+            with state_write_lock(self.root.parent):
+                os.replace(temporary, path)
         except OSError as exc:
             temporary.unlink(missing_ok=True)
             raise FocusFailure(

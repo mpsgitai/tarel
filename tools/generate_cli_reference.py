@@ -26,9 +26,10 @@ GROUPS = {
     ),
     "package": (
         "Portable packages",
-        "Pack, inspect, verify, and unpack portable metadata snapshots.",
+        "Plan, pack, inspect, verify, and unpack portable metadata snapshots.",
         (
-            "Pack writes a deterministic .tarel file from authoritative metadata. "
+            "Plan lists the selection; pack writes a deterministic .tarel file with scoped "
+            "knowledge and explicitly selected lineage/global knowledge. "
             "Inspect reads its manifest, verify checks every document and checksum, and "
             "unpack writes only to a destination that does not exist."
         ),

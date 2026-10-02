@@ -5,14 +5,19 @@ documents. A file ending in `.tarel` is the portable snapshot form for review, t
 backup. It is an ordinary ZIP container so that the contents remain inspectable with standard
 operating-system tools. The package layer uses only the Python standard library.
 
-The first package contract is `tarel.package.v0.1`. `application/vnd.tarel+zip` is currently a
+New exports use `tarel.package.v0.2`; readers also accept `tarel.package.v0.1` snapshots.
+Version 0.2 records the narrower auxiliary selection policy without changing graph, knowledge,
+lineage, workspace, or focus schemas. Older TAREL readers require an update to open these exports.
+`application/vnd.tarel+zip` is currently a
 project media type, not an IANA-registered type. The package contract has its own version and does
 not inherit the installed TAREL version.
 
 ## Commands
 
 ```console
+tarel package plan --state .tarel --workspace team
 tarel package pack --state .tarel --workspace team --output team.tarel
+tarel package pack --state .tarel --workspace team --output team.tarel --lineage sales-etl --knowledge shared-terms
 tarel package inspect team.tarel
 tarel package verify team.tarel
 tarel package unpack team.tarel --destination imported-state
@@ -39,14 +44,48 @@ ZIP member timestamps and permissions are normalized, entries are sorted, and th
 wall-clock timestamp. Identical state therefore produces identical package bytes with the same
 TAREL/Python ZIP implementation.
 
-Packing one workspace includes its graphs, all lineage and knowledge documents in the state
-root, and focus snapshots whose graph and lineage sources are present. This broad auxiliary scope
-is explicit in the manifest because the current workspace contract does not yet assign lineage or
-knowledge documents to a workspace. An invalid selected document fails the package operation.
+Packing includes the selected workspace, its graphs, knowledge scoped to its graphs/objects/schemas
+or workspace systems, and focus snapshots whose sources are all included. Global knowledge and
+lineage documents require explicit selection with repeatable `--knowledge ID` and `--lineage NAME`
+flags. Lineage has no persisted workspace ownership, so TAREL does not guess membership from names
+or SQL. Explicit knowledge selection can intentionally include a document outside the workspace.
+The plan command accepts the same selection flags and lists paths, sizes, and hashes without
+creating a package. A later pack captures a fresh snapshot; a plan does not pin future state.
+Invalid inspected knowledge/focus documents and missing selected documents fail visibly.
+
+Version 0.1 packages retain their original broad auxiliary policy when read; accepting an old
+package does not narrow or otherwise rewrite its contents.
 
 The allowlist excludes selective graph caches, search indexes, lineage analysis caches, connector
 and provider configuration, credentials, logs, raw samples, source rows, and analytical results.
 Indexes are rebuilt after import when needed.
+
+## Concurrent writes and snapshots
+
+Graph transformations reload and update the latest document under a per-graph OS lock. Provider
+generation, stdin reads, and source observations run without that lock. Stale annotation tasks
+are rejected, including full proposals planned before an intervening annotation or human edit.
+Refresh reconciles its observation with the latest annotations; an intervening schema change
+requires a retry. Other graph transformations use an expected-revision check when saving.
+
+The five packaged stores serialize atomic file publication with a short state lock. Pack copies
+selected documents into a private temporary directory under this lock, then compresses and verifies
+them after releasing it. The snapshot copy needs temporary disk space equal to the selected metadata
+size and is removed on success or failure; it does not retain the complete snapshot in RAM.
+This captures a consistent committed file state; it does not make several independent CLI commands
+one transaction. Manual editors and other programs must cooperate with the same locks.
+
+Without `--replace`, publication uses an atomic hard link: competing exports cannot overwrite a
+winner. The output filesystem must support hard links; an unsupported operation fails visibly.
+`--replace` atomically replaces an existing package only after successful verification.
+
+Locks use the Python standard library (`flock` on POSIX and byte-range locking on Windows), with a
+30-second acquisition timeout. OS locks are released on process exit. The small `.write.lock` and
+`.state.lock` files remain so waiters always use the same inode; they are excluded from packages.
+Use filesystems that support these OS locks; cross-host SMB/NFS behavior is not established by
+local tests. Directory ACLs still determine who may read or write.
+Snapshot capture requires access to the state lock file; a read-only copy must first be placed
+in a writable local directory. Shared access permissions must cover lock files as well.
 
 ## Verification and extraction safety
 
