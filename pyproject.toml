@@ -87,6 +87,9 @@ only-include = [
 exclude = [
   "/.tarel",
   "/AGENTS.md",
+  "/docs/coding-conventions.md",
+  "/docs/competitors.md",
+  "/docs/harness-adaptation.md",
   "/models",
   "/tests/local_databases.toml",
   "**/AGENTS.md",

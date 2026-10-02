@@ -401,9 +401,22 @@ def _task_for_object(
         sort_keys=True,
         separators=(",", ":"),
     )
-    task_id = hashlib.sha256(
-        f"{graph.name}\n{node.id}\n{technical_context}".encode()
-    ).hexdigest()[:24]
+    # Full regeneration may replace drafts, but a task planned before another
+    # annotation or review must not silently overwrite that intervening edit.
+    annotation_context = (
+        json.dumps(
+            [node.to_dict(), *(item.to_dict() for item in fields)],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if mode == "full"
+        else ""
+    )
+    task_identity = f"{graph.name}\n{node.id}\n{technical_context}"
+    if mode == "full":
+        task_identity += f"\n{annotation_context}"
+    task_id = hashlib.sha256(task_identity.encode()).hexdigest()[:24]
     if sample is not None:
         context["sample"] = sample.to_dict()
     if profile is not None:

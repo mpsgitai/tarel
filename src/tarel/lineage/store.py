@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Protocol
 
+from tarel.file_lock import state_write_lock
 from tarel.lineage.contracts import (
     LineageDocument,
     LineageFailure,
@@ -46,7 +47,8 @@ class FileLineageStore:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.write("\n")
-            os.replace(temporary, path)
+            with state_write_lock(self.root.parent):
+                os.replace(temporary, path)
         except OSError as exc:
             temporary.unlink(missing_ok=True)
             raise LineageFailure(

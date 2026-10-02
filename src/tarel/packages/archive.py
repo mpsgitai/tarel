@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import stat
 import unicodedata
 import zipfile
@@ -45,7 +46,14 @@ class PackageArchive:
                 self.archive.close()
                 self.archive = None
             raise
-        except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        except OSError as exc:
+            if self.archive is not None:
+                self.archive.close()
+                self.archive = None
+            raise PackageFailure(
+                "package_read_failed", f"Could not read package: {self.path} ({exc.strerror})."
+            ) from exc
+        except (zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
             if self.archive is not None:
                 self.archive.close()
                 self.archive = None
@@ -119,9 +127,7 @@ def write_manifest(archive: zipfile.ZipFile, manifest: PackageManifest) -> None:
     write_bytes(archive, MANIFEST_PATH, pretty_json(manifest.to_dict()), compressed=True)
 
 
-def write_bytes(
-    archive: zipfile.ZipFile, name: str, data: bytes, *, compressed: bool
-) -> None:
+def write_bytes(archive: zipfile.ZipFile, name: str, data: bytes, *, compressed: bool) -> None:
     archive.writestr(_zip_info(name, compressed=compressed), data)
 
 
@@ -130,14 +136,41 @@ def parse_json_object(data: bytes, label: str) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
             if key in result:
-                raise ValueError(f"duplicate key: {key}")
+                raise ValueError("duplicate object keys")
             result[key] = value
         return result
 
+    def invalid_constant(_: str) -> None:
+        raise ValueError("non-finite numbers are not allowed")
+
+    def finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite numbers are not allowed")
+        return number
+
     try:
-        payload = json.loads(data.decode("utf-8"), object_pairs_hook=unique_object)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise PackageFailure("invalid_package_json", f"Invalid {label} JSON.") from exc
+        payload = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+            parse_float=finite_float,
+        )
+    except UnicodeDecodeError as exc:
+        raise PackageFailure(
+            "invalid_package_json", f"{label.title()} JSON must be UTF-8."
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise PackageFailure(
+            "invalid_package_json",
+            f"Invalid {label} JSON at line {exc.lineno}, column {exc.colno}.",
+        ) from exc
+    except RecursionError as exc:
+        raise PackageFailure(
+            "invalid_package_json", f"{label.title()} JSON is nested too deeply."
+        ) from exc
+    except ValueError as exc:
+        raise PackageFailure("invalid_package_json", f"Invalid {label} JSON: {exc}.") from exc
     if not isinstance(payload, dict):
         raise PackageFailure("invalid_package_json", f"{label.title()} must be a JSON object.")
     return payload
@@ -152,7 +185,8 @@ def _validate_archive_members(archive: zipfile.ZipFile) -> None:
     total = 0
     for info in infos:
         name = info.filename
-        validate_portable_path(name)
+        # ZipInfo.filename truncates at NUL; validate the original name first.
+        validate_portable_path(info.orig_filename)
         if name in names:
             raise PackageFailure("invalid_package", f"Duplicate package path: {name}")
         folded = unicodedata.normalize("NFC", name).casefold()

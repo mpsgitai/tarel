@@ -330,7 +330,7 @@ def enrich_source_use_case(
     return SourceEnrichmentResult(
         workfile=workfile,
         persisted_candidates=candidates,
-        graph_path=graph_store.save(enriched_graph),
+        graph_path=graph_store.save(enriched_graph, expected_revision=graph_revision(graph)),
     )
 
 

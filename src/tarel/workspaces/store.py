@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Protocol
 
+from tarel.file_lock import state_write_lock
 from tarel.workspaces.contracts import (
     WorkspaceDocument,
     WorkspaceFailure,
@@ -48,7 +49,8 @@ class FileWorkspaceStore:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.write("\n")
-            os.replace(temporary_path, path)
+            with state_write_lock(self.root.parent):
+                os.replace(temporary_path, path)
         except OSError as exc:
             temporary_path.unlink(missing_ok=True)
             raise WorkspaceFailure(
@@ -83,9 +85,7 @@ class FileWorkspaceStore:
             return ()
         return tuple(
             sorted(
-                path.parent.name
-                for path in self.root.glob("*/workspace.json")
-                if path.is_file()
+                path.parent.name for path in self.root.glob("*/workspace.json") if path.is_file()
             )
         )
 

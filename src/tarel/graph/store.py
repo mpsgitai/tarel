@@ -6,10 +6,14 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from tarel.file_lock import file_lock, state_write_lock
 from tarel.graph.contracts import GraphDocument, GraphFailure
+from tarel.graph.revision import graph_revision
 
 if TYPE_CHECKING:
     from tarel.graph.selective import (
@@ -36,7 +40,44 @@ class FileGraphStore:
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or Path.cwd() / ".tarel" / "graphs"
 
-    def save(self, graph: GraphDocument) -> Path:
+    @contextmanager
+    def _write_lock(self, name: str) -> Iterator[None]:
+        try:
+            with file_lock(self.path(name).with_name(".write.lock")):
+                yield
+        except TimeoutError as exc:
+            raise GraphFailure("graph_busy", f"Graph is busy; retry: {name}") from exc
+        except OSError as exc:
+            raise GraphFailure("graph_save_failed", f"Could not write graph: {name}") from exc
+
+    def save(self, graph: GraphDocument, *, expected_revision: str | None = None) -> Path:
+        with self._write_lock(graph.name):
+            if (
+                expected_revision is not None
+                and graph_revision(self.load(graph.name)) != expected_revision
+            ):
+                raise GraphFailure("graph_conflict", "Graph changed; reload before saving.")
+            return self._save(graph)
+
+    def create(self, graph: GraphDocument) -> Path:
+        with self._write_lock(graph.name):
+            if self.path(graph.name).exists():
+                raise GraphFailure("graph_exists", f"Graph already exists: {graph.name}")
+            return self._save(graph)
+
+    def update(
+        self, name: str, change: Callable[[GraphDocument], GraphDocument]
+    ) -> tuple[GraphDocument, Path]:
+        """Apply a short local transformation to the latest graph under its lock."""
+        with self._write_lock(name):
+            current = self.load(name)
+            updated = change(current)
+            if updated.name != name:
+                raise GraphFailure("invalid_graph_name", "An update cannot rename a graph.")
+            path = self.path(name) if updated == current else self._save(updated)
+            return updated, path
+
+    def _save(self, graph: GraphDocument) -> Path:
         path = self.path(graph.name)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(graph.to_dict(), indent=2, ensure_ascii=False, sort_keys=True)
@@ -51,7 +92,8 @@ class FileGraphStore:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.write("\n")
-            os.replace(temporary_path, path)
+            with state_write_lock(self.root.parent):
+                os.replace(temporary_path, path)
         except OSError as exc:
             temporary_path.unlink(missing_ok=True)
             raise GraphFailure("graph_save_failed", f"Could not save graph: {graph.name}") from exc

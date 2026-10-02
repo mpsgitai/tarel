@@ -12,14 +12,17 @@ import os
 import shutil
 import tempfile
 import zipfile
-from collections.abc import Callable
-from contextlib import suppress
+import zlib
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from tarel.file_lock import state_write_lock
 from tarel.focus.contracts import FocusDocument
 from tarel.graph.contracts import GraphDocument
 from tarel.knowledge.contracts import KnowledgeDocument
+from tarel.knowledge.core import knowledge_applies
 from tarel.lineage.contracts import LineageDocument
 from tarel.packages.archive import (
     PackageArchive,
@@ -40,6 +43,7 @@ from tarel.packages.contracts import (
     PackageEntry,
     PackageFailure,
     PackageManifest,
+    PackagePlan,
     PackageReport,
     entry_identity,
     package_report,
@@ -63,10 +67,12 @@ def pack_workspace(
     output: Path,
     *,
     replace: bool = False,
+    lineage_names: tuple[str, ...] = (),
+    knowledge_ids: tuple[str, ...] = (),
 ) -> PackageReport:
     """Pack one workspace and its portable metadata into a ``.tarel`` file."""
     state_root = state_root.resolve()
-    output = output.resolve()
+    output = Path(os.path.abspath(output))
     if output.suffix.lower() != ".tarel":
         raise PackageFailure("invalid_package_path", "Package output must use the .tarel suffix.")
     if output.exists() and not replace:
@@ -74,41 +80,53 @@ def pack_workspace(
     temporary: Path | None = None
     entries: list[PackageEntry] = []
     try:
-        sources = _select_workspace_documents(state_root, workspace)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=output.parent, prefix=f".{output.stem}-", suffix=".tmp"
-        )
-        temporary = Path(temporary_name)
-        os.close(descriptor)
-        with zipfile.ZipFile(
-            temporary,
-            mode="w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=9,
-            allowZip64=True,
-        ) as archive:
-            write_bytes(archive, MIMETYPE_PATH, MIMETYPE_BYTES, compressed=False)
-            for archive_path, source_path in sources:
-                kind, name = entry_identity(archive_path)
-                data = _read_source_document(source_path)
-                contract_version = _validate_document(data, kind, name)
-                digest, size = write_document(archive, archive_path, data)
-                entries.append(
-                    PackageEntry(
-                        path=archive_path,
-                        kind=kind,
-                        name=name,
-                        contract_version=contract_version,
-                        sha256=digest,
-                        size=size,
+        with _capture_workspace_documents(
+            state_root,
+            workspace,
+            lineage_names=lineage_names,
+            knowledge_ids=knowledge_ids,
+        ) as sources:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(
+                dir=output.parent, prefix=f".{output.stem}-", suffix=".tmp"
+            )
+            temporary = Path(temporary_name)
+            os.close(descriptor)
+            with zipfile.ZipFile(
+                temporary,
+                mode="w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=9,
+                allowZip64=True,
+            ) as archive:
+                write_bytes(archive, MIMETYPE_PATH, MIMETYPE_BYTES, compressed=False)
+                for archive_path, source_path in sources:
+                    data = _read_source_document(source_path)
+                    kind, name = entry_identity(archive_path)
+                    contract_version = _validate_document(data, kind, name)
+                    digest, size = write_document(archive, archive_path, data)
+                    entries.append(
+                        PackageEntry(
+                            path=archive_path,
+                            kind=kind,
+                            name=name,
+                            contract_version=contract_version,
+                            sha256=digest,
+                            size=size,
+                        )
                     )
-                )
-            manifest = PackageManifest.create(workspace, tuple(entries))
-            _validate_package_references(manifest, None)
-            write_manifest(archive, manifest)
+                manifest = PackageManifest.create(workspace, tuple(entries))
+                _validate_package_references(manifest, None)
+                write_manifest(archive, manifest)
         verify_package(temporary)
-        os.replace(temporary, output)
+        if replace:
+            os.replace(temporary, output)
+        else:
+            try:
+                os.link(temporary, output)
+            except FileExistsError as exc:
+                raise PackageFailure("package_exists", f"Package already exists: {output}") from exc
+            _remove_temporary(temporary)
     except PackageFailure:
         _remove_temporary(temporary)
         raise
@@ -121,9 +139,71 @@ def pack_workspace(
     return package_report(output, manifest, verified=True)
 
 
+def plan_workspace(
+    state_root: Path,
+    workspace: str,
+    *,
+    lineage_names: tuple[str, ...] = (),
+    knowledge_ids: tuple[str, ...] = (),
+) -> PackagePlan:
+    entries = []
+    with _capture_workspace_documents(
+        state_root.resolve(),
+        workspace,
+        lineage_names=lineage_names,
+        knowledge_ids=knowledge_ids,
+    ) as sources:
+        for archive_path, source_path in sources:
+            data = _read_source_document(source_path)
+            kind, name = entry_identity(archive_path)
+            entries.append(
+                PackageEntry(
+                    path=archive_path,
+                    kind=kind,
+                    name=name,
+                    contract_version=_validate_document(data, kind, name),
+                    sha256=sha256(data),
+                    size=len(data),
+                )
+            )
+    return PackagePlan(workspace=workspace, entries=tuple(entries))
+
+
+@contextmanager
+def _capture_workspace_documents(
+    state_root: Path,
+    workspace: str,
+    *,
+    lineage_names: tuple[str, ...],
+    knowledge_ids: tuple[str, ...],
+) -> Iterator[tuple[tuple[str, Path], ...]]:
+    # Freeze files under the publication lock; do not retain the whole state in
+    # RAM or hold locks while compressing. TemporaryDirectory cleans up failures.
+    with tempfile.TemporaryDirectory(prefix="tarel-package-snapshot-") as temporary:
+        copies: list[tuple[str, Path]] = []
+        try:
+            with state_write_lock(state_root):
+                selected = _select_workspace_documents(
+                    state_root,
+                    workspace,
+                    lineage_names=lineage_names,
+                    knowledge_ids=knowledge_ids,
+                )
+                for archive_path, source in selected:
+                    copy = Path(temporary).joinpath(*PurePosixPath(archive_path).parts)
+                    copy.parent.mkdir(parents=True, exist_ok=True)
+                    copy.write_bytes(_read_source_document(source))
+                    copies.append((archive_path, copy))
+        except OSError as exc:
+            raise PackageFailure(
+                "package_snapshot_failed", "Could not capture package state."
+            ) from exc
+        yield tuple(copies)
+
+
 def inspect_package(path: Path) -> PackageReport:
     """Read the bounded manifest without expanding package documents."""
-    path = path.resolve()
+    path = Path(os.path.abspath(path))
     with PackageArchive(str(path)) as archive:
         manifest = read_manifest(archive)
         validate_declared_members(archive, manifest)
@@ -132,7 +212,7 @@ def inspect_package(path: Path) -> PackageReport:
 
 def verify_package(path: Path) -> PackageReport:
     """Verify archive safety, checksums, contracts, identities, and references."""
-    path = path.resolve()
+    path = Path(os.path.abspath(path))
     with PackageArchive(str(path)) as archive:
         manifest = _verify_open_archive(archive)
     return package_report(path, manifest, verified=True)
@@ -140,28 +220,47 @@ def verify_package(path: Path) -> PackageReport:
 
 def unpack_package(path: Path, destination: Path) -> PackageReport:
     """Verify and extract into a new state root; merge and overwrite are not supported."""
-    path = path.resolve()
-    destination = destination.resolve()
-    if destination.exists():
+    path = Path(os.path.abspath(path))
+    destination = Path(os.path.abspath(destination))
+    if os.path.lexists(destination):
         raise PackageFailure(
             "package_destination_exists",
             "Package destination must not exist; unpacking never merges or overwrites state.",
         )
-    with PackageArchive(str(path)) as archive:
-        manifest = _verify_open_archive(archive)
-        verified = package_report(path, manifest, verified=True)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(dir=destination.parent, prefix=f".{destination.name}-"))
-        try:
+    staging: Path | None = None
+    try:
+        with PackageArchive(str(path)) as archive:
+            manifest = _verify_open_archive(archive)
+            verified = package_report(path, manifest, verified=True)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            staging = Path(tempfile.mkdtemp(dir=destination.parent, prefix=f".{destination.name}-"))
             for entry in manifest.entries:
                 target = staging.joinpath(*PurePosixPath(entry.path).parts)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(entry.path, "r") as source, target.open("xb") as sink:
-                    shutil.copyfileobj(source, sink, length=_CHUNK_SIZE)
+                # Do not trust ZIP modes or a permissive process umask. Every
+                # imported directory and document starts owner-only on POSIX.
+                for directory in (target.parent.parent, target.parent):
+                    directory.mkdir(mode=0o700, exist_ok=True)
+                with archive.open(entry.path, "r") as source:
+                    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with os.fdopen(descriptor, "wb") as sink:
+                        shutil.copyfileobj(source, sink, length=_CHUNK_SIZE)
+            if os.path.lexists(destination):
+                raise PackageFailure(
+                    "package_destination_exists", "Package destination appeared during unpacking."
+                )
             os.replace(staging, destination)
-        except Exception:
+    except OSError as exc:
+        raise PackageFailure(
+            "package_extract_failed",
+            f"Could not unpack package into {destination} ({exc.strerror}).",
+        ) from exc
+    except PackageFailure:
+        raise
+    except (zipfile.BadZipFile, RuntimeError, zlib.error) as exc:
+        raise PackageFailure("invalid_package", "Could not extract package documents.") from exc
+    finally:
+        if staging is not None:
             shutil.rmtree(staging, ignore_errors=True)
-            raise
     return PackageReport(
         path=verified.path,
         workspace=verified.workspace,
@@ -182,22 +281,23 @@ def _verify_open_archive(archive: zipfile.ZipFile) -> PackageManifest:
     for entry in manifest.entries:
         data = read_member(archive, entry.path, entry.size)
         if sha256(data) != entry.sha256:
-            raise PackageFailure(
-                "package_checksum_mismatch", f"Checksum mismatch: {entry.path}"
-            )
+            raise PackageFailure("package_checksum_mismatch", f"Checksum mismatch: {entry.path}")
         contract_version = _validate_document(data, entry.kind, entry.name)
         if contract_version != entry.contract_version:
-            raise PackageFailure(
-                "invalid_package_document", f"Contract mismatch: {entry.path}"
-            )
+            raise PackageFailure("invalid_package_document", f"Contract mismatch: {entry.path}")
         documents[entry.path] = _parse_document(data, entry.kind)
     _validate_package_references(manifest, documents)
     return manifest
 
 
 def _select_workspace_documents(
-    state_root: Path, workspace_name: str
+    state_root: Path,
+    workspace_name: str,
+    *,
+    lineage_names: tuple[str, ...],
+    knowledge_ids: tuple[str, ...],
 ) -> tuple[tuple[str, Path], ...]:
+    entry_identity(f"workspaces/{workspace_name}/workspace.json")
     workspace_path = state_root / "workspaces" / workspace_name / "workspace.json"
     workspace = _load_local_document(workspace_path, "workspace", workspace_name)
     assert isinstance(workspace, WorkspaceDocument)
@@ -208,12 +308,27 @@ def _select_workspace_documents(
     ]
     selected.append((f"workspaces/{workspace_name}/workspace.json", workspace_path))
 
-    lineage_names = _local_names(state_root / "lineage", "lineage.json")
+    lineage_names = tuple(sorted(set(lineage_names)))
+    for name in lineage_names:
+        entry_identity(f"lineage/{name}/lineage.json")
     selected.extend(
         (f"lineage/{name}/lineage.json", state_root / "lineage" / name / "lineage.json")
         for name in lineage_names
     )
-    knowledge_names = _local_names(state_root / "knowledge", "document.json")
+    explicit_knowledge = set(knowledge_ids)
+    for name in explicit_knowledge:
+        entry_identity(f"knowledge/{name}/document.json")
+    graphs: dict[str, GraphDocument] = {}
+    knowledge_names = set(explicit_knowledge)
+    for name in _local_names(state_root / "knowledge", "document.json"):
+        document = _load_local_document(
+            state_root / "knowledge" / name / "document.json",
+            "knowledge",
+            name,
+        )
+        assert isinstance(document, KnowledgeDocument)
+        if _knowledge_in_workspace(document, workspace, graph_names, state_root, graphs):
+            knowledge_names.add(name)
     selected.extend(
         (f"knowledge/{name}/document.json", state_root / "knowledge" / name / "document.json")
         for name in knowledge_names
@@ -234,6 +349,43 @@ def _select_workspace_documents(
         if not source.is_file():
             raise PackageFailure("package_source_missing", f"Package source missing: {source}")
     return tuple(selected)
+
+
+def _knowledge_in_workspace(
+    document: KnowledgeDocument,
+    workspace: WorkspaceDocument,
+    graph_names: list[str],
+    state_root: Path,
+    graphs: dict[str, GraphDocument],
+) -> bool:
+    scope = document.scope
+    if scope.kind == "global":
+        return False
+    if scope.kind == "graph":
+        return any(name.casefold() == scope.reference.casefold() for name in graph_names)
+    if scope.kind == "system":
+        return (
+            scope.workspace is not None
+            and scope.workspace.casefold() == workspace.name.casefold()
+            and any(
+                system.name.casefold() == scope.reference.casefold() and system.graphs
+                for system in workspace.systems
+            )
+        )
+    name = next(
+        (name for name in graph_names if name.casefold() == (scope.graph or "").casefold()), None
+    )
+    if name is None:
+        return False
+    if name not in graphs:
+        graph = _load_local_document(state_root / "graphs" / name / "graph.json", "graph", name)
+        assert isinstance(graph, GraphDocument)
+        graphs[name] = graph
+    return any(
+        knowledge_applies(document, graphs[name], node, workspace=workspace)
+        for node in graphs[name].nodes
+        if node.type in {"table", "view"}
+    )
 
 
 def _local_names(root: Path, filename: str) -> tuple[str, ...]:
@@ -288,9 +440,7 @@ def _parse_document(data: bytes, kind: str) -> object:
     except PackageFailure:
         raise
     except (AttributeError, RuntimeError, TypeError, ValueError, KeyError) as exc:
-        raise PackageFailure(
-            "invalid_package_document", f"Invalid {kind} document: {exc}"
-        ) from exc
+        raise PackageFailure("invalid_package_document", f"Invalid {kind} document: {exc}") from exc
 
 
 def _validate_package_references(
@@ -346,6 +496,7 @@ __all__ = [
     "PackageReport",
     "inspect_package",
     "pack_workspace",
+    "plan_workspace",
     "unpack_package",
     "verify_package",
 ]
