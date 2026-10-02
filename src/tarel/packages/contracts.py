@@ -31,6 +31,8 @@ OMISSIONS = (
     "lineage analysis caches",
     "logs and temporary files",
 )
+# Derived CLI/report information, not a change to either serialized manifest.
+SNAPSHOT_OMISSIONS = ("logical topology overlays", "graph change reports")
 _WINDOWS_RESERVED = {
     "CON",
     "PRN",
@@ -208,6 +210,7 @@ class PackagePlan:
             "auxiliary_scope": AUXILIARY_SCOPE,
             "entries": [entry.to_dict() for entry in self.entries],
             "uncompressed_bytes": sum(entry.size for entry in self.entries),
+            "omissions": list(OMISSIONS + SNAPSHOT_OMISSIONS),
         }
 
 
@@ -234,6 +237,7 @@ class PackageReport:
             "uncompressed_bytes": self.uncompressed_bytes,
             "verified": self.verified,
             "workspace": self.workspace,
+            "omissions": list(OMISSIONS + SNAPSHOT_OMISSIONS),
         }
 
 
@@ -255,7 +259,11 @@ def validate_portable_path(name: str) -> None:
     if not name or len(name) > 512 or "\\" in name or name.endswith("/"):
         raise PackageFailure("invalid_package_path", f"Unsafe package path: {name!r}")
     path = PurePosixPath(name)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+    if (
+        path.is_absolute()
+        or str(path) != name
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
         raise PackageFailure("invalid_package_path", f"Unsafe package path: {name!r}")
     for part in path.parts:
         has_windows_illegal_character = any(
@@ -279,8 +287,10 @@ def package_report(
     kinds = dict(sorted(Counter(entry.kind for entry in manifest.entries).items()))
     try:
         package_bytes = path.stat().st_size
-    except OSError:
-        package_bytes = 0
+    except OSError as exc:
+        raise PackageFailure(
+            "package_read_failed", f"Could not read package size: {path} ({exc.strerror})."
+        ) from exc
     return PackageReport(
         path=path,
         workspace=manifest.workspace,

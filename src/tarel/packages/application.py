@@ -12,6 +12,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+import zlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
@@ -202,7 +203,7 @@ def _capture_workspace_documents(
 
 def inspect_package(path: Path) -> PackageReport:
     """Read the bounded manifest without expanding package documents."""
-    path = path.resolve()
+    path = Path(os.path.abspath(path))
     with PackageArchive(str(path)) as archive:
         manifest = read_manifest(archive)
         validate_declared_members(archive, manifest)
@@ -211,7 +212,7 @@ def inspect_package(path: Path) -> PackageReport:
 
 def verify_package(path: Path) -> PackageReport:
     """Verify archive safety, checksums, contracts, identities, and references."""
-    path = path.resolve()
+    path = Path(os.path.abspath(path))
     with PackageArchive(str(path)) as archive:
         manifest = _verify_open_archive(archive)
     return package_report(path, manifest, verified=True)
@@ -219,28 +220,47 @@ def verify_package(path: Path) -> PackageReport:
 
 def unpack_package(path: Path, destination: Path) -> PackageReport:
     """Verify and extract into a new state root; merge and overwrite are not supported."""
-    path = path.resolve()
-    destination = destination.resolve()
-    if destination.exists():
+    path = Path(os.path.abspath(path))
+    destination = Path(os.path.abspath(destination))
+    if os.path.lexists(destination):
         raise PackageFailure(
             "package_destination_exists",
             "Package destination must not exist; unpacking never merges or overwrites state.",
         )
-    with PackageArchive(str(path)) as archive:
-        manifest = _verify_open_archive(archive)
-        verified = package_report(path, manifest, verified=True)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(dir=destination.parent, prefix=f".{destination.name}-"))
-        try:
+    staging: Path | None = None
+    try:
+        with PackageArchive(str(path)) as archive:
+            manifest = _verify_open_archive(archive)
+            verified = package_report(path, manifest, verified=True)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            staging = Path(tempfile.mkdtemp(dir=destination.parent, prefix=f".{destination.name}-"))
             for entry in manifest.entries:
                 target = staging.joinpath(*PurePosixPath(entry.path).parts)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(entry.path, "r") as source, target.open("xb") as sink:
-                    shutil.copyfileobj(source, sink, length=_CHUNK_SIZE)
+                # Do not trust ZIP modes or a permissive process umask. Every
+                # imported directory and document starts owner-only on POSIX.
+                for directory in (target.parent.parent, target.parent):
+                    directory.mkdir(mode=0o700, exist_ok=True)
+                with archive.open(entry.path, "r") as source:
+                    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with os.fdopen(descriptor, "wb") as sink:
+                        shutil.copyfileobj(source, sink, length=_CHUNK_SIZE)
+            if os.path.lexists(destination):
+                raise PackageFailure(
+                    "package_destination_exists", "Package destination appeared during unpacking."
+                )
             os.replace(staging, destination)
-        except Exception:
+    except OSError as exc:
+        raise PackageFailure(
+            "package_extract_failed",
+            f"Could not unpack package into {destination} ({exc.strerror}).",
+        ) from exc
+    except PackageFailure:
+        raise
+    except (zipfile.BadZipFile, RuntimeError, zlib.error) as exc:
+        raise PackageFailure("invalid_package", "Could not extract package documents.") from exc
+    finally:
+        if staging is not None:
             shutil.rmtree(staging, ignore_errors=True)
-            raise
     return PackageReport(
         path=verified.path,
         workspace=verified.workspace,

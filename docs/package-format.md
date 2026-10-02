@@ -1,9 +1,10 @@
 # Portable `.tarel` packages
 
 TAREL's editable source of truth remains a normal `.tarel/` directory containing readable JSON
-documents. A file ending in `.tarel` is the portable snapshot form for review, transfer, and
-backup. It is an ordinary ZIP container so that the contents remain inspectable with standard
-operating-system tools. The package layer uses only the Python standard library.
+documents. A file ending in `.tarel` is a selected metadata snapshot for review and transfer,
+not a complete backup of local state. It is an ordinary ZIP container so the contents remain
+inspectable with standard operating-system tools. The package layer uses only the Python standard
+library.
 
 New exports use `tarel.package.v0.2`; readers also accept `tarel.package.v0.1` snapshots.
 Version 0.2 records the narrower auxiliary selection policy without changing graph, knowledge,
@@ -60,6 +61,26 @@ The allowlist excludes selective graph caches, search indexes, lineage analysis 
 and provider configuration, credentials, logs, raw samples, source rows, and analytical results.
 Indexes are rebuilt after import when needed.
 
+## Snapshot completeness
+
+Neither v0.1 nor v0.2 transfers logical topology overlays
+(`logical-topology/<graph>/topology.json`) or graph change reports
+(`graphs/<graph>/changes/<before>--<after>.json`). These are persisted metadata, not rebuildable
+search indexes. A verified package therefore does not prove that all local graph-related metadata
+was captured. It cannot restore topology-based explanations or historical change evidence that
+remains only in the original state directory.
+
+Every package command displays both omissions in text output. JSON plans and reports include an
+`omissions` list covering these and the existing exclusions. This is derived reporting information
+for both supported versions; their serialized manifests, omission policies, and revisions remain
+unchanged. The notice describes the package boundary even when the source had no such documents;
+an imported archive cannot reveal whether omitted files existed at its source.
+
+Transferring these documents requires a separately reviewed package contract before stabilization.
+That review must settle graph ownership, supported document versions, revision validation for
+topology, selection and reference validation for historical reports, and snapshot locking across
+their stores. Adding paths to ZIP files alone would not establish safe or complete round trips.
+
 ## Concurrent writes and snapshots
 
 Graph transformations reload and update the latest document under a per-graph OS lock. Provider
@@ -91,12 +112,18 @@ in a writable local directory. Shared access permissions must cover lock files a
 
 `verify` checks the ZIP structure, manifest membership, sizes, SHA-256 digests, JSON contracts,
 document identities, workspace graph references, and focus source references. It rejects duplicate
-or case-colliding names, absolute paths, parent traversal, backslashes, Windows-reserved names,
+or case/Unicode-colliding names, absolute paths, parent traversal, backslashes, Windows-reserved names,
 symlinks, encrypted ZIP members, excessive entry counts and sizes, and unsafe compression ratios.
-JSON must be UTF-8 and duplicate object keys are rejected.
+Paths must use their canonical POSIX spelling: redundant slashes and `./` components are rejected
+before extraction, including when the manifest declares them with valid checksums. Original ZIP
+names are checked before Python's null-byte truncation can disguise a member path.
+JSON must be UTF-8; duplicate object keys and non-finite numbers are rejected. Invalid syntax,
+excessive parser nesting, and document validation failures produce ordinary CLI errors.
 
 Extraction runs only after full verification. Files go into a temporary sibling directory, which
-is renamed to the requested destination after every write succeeds.
+is renamed to the requested destination after every write succeeds. File-system failures during
+setup, extraction, and publication report an error category and cause, with staging files removed
+on failure. Existing destinations, including dangling symlinks, are rejected without following them.
 
 Verification establishes package integrity and structural validity. It does not refresh or promote
 revision-pinned focus snapshots. Their current/stale status remains part of the imported state and
@@ -106,7 +133,11 @@ is enforced by the normal focus and UI application paths.
 
 For a local working directory, access control should initially use operating-system ownership and
 ACLs. A package is a transferable artifact, so filesystem permissions alone no longer protect it
-after copying. Encryption belongs around the complete package as a separate envelope, for example
+after copying. On POSIX systems, unpack creates the state root and its directories with mode `0700`
+and documents with mode `0600` (a stricter umask can restrict them further). ZIP member permissions
+do not grant access. Native Windows uses the destination's inherited ACLs; POSIX mode bits do not
+configure Windows ACLs. Shared team access must be granted deliberately after import.
+Encryption belongs around the complete package as a separate envelope, for example
 `team.tarel.age`; it should not make individual ZIP members partly readable or add key management
 to the metadata kernel. A later signing contract can authenticate the package revision without
 changing the internal graph documents.

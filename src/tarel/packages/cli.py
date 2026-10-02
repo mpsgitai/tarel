@@ -14,6 +14,7 @@ from tarel.packages.application import (
     unpack_package,
     verify_package,
 )
+from tarel.packages.contracts import SNAPSHOT_OMISSIONS
 
 
 def add_package_commands(
@@ -78,6 +79,7 @@ def dispatch_package(args: argparse.Namespace) -> int | None:
             for entry in plan.entries:
                 print(f"{entry.path} ({entry.size} bytes)")
             print("Global knowledge and lineage require explicit selection.")
+            _render_snapshot_omissions()
         return 0
     if args.package_command == "pack":
         report = pack_workspace(
@@ -112,5 +114,10 @@ def _render(report: PackageReport, *, output_format: str) -> None:
     )
     print(f"Revision: {report.package_revision}")
     print(f"Status: {state}")
+    _render_snapshot_omissions()
     if report.destination is not None:
         print(f"Destination: {report.destination}")
+
+
+def _render_snapshot_omissions() -> None:
+    print(f"Snapshot omissions: {'; '.join(SNAPSHOT_OMISSIONS)} (not included).")
