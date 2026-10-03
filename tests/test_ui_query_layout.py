@@ -10,6 +10,53 @@ STATIC = Path(__file__).parents[1] / "src/tarel/ui/static"
 
 @skipUnless(shutil.which("node"), "Node.js is needed for optional browser regressions")
 class ProjectQueryLayoutTests(TestCase):
+    def test_cloud_selection_requires_explicit_search(self) -> None:
+        self._script((STATIC / "retrieval_models.js").read_text() + r"""
+(async () => {
+  state.data = {objects:[]};
+  visibleObjects = () => [];
+  const requests = [];
+  api = async path => {
+    requests.push(path);
+    return {results:{graph:'sales',hits:[]}};
+  };
+  renderRetrievalModels({settings:{embedding:{provider:'openrouter',model:'embed'},
+    reranker:null,rerank_depth:10},providers:['openrouter'],search_mode:'hybrid'});
+  $('#object-search').value = 'revenue';
+  scheduleProjectSearch();
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(requests.length, 0);
+  assert.equal($('#run-model-search').hidden, false);
+  assert.ok($('#project-search-status').textContent.includes('Press Enter'));
+  await runProjectSearch();
+  assert.equal(JSON.stringify(requests), JSON.stringify(['/api/search']));
+  renderRetrievalModels({settings:{embedding:{provider:'local',model:'embed'},
+    reranker:{provider:'local',model:'ranker'},rerank_depth:10},search_mode:'hybrid'});
+  assert.equal(queryTools.requireSubmit, true);
+  renderRetrievalModels({settings:{embedding:{provider:'local',model:'embed'},
+    reranker:null,rerank_depth:10},search_mode:'hybrid'});
+  assert.equal(queryTools.requireSubmit, false);
+})()
+""")
+
+    def test_late_model_catalog_cannot_replace_another_provider(self) -> None:
+        self._script((STATIC / "retrieval_models.js").read_text() + r"""
+(async () => {
+  const pending = [];
+  api = () => new Promise(resolve => pending.push(resolve));
+  $('#embedding-provider').value = 'openrouter';
+  const previous = loadModelCatalog('embedding');
+  $('#embedding-provider').value = 'local';
+  const current = loadModelCatalog('embedding');
+  pending[1]({models:[{id:'local-current',installed:true}]});
+  await current;
+  pending[0]({models:[{id:'remote-old'}]});
+  await previous;
+  assert.ok($('#embedding-models').innerHTML.includes('local-current'));
+  assert.ok(!$('#embedding-models').innerHTML.includes('remote-old'));
+})()
+""")
+
     def test_graph_reload_refreshes_index_health(self) -> None:
         self._script(r"""
 (async () => {

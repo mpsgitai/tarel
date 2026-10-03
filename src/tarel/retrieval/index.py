@@ -44,6 +44,14 @@ DEFAULT_BM25_WEIGHT = 1.0
 _MAX_FIELDS = 8
 
 
+def _model_identity(path: Path | None, identity: str | None) -> str:
+    if identity is not None:
+        return identity
+    if path is None:
+        raise RetrievalFailure("missing_embedding_backend", "An embedding identity is required.")
+    return sha256_file(path)
+
+
 def _annotation_policy_suffix(annotation_states: frozenset[str]) -> str:
     if annotation_states == DEFAULT_CONTEXT_ANNOTATION_STATES:
         return ""
@@ -52,15 +60,18 @@ def _annotation_policy_suffix(annotation_states: frozenset[str]) -> str:
 
 
 class FileRetrievalIndex:
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, *, namespace: str | None = None) -> None:
         self.root = root or Path.cwd() / ".tarel" / "indexes"
+        if namespace is not None and not re.fullmatch(r"[a-f0-9]{24}", namespace):
+            raise RetrievalFailure("invalid_index_namespace", "Invalid model index namespace.")
+        self.namespace = namespace
 
     def build(
         self,
         graph: GraphDocument,
         *,
         embedder: EmbeddingBackend | None,
-        model_path: Path,
+        model_path: Path | None,
         model_id: str | None = None,
         model_sha256: str | None = None,
         batch_size: int = 16,
@@ -77,7 +88,7 @@ class FileRetrievalIndex:
             raise RetrievalFailure(
                 "missing_embedding_backend", "Index build needs a model identity.",
             )
-        selected_model_sha256 = model_sha256 or sha256_file(model_path)
+        selected_model_sha256 = _model_identity(model_path, model_sha256)
         reusable, previous_ids, reusable_dimensions = self._reusable_document_ids(
             graph.name,
             documents=documents,
@@ -228,7 +239,7 @@ class FileRetrievalIndex:
                     document_count=total,
                     dimensions=dimensions,
                     model_id=selected_model_id,
-                    model_path=str(model_path.resolve()),
+                    model_path=str(model_path.resolve()) if model_path is not None else "",
                     model_sha256=selected_model_sha256,
                     normalized=True,
                     annotation_states=tuple(sorted(annotation_states)),
@@ -405,14 +416,14 @@ class FileRetrievalIndex:
             return False
         return True
 
-    def load(
+    def validate_selection(
         self,
         graph: GraphDocument,
         *,
-        model_path: Path,
+        model_path: Path | None,
         model_sha256: str | None = None,
         annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
-    ) -> tuple[IndexMetadata, tuple[RetrievalDocument, ...], tuple[tuple[float, ...], ...]]:
+    ) -> IndexMetadata:
         metadata = self.metadata(graph.name, annotation_states=annotation_states)
         if not _retrieval_projection_current(
             metadata, graph, annotation_states=annotation_states,
@@ -421,11 +432,25 @@ class FileRetrievalIndex:
                 "stale_index",
                 f"Graph {graph.name} changed after indexing. Run `tarel index build {graph.name}`.",
             )
-        if metadata.model_sha256 != (model_sha256 or sha256_file(model_path)):
+        if metadata.model_sha256 != _model_identity(model_path, model_sha256):
             raise RetrievalFailure(
                 "model_index_mismatch",
                 "The selected embedding model differs from the indexed model. Rebuild the index.",
             )
+        return metadata
+
+    def load(
+        self,
+        graph: GraphDocument,
+        *,
+        model_path: Path | None,
+        model_sha256: str | None = None,
+        annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
+    ) -> tuple[IndexMetadata, tuple[RetrievalDocument, ...], tuple[tuple[float, ...], ...]]:
+        metadata = self.validate_selection(
+            graph, model_path=model_path, model_sha256=model_sha256,
+            annotation_states=annotation_states,
+        )
         path = self.path(graph.name, annotation_states=annotation_states)
         try:
             with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
@@ -461,7 +486,7 @@ class FileRetrievalIndex:
         self,
         graph: GraphDocument,
         *,
-        model_path: Path,
+        model_path: Path | None,
         model_sha256: str | None = None,
         query_vector: tuple[float, ...],
         limit: int,
@@ -504,7 +529,7 @@ class FileRetrievalIndex:
         self,
         graph: GraphDocument,
         *,
-        model_path: Path,
+        model_path: Path | None,
         model_sha256: str | None,
         query_vector: tuple[float, ...],
         limit: int,
@@ -521,7 +546,7 @@ class FileRetrievalIndex:
                 f"Graph {graph.name} changed after indexing. "
                 f"Run `tarel index build {graph.name}`.",
             )
-        if metadata.model_sha256 != (model_sha256 or sha256_file(model_path)):
+        if metadata.model_sha256 != _model_identity(model_path, model_sha256):
             raise RetrievalFailure(
                 "model_index_mismatch",
                 "The selected embedding model differs from the indexed model. Rebuild the index.",
@@ -584,15 +609,18 @@ class FileRetrievalIndex:
         if not _GRAPH_NAME.fullmatch(name):
             raise RetrievalFailure("invalid_graph_name", "Invalid graph name for retrieval index.")
         suffix = _annotation_policy_suffix(annotation_states)
-        return self.root / name / f"index{suffix}.sqlite"
+        directory = self.root / name
+        if self.namespace is not None:
+            directory = directory / "models" / self.namespace
+        return directory / f"index{suffix}.sqlite"
 
     def checkpoint_path(
         self, name: str, *,
         annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
     ) -> Path:
-        suffix = _annotation_policy_suffix(annotation_states)
-        self.path(name, annotation_states=annotation_states)
-        return self.root / name / f"index{suffix}.checkpoint.sqlite"
+        return self.path(name, annotation_states=annotation_states).with_suffix(
+            ".checkpoint.sqlite",
+        )
 
     def checkpoint_status(
         self, name: str, *,
@@ -681,8 +709,14 @@ def search_retrieval(
     )
     vector_results: tuple[RankedDocument, ...] = ()
     if mode in {"vector", "hybrid"}:
-        if embedder is None or model_path is None:
+        if embedder is None or (model_path is None and model_sha256 is None):
             raise RetrievalFailure("missing_embedding_backend", "Vector retrieval needs a model.")
+        if query_vector is None:
+            # Reject missing/stale indexes before a potentially paid embedding request.
+            (store or FileRetrievalIndex()).validate_selection(
+                graph, model_path=model_path, model_sha256=model_sha256,
+                annotation_states=annotation_states,
+            )
         selected_query_vector = query_vector or embedder.embed_query(query)
         vector_results = (store or FileRetrievalIndex()).rank(
             graph,

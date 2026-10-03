@@ -7,7 +7,7 @@ import secrets
 import threading
 import webbrowser
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -25,6 +25,7 @@ from tarel.application import (
     define_workspace_area_use_case,
     define_workspace_system_use_case,
     define_workspace_zone_use_case,
+    download_embedding_model_use_case,
     edit_annotation_use_case,
     list_focuses_use_case,
     list_knowledge_documents_use_case,
@@ -65,12 +66,16 @@ from tarel.object_families.application import (
     resolve_family_members_use_case,
 )
 from tarel.object_families.contracts import ObjectFamilyFailure
+from tarel.providers.config import list_provider_names
+from tarel.providers.contracts import ProviderFailure
 from tarel.reference_mapping.application import (
     find_reference_mapping_candidates_for_graph_use_case,
 )
 from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
+from tarel.retrieval.catalog import list_models
 from tarel.retrieval.contracts import RetrievalFailure
+from tarel.retrieval.settings import RetrievalSettings, load_settings, save_settings, settings_path
 from tarel.runtime import TarelRuntime
 from tarel.search import SearchFailure
 from tarel.semantic_concepts.contracts import SemanticConceptFailure
@@ -485,6 +490,27 @@ class TarelUIBackend:
         } | {"focuses": list(names)}
 
     def mutate(self, route: str, payload: dict[str, Any]) -> dict[str, object]:
+        if route == "/api/retrieval/settings":
+            if set(payload) != {"settings", "search_mode"} or not isinstance(
+                payload["settings"], dict,
+            ):
+                raise UIFailure("invalid_retrieval_settings", "Invalid retrieval selection.")
+            mode = payload["search_mode"]
+            if mode not in {"lexical", "bm25", "vector", "hybrid"}:
+                raise UIFailure("invalid_retrieval_settings", "Invalid search mode.")
+            selected = RetrievalSettings.from_dict(payload["settings"])
+            save_settings(self.runtime, selected)
+            self.config = replace(self.config, search_mode=mode, model_path=None)
+            return self._retrieval_settings()
+        if route == "/api/retrieval/models":
+            if set(payload) != {"provider", "task"}:
+                raise UIFailure("invalid_retrieval_settings", "Select provider and model task.")
+            return list_models(provider=_string(payload, "provider"), task=_string(payload, "task"))
+        if route == "/api/retrieval/download":
+            if set(payload) != {"model"}:
+                raise UIFailure("invalid_retrieval_settings", "Select a registered local model.")
+            result = download_embedding_model_use_case(name=_string(payload, "model"))
+            return {"model": result.spec.name, "reused": result.reused}
         if route.startswith("/api/architecture/"):
             if not self.architecture:
                 raise UIFailure(
@@ -512,11 +538,11 @@ class TarelUIBackend:
                     self.config.workspace, systems=self.config.systems,
                     graphs=self.config.graphs, areas=self.config.areas,
                     schemas=self.config.schemas, zones=self.config.zones,
-                    model_path=self.config.model_path, n_threads=self.config.n_threads,
+                    model_path=self._retrieval_model_path(), n_threads=self.config.n_threads,
                     max_graphs=1, **self._runtime_options(),
                 )
             result = build_retrieval_index_use_case(
-                self._single_graph(), model_path=self.config.model_path,
+                self._single_graph(), model_path=self._retrieval_model_path(),
                 n_threads=self.config.n_threads, **self._runtime_options(),
             )
             return {
@@ -535,7 +561,7 @@ class TarelUIBackend:
                 systems=self.config.systems, graphs=self.config.graphs,
                 areas=self.config.areas, schemas=self.config.schemas, zones=self.config.zones,
                 focuses=self.config.focuses, search_mode=self.config.search_mode,
-                model_path=self.config.model_path,
+                model_path=self._retrieval_model_path(),
                 n_threads=self.config.n_threads,
             )
             if route == "/api/query/scope":
@@ -861,6 +887,8 @@ class TarelUIBackend:
         return stale
 
     def read(self, route: str) -> dict[str, object]:
+        if route == "/api/retrieval/settings":
+            return self._retrieval_settings()
         if route == "/api/architecture" and self.architecture:
             return self.architecture.snapshot()
         if route == "/api/bootstrap":
@@ -875,17 +903,29 @@ class TarelUIBackend:
                 self.config.workspace, systems=self.config.systems,
                 graphs=self.config.graphs, areas=self.config.areas,
                 schemas=self.config.schemas, zones=self.config.zones,
-                model_path=self.config.model_path,
+                model_path=self._retrieval_model_path(),
                 **self._runtime_options(),
             )
         return retrieval_index_status_use_case(
-            self._single_graph(), model_path=self.config.model_path,
+            self._single_graph(), model_path=self._retrieval_model_path(),
             **self._runtime_options(),
         )
 
     def _require_editable(self) -> None:
         if not self.config.editable:
             raise UIFailure("read_only", "Restart TAREL UI with --edit to change data.", status=403)
+
+    def _retrieval_settings(self) -> dict[str, object]:
+        return {"settings": load_settings(self.runtime).to_dict(),
+                "providers": [name for name in list_provider_names() if name != "local"],
+                "search_mode": self.config.search_mode}
+
+    def _retrieval_model_path(self) -> Path | None:
+        if settings_path(self.runtime).is_file() or (
+            self.runtime is not None and self.runtime.retrieval_settings is not None
+        ):
+            return None
+        return self.config.model_path
 
     def _runtime_options(self) -> dict[str, TarelRuntime]:
         """Preserve legacy call shapes unless an explicit runtime was supplied."""
@@ -1135,6 +1175,7 @@ class _Handler(BaseHTTPRequestHandler):
         name = "index.html" if path in {"", "/"} else path.removeprefix("/")
         if name not in {
             "index.html", "app.js", "styles.css", "cytoscape.min.js", "logical_metadata.js",
+            "retrieval_models.js",
             "query_tools.js",
             "optional_details.js",
             "estate_navigation.js",
@@ -1277,6 +1318,7 @@ def _ui_failure(exc: Exception) -> UIFailure:
             ReferenceMappingFailure,
             RelationshipFailure,
             RetrievalFailure,
+            ProviderFailure,
             SearchFailure,
             SemanticFailure,
             WorkspaceFailure,

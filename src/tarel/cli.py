@@ -132,6 +132,7 @@ from tarel.reference_mapping.cli import (
 )
 from tarel.reference_mapping.contracts import ReferenceMappingFailure
 from tarel.relationships.core import RelationshipFailure
+from tarel.retrieval.cli import add_retrieval_commands, dispatch_retrieval
 from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.local import DEFAULT_MODEL_NAME
 from tarel.search import SearchFailure, SearchFilters, SearchResults
@@ -1209,6 +1210,7 @@ def build_parser() -> argparse.ArgumentParser:
         relationship_decision.add_argument("edge_id", help="Relationship candidate ID.")
         relationship_decision.add_argument("--reason", required=True)
         _add_format_argument(relationship_decision)
+    add_retrieval_commands(subcommands)
     return parser
 
 
@@ -1225,6 +1227,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(arguments)
 
     try:
+        retrieval_result = dispatch_retrieval(args)
+        if retrieval_result is not None:
+            return retrieval_result
         package_result = dispatch_package(args)
         if package_result is not None:
             return package_result
