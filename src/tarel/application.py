@@ -1230,9 +1230,9 @@ def search_workspace_use_case(
         else None
     )
     if embedder is not None:
-        for graph in loaded.values():
+        for name in scope.graph_names:
             _retrieval_index(runtime).validate_selection(
-                graph, model_path=resolved_model, model_sha256=model_sha256,
+                loaded[name], model_path=resolved_model, model_sha256=model_sha256,
                 annotation_states=selected_states,
             )
     query_vector = embedder.embed_query(query) if embedder is not None else None
@@ -1295,8 +1295,10 @@ def search_workspace_use_case(
         )
     )
     combined = with_family_hits(combined, families, limit=limit)
-    return rerank_results(combined, tuple(loaded.values()), runtime=runtime,
-                          limit=requested_limit, n_threads=n_threads)
+    return rerank_results(
+        combined, tuple(loaded[name] for name in scope.graph_names), runtime=runtime,
+        limit=requested_limit, n_threads=n_threads,
+    )
 
 
 def _search_loaded_graph(

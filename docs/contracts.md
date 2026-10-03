@@ -885,7 +885,13 @@ HTTP rerankers must provide `/rerank` with indexed `relevance_score` results; em
 
 Local reranking uses Qwen3-Reranker-0.6B on the CPU through the same optional `local-rag` extra.
 It scores yes/no logits without generating text. Its immutable GGUF revision, byte size and
-checksum are pinned in the existing model registry; download it explicitly:
+checksum are pinned in the existing model registry.
+
+A long-lived SDK or browser runtime reuses the reranker's file-stat-keyed model hash and loaded
+backend. Replacing the GGUF invalidates the cached identity and backend; one-shot calls hash the
+file directly.
+
+Download the model explicitly:
 
 ```bash
 tarel model download --name qwen3-reranker-0.6b-q4-k-m

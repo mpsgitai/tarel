@@ -138,7 +138,8 @@ def rerank_results(
         path = resolve_model_path(
             Path(choice.model_path) if choice.model_path else default_model_path(choice.model)
         )
-        key = (str(path), sha256_file(path), n_threads)
+        digest = runtime.model_sha256(path) if runtime is not None else sha256_file(path)
+        key = (str(path), digest, n_threads)
         if runtime is None:
             backend = LocalQwenReranker(path, n_threads=n_threads)
         else:

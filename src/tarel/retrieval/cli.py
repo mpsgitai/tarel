@@ -83,5 +83,24 @@ def dispatch_retrieval(args: argparse.Namespace) -> int | None:
             args.rerank_depth if args.rerank_depth is not None else current.rerank_depth,
         )
         result = save_settings(None, settings)
-    print(json.dumps(result, indent=2, sort_keys=True))
+    if args.format == "json":
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.retrieval_command == "models":
+        print(f"{result['task'].capitalize()} models ({result['provider']}):")
+        for model in result["models"]:
+            status = (
+                "installed" if model.get("installed")
+                else "download available" if model.get("downloadable") else "provider model"
+            )
+            print(f"  {model['id']} ({status})")
+        if not result["models"]:
+            print("  No models available.")
+    else:
+        for task in ("embedding", "reranker"):
+            choice = result[task]
+            label = f"{choice['provider']} / {choice['model']}" if choice else "off"
+            print(f"{task.capitalize()}: {label}")
+            if choice and choice["model_path"]:
+                print(f"  GGUF: {choice['model_path']}")
+        print(f"Rerank candidates: {result['rerank_depth']}")
     return 0
