@@ -16,6 +16,7 @@ from tarel.lineage.application import (
     build_lineage_use_case,
     decide_lineage_item_use_case,
     find_lineage_references_use_case,
+    import_dbt_lineage_use_case,
     import_runtime_lineage_use_case,
     lineage_status_use_case,
     list_lineage_items_use_case,
@@ -49,6 +50,21 @@ def add_lineage_commands(subcommands: argparse._SubParsersAction[argparse.Argume
     build.add_argument("name")
     build.add_argument("--source", required=True, type=Path)
     _format(build)
+
+    import_dbt = commands.add_parser(
+        "import-dbt",
+        help="Import declared dbt manifest v12 dependencies without SQL analysis.",
+    )
+    import_dbt.add_argument("name")
+    import_dbt.add_argument("--manifest", required=True, type=Path)
+    import_dbt.add_argument(
+        "--catalog-map",
+        action="append",
+        default=[],
+        metavar="FROM=TO",
+        help="Explicit database/catalog name mapping; repeat for multiple catalogs.",
+    )
+    _format(import_dbt)
 
     show = commands.add_parser(
         "show",
@@ -233,6 +249,22 @@ def dispatch_lineage(args: argparse.Namespace) -> int | None:
     if args.command != "lineage":
         return None
     command = args.lineage_command
+    if command == "import-dbt":
+        mappings = {}
+        for value in args.catalog_map:
+            source, separator, target = value.partition("=")
+            if not separator or not source or not target or source in mappings:
+                raise LineageFailure(
+                    "invalid_dbt_mapping", "Use unique --catalog-map FROM=TO entries."
+                )
+            mappings[source] = target
+        result = import_dbt_lineage_use_case(
+            args.name,
+            manifest_path=args.manifest,
+            catalog_map=mappings,
+        )
+        _render_document_change(_document_change_payload(result), output_format=args.format)
+        return 0
     if command == "build":
         result = build_lineage_use_case(args.name, source_path=args.source)
         payload = _document_change_payload(result)

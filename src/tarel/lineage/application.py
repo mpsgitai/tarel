@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -154,8 +154,29 @@ def build_lineage_use_case(
     source_path: Path,
     runtime: TarelRuntime | None = None,
 ) -> LineageChangeResult:
+    return _build_from_input(name, load_lineage_input(source_path), runtime=runtime)
+
+
+def import_dbt_lineage_use_case(
+    name: str,
+    *,
+    manifest_path: Path,
+    catalog_map: Mapping[str, str] | None = None,
+    runtime: TarelRuntime | None = None,
+) -> LineageChangeResult:
+    from tarel.lineage.dbt import load_dbt_manifest
+
+    source = load_dbt_manifest(manifest_path, catalog_map=catalog_map)
+    return _build_from_input(name, source, runtime=runtime)
+
+
+def _build_from_input(
+    name: str,
+    source: LineageInput,
+    *,
+    runtime: TarelRuntime | None,
+) -> LineageChangeResult:
     store = _lineage_store(runtime)
-    source = load_lineage_input(source_path)
     if store.exists(name):
         document = store.load(name)
         if document.source_revision == source.revision:

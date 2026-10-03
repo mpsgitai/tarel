@@ -430,6 +430,12 @@ NOTES = {
         "reads/writes are different evidence and must be represented acco"
         "rdingly."
     ),
+    "lineage import-dbt": (
+        "Imports model/source declarations from dbt manifest v12 through the same build/refresh "
+        "path. No dbt installation, SQLGlot or provider is used. Catalog mappings are explicit; "
+        "ephemeral models stay logical. This does not prove execution or column lineage. "
+        "See dbt-lineage.md for capabilities, limits and tests."
+    ),
     "lineage import-runtime": (
         "Requires a complete runtime-lineage input with exact graph revis"
         "ion and resolvable inputs. Imports are create-only. Successful e"
@@ -475,6 +481,8 @@ NOTES = {
     ),
 }
 MEANINGS = {
+    "manifest": "Path to the dbt manifest v12 JSON artifact; read locally without running dbt.",
+    "catalog_map": "Explicit FROM=TO database/catalog mapping; repeat for multiple mappings.",
     "name": "Name of the resource operated on by this command; see the command purpose.",
     "graph": (
         "Graph name; for commands supporting --workspace, that flag chang"

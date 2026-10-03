@@ -156,6 +156,7 @@ from tarel.lineage.application import (
     build_lineage_use_case,
     decide_lineage_item_use_case,
     find_lineage_references_use_case,
+    import_dbt_lineage_use_case,
     import_runtime_lineage_use_case,
     lineage_status_use_case,
     list_lineage_items_use_case,
@@ -1497,6 +1498,21 @@ class GroundingAPI(_RuntimeAPI):
 
 
 class LineageAPI(_RuntimeAPI):
+    def import_dbt(
+        self,
+        name: str,
+        *,
+        manifest: str | Path,
+        catalog_map: Mapping[str, str] | None = None,
+    ) -> LineageChangeResult:
+        """Import manifest declarations; no dbt execution, provider or SQL parser."""
+        return import_dbt_lineage_use_case(
+            name,
+            manifest_path=Path(manifest),
+            catalog_map=catalog_map,
+            runtime=self._runtime,
+        )
+
     def list(self) -> tuple[str, ...]:
         return list_lineages_use_case(runtime=self._runtime)
 

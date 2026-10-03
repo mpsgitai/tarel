@@ -396,7 +396,9 @@ def refresh_lineage(
                 if item.evidence.source == "declared_reference"
                 else item
             )
-            refreshed = replace(base, definition_id=definition.id, state="review_required")
+            refreshed = replace(
+                base, definition_id=definition.id, state="review_required", reviews=item.reviews,
+            )
             claims.append(refreshed)
             review_required_claims += 1
             stale_items.append(
