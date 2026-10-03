@@ -113,21 +113,41 @@ def load_settings(runtime: TarelRuntime | None) -> RetrievalSettings:
         ) from exc
 
 
-def snapshot_runtime(runtime: TarelRuntime | None) -> TarelRuntime | None:
-    # A GUI selection change must not mix model/index choices within a running request.
+def has_retrieval_selection(runtime: TarelRuntime | None) -> bool:
     if runtime is not None and runtime.retrieval_settings is not None:
-        return runtime
-    if not settings_path(runtime).is_file():
-        return runtime
+        return not runtime._implicit_retrieval_settings
+    return settings_path(runtime).is_file()
+
+
+def snapshot_runtime(
+    runtime: TarelRuntime | None, *, model_path: Path | None = None,
+) -> TarelRuntime:
+    # A GUI selection change must not mix model/index choices within a running request.
     from tarel.runtime import TarelRuntime
 
-    return replace(
-        runtime or TarelRuntime.local(Path.cwd() / ".tarel"),
-        retrieval_settings=load_settings(runtime),
-    )
+    if runtime is None or runtime.retrieval_settings is None:
+        selected = has_retrieval_selection(runtime)
+        settings = load_settings(runtime) if selected else RetrievalSettings()
+        runtime = replace(
+            runtime or TarelRuntime.local(Path.cwd() / ".tarel"),
+            retrieval_settings=settings, _implicit_retrieval_settings=not selected,
+        )
+    if model_path is not None:
+        selected_local_path(runtime, model_path)
+        if has_retrieval_selection(runtime):
+            settings = load_settings(runtime)
+            runtime = replace(runtime, retrieval_settings=replace(
+                settings, embedding=replace(settings.embedding, model_path=str(model_path)),
+            ))
+    return runtime
 
 
 def save_settings(runtime: TarelRuntime | None, settings: RetrievalSettings) -> dict[str, object]:
+    if runtime is not None and runtime.retrieval_settings is not None:
+        raise RetrievalFailure(
+            "retrieval_settings_override", "This client has an explicit retrieval override. "
+            "Use a client without an override to save project settings."
+        )
     path = settings_path(runtime)
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".retrieval-", suffix=".json")
@@ -143,9 +163,7 @@ def save_settings(runtime: TarelRuntime | None, settings: RetrievalSettings) -> 
 
 def index_namespace(runtime: TarelRuntime | None) -> str | None:
     # Preserve existing paths until users explicitly opt into a model selection.
-    if not settings_path(runtime).is_file() and (
-        runtime is None or runtime.retrieval_settings is None
-    ):
+    if not has_retrieval_selection(runtime):
         return None
     choice = load_settings(runtime).embedding
     if choice == ModelChoice():

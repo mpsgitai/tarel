@@ -500,8 +500,6 @@ class TarelUIBackend:
                 raise UIFailure("invalid_retrieval_settings", "Invalid search mode.")
             selected = RetrievalSettings.from_dict(payload["settings"])
             save_settings(self.runtime, selected)
-            if self.runtime is not None and self.runtime.retrieval_settings is not None:
-                self.runtime = replace(self.runtime, retrieval_settings=selected)
             self.config = replace(self.config, search_mode=mode, model_path=None)
             return self._retrieval_settings()
         if route == "/api/retrieval/models":

@@ -144,6 +144,7 @@ from tarel.retrieval.local import (
 from tarel.retrieval.remote import HTTPEmbedding, remote_identity
 from tarel.retrieval.rerank import candidate_limit, rerank_results
 from tarel.retrieval.settings import (
+    has_retrieval_selection,
     index_namespace,
     load_settings,
     selected_local_path,
@@ -1121,7 +1122,7 @@ def search_graph_use_case(
     scope_object_ids: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
-    runtime = snapshot_runtime(runtime)
+    runtime = snapshot_runtime(runtime, model_path=model_path)
     validate_bm25_weight(mode, bm25_weight)
     if not 1 <= limit <= 100:
         raise SearchFailure("invalid_limit", "Search limit must be between 1 and 100.")
@@ -1193,7 +1194,7 @@ def search_workspace_use_case(
     filters: SearchFilters | None = None,
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
-    runtime = snapshot_runtime(runtime)
+    runtime = snapshot_runtime(runtime, model_path=model_path)
     validate_bm25_weight(mode, bm25_weight)
     if not 1 <= limit <= 100:
         raise SearchFailure("invalid_limit", "Search limit must be between 1 and 100.")
@@ -1882,7 +1883,7 @@ def build_retrieval_index_use_case(
     validated_only: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> IndexBuildResult:
-    runtime = snapshot_runtime(runtime)
+    runtime = snapshot_runtime(runtime, model_path=model_path)
     if not 1 <= batch_size <= 256:
         raise RetrievalFailure("invalid_batch_size", "Batch size must be between 1 and 256.")
     graph = _graph_store(runtime).load(name)
@@ -1949,7 +1950,7 @@ def retrieval_index_status_use_case(
     validated_only: bool = False,
     _selected_model: tuple[Path | None, str] | None = None,
 ) -> dict[str, object]:
-    runtime = snapshot_runtime(runtime)
+    runtime = snapshot_runtime(runtime, model_path=model_path)
     graph = _graph_store(runtime).load(name)
     store = _retrieval_index(runtime)
     selected_states = selected_annotation_states(
@@ -2024,7 +2025,7 @@ def retrieval_workspace_status_use_case(
     validated_only: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> dict[str, object]:
-    runtime = snapshot_runtime(runtime)
+    runtime = snapshot_runtime(runtime, model_path=model_path)
     runtime = runtime or TarelRuntime.local(Path.cwd() / ".tarel")
     selected_model = _selected_retrieval_model(runtime, model_path)
     scope = resolve_workspace_scope_use_case(
@@ -2086,7 +2087,7 @@ def build_retrieval_workspace_indexes_use_case(
     validated_only: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> dict[str, object]:
-    runtime = snapshot_runtime(runtime)
+    runtime = snapshot_runtime(runtime, model_path=model_path)
     if not 1 <= max_graphs <= 100:
         raise RetrievalFailure("invalid_graph_limit", "Graph limit must be between 1 and 100.")
     runtime = runtime or TarelRuntime.local(Path.cwd() / ".tarel")
@@ -2186,9 +2187,7 @@ def _selected_retrieval_model(
     selected_path = selected_local_path(runtime, model_path)
     if choice.provider != "local":
         return None, remote_identity(choice)
-    if selected_path is None and (
-        runtime is None or runtime.retrieval_settings is None
-    ):
+    if selected_path is None and not has_retrieval_selection(runtime):
         return None
     resolved = resolve_model_path(selected_path)
     return resolved, _embedding_model_sha256(runtime, resolved)

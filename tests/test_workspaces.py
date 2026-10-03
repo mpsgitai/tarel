@@ -60,6 +60,8 @@ class WorkspaceTests(TestCase):
             with (
                 patch("tarel.application.FileGraphStore", return_value=graph_store),
                 patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
                 self._run("workspace", "create", "enterprise")
                 self._run(
@@ -153,6 +155,8 @@ class WorkspaceTests(TestCase):
             with (
                 patch("tarel.application.FileGraphStore", return_value=graph_store),
                 patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
                 scoped = json.loads(
                     self._run(
@@ -185,6 +189,8 @@ class WorkspaceTests(TestCase):
             with (
                 patch("tarel.application.FileGraphStore", return_value=graph_store),
                 patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
                 self._run("workspace", "create", "enterprise")
                 self._run(
@@ -306,6 +312,8 @@ class WorkspaceTests(TestCase):
             with (
                 patch("tarel.application.FileGraphStore", return_value=graph_store),
                 patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
                 self._run("workspace", "create", "enterprise")
                 self._run(

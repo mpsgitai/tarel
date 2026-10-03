@@ -70,7 +70,7 @@ class SearchTests(TestCase):
             store.save(graph)
             output = StringIO()
             with (
-                patch("tarel.application.FileGraphStore", return_value=store),
+                patch("tarel.runtime.FileGraphStore", return_value=store),
                 redirect_stdout(output),
             ):
                 exit_code = main(

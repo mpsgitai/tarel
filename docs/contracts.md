@@ -917,7 +917,8 @@ hits = sdk.search.graph("adventureworks_dw", "internet revenue", mode="hybrid")
 
 `Tarel(root, retrieval=settings)` instead pins an independent client override without saving
 project settings. Its `retrieval.configure()` rejects persistence while that override is active;
-use a regular client to change project defaults. This makes local/cloud comparisons possible
+browser **Apply** also rejects persistence through that client. Use a regular client to change
+project defaults. This makes local/cloud comparisons possible
 without changing each other's selections. A local `ModelChoice` may additionally name a
 `model_path`; a cloud choice cannot use a local GGUF path or a search/build `--model` override.
 
@@ -931,10 +932,17 @@ calls. **Update** builds only the currently selected embedding index.
 Project defaults are stored atomically in `<state>/retrieval.json`, without API keys. The
 default local choice continues using its existing index path. Other embedding choices use
 `<state>/indexes/<graph>/models/<selection-hash>/index{policy}.sqlite`, keyed by provider, model,
-local path and remote endpoint. Annotation policies keep their existing separate files. Cloud
-vectors are returned by the provider and stored locally; no graph/vector upload to a hosted
+local path and remote endpoint. Annotation policies keep their existing separate files.
+With a configured local selection, a per-call `--model`/`model_path` override selects its own
+index namespace without changing saved settings or overwriting the selected model's index.
+Unconfigured local use retains the legacy index paths, including explicit GGUF paths.
+Cloud vectors are returned by the provider and stored locally; no graph/vector upload to a hosted
 vector database is involved. Switching back reuses an existing matching index. Changing only
 the reranker or its depth never rebuilds embeddings.
+
+Every search or index operation pins its selection at entry, including implicit defaults before
+the first project configuration exists. A concurrent configuration change applies to subsequent
+operations; a running workspace operation keeps one selection across all graphs.
 
 Incremental updates, stale-projection checks, atomic replacement and interrupted-build resume
 apply to every model choice. A workspace search embeds its query once, then reranks one combined,

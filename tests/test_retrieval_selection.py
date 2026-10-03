@@ -20,7 +20,7 @@ from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.local import DEFAULT_MODEL_NAME, sha256_file
 from tarel.retrieval.remote import HTTPEmbedding, HTTPRetrievalClient, indexed_rows, rerank_remote
 from tarel.retrieval.rerank import LocalQwenReranker, rerank_results
-from tarel.retrieval.settings import index_namespace, snapshot_runtime
+from tarel.retrieval.settings import index_namespace, load_settings, snapshot_runtime
 from tarel.sdk import ModelChoice, RetrievalSettings, Tarel
 from tarel.ui.server import TarelUIBackend, UIConfig
 from tarel.workspaces.contracts import SchemaReference
@@ -52,6 +52,170 @@ class RetrievalSelectionTests(TestCase):
         # Index namespacing imports this loader independently from the HTTP adapter.
         self.enterContext(patch("tarel.providers.config.load_http_provider_config",
                                return_value=_profile()))
+
+    def test_local_model_override_keeps_configured_indexes_and_settings_intact(self):
+        for saved in (True, False):
+            with (
+                self.subTest(saved=saved), TemporaryDirectory() as temporary,
+                patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
+            ):
+                root = Path(temporary)
+                original_model, override = root / "original.gguf", root / "override.gguf"
+                original_model.write_bytes(b"original model")
+                override.write_bytes(b"override model")
+                settings = RetrievalSettings(embedding=ModelChoice(model_path=str(original_model)))
+                sdk = Tarel(root / ".tarel", retrieval=None if saved else settings)
+                if saved:
+                    sdk.retrieval.configure(settings)
+                graphs = (_retrieval_graph(), replace(_retrieval_graph(), name="second"))
+                for graph in graphs:
+                    sdk.runtime.graph_store().save(graph)
+                sdk.runtime.workspace_store().save(define_system(
+                    create_workspace("estate"), "analytics",
+                    graph_names=tuple(graph.name for graph in graphs),
+                    graphs={graph.name: graph for graph in graphs},
+                ))
+                sdk.index.build_workspace("estate", max_graphs=2)
+                originals = {graph.name: sdk.runtime.retrieval_index().path(graph.name)
+                             for graph in graphs}
+                content = {name: path.read_bytes() for name, path in originals.items()}
+                self.assertEqual(sdk.index.status_workspace("estate", model_path=override)
+                                 ["state"], "missing")
+                built = sdk.index.build(graphs[0].name, model_path=override)
+                self.assertNotEqual(built.path, originals[graphs[0].name])
+                workspace_build = sdk.index.build_workspace("estate", model_path=override)
+                self.assertEqual(workspace_build["built_graphs"], 1)
+                for graph in graphs:
+                    for path in (None, override):
+                        self.assertTrue(sdk.index.status(graph.name, model_path=path)["ready"])
+                        self.assertTrue(sdk.search.graph(graph.name, "internet revenue",
+                                                        mode="hybrid", model_path=path).hits)
+                    self.assertEqual(originals[graph.name].read_bytes(), content[graph.name])
+                for path in (None, override):
+                    self.assertTrue(sdk.index.status_workspace("estate", model_path=path)["ready"])
+                    self.assertTrue(sdk.search.workspace("estate", "internet revenue",
+                                                        mode="hybrid", model_path=path).hits)
+                self.assertEqual(sdk.retrieval.settings(), settings)
+                selected_override = Tarel(sdk.root, retrieval=RetrievalSettings(
+                    embedding=ModelChoice(model_path=str(override)),
+                ))
+                self.assertEqual(selected_override.runtime.retrieval_index().path(graphs[0].name),
+                                 built.path)
+                if saved:
+                    previous, output = Path.cwd(), StringIO()
+                    os.chdir(root)
+                    try:
+                        with redirect_stdout(output):
+                            code = main(["index", "build", graphs[0].name,
+                                         "--model", str(override), "--format", "json"])
+                        self.assertEqual(code, 0)
+                        self.assertEqual(json.loads(output.getvalue())["path"], str(built.path))
+                    finally:
+                        os.chdir(previous)
+
+    def test_gui_cannot_persist_or_change_a_pinned_sdk_override(self):
+        for project_configured in (False, True):
+            with self.subTest(project_configured=project_configured), TemporaryDirectory() as root:
+                regular = Tarel(root)
+                if project_configured:
+                    regular.retrieval.configure(RetrievalSettings(rerank_depth=25))
+                path = regular.root / "retrieval.json"
+                before = path.read_bytes() if path.is_file() else None
+                settings = RetrievalSettings(ModelChoice("openrouter", "embedding"))
+                pinned = Tarel(root, retrieval=settings)
+                backend = TarelUIBackend(UIConfig(graph="sales", search_mode="bm25"),
+                                         runtime=pinned.runtime)
+                with self.assertRaises(RetrievalFailure) as error:
+                    backend.mutate("/api/retrieval/settings", {
+                        "settings": RetrievalSettings().to_dict(), "search_mode": "hybrid",
+                    })
+                self.assertEqual(error.exception.code, "retrieval_settings_override")
+                self.assertEqual(path.read_bytes() if path.is_file() else None, before)
+                self.assertIs(backend.runtime, pinned.runtime)
+                self.assertEqual(backend.config.search_mode, "bm25")
+                self.assertEqual(pinned.retrieval.settings(), settings)
+                self.assertEqual(backend.read("/api/retrieval/settings")["settings"],
+                                 settings.to_dict())
+
+    def test_default_snapshot_stays_local_when_first_configuration_appears(self):
+        with TemporaryDirectory() as temporary:
+            previous = Path.cwd()
+            os.chdir(temporary)
+            try:
+                sdk = Tarel(Path(temporary) / ".tarel")
+                captured = (snapshot_runtime(None), snapshot_runtime(sdk.runtime))
+                sdk.retrieval.configure(RetrievalSettings(
+                    ModelChoice("openrouter", "embedding"),
+                    ModelChoice("openrouter", "typesafe/jev-1.13"),
+                ))
+                for snapshot in captured:
+                    self.assertEqual(load_settings(snapshot), RetrievalSettings())
+                    self.assertIsNone(index_namespace(snapshot))
+                    self.assertIs(snapshot_runtime(snapshot), snapshot)
+                self.assertEqual(sdk.retrieval.settings().embedding.provider, "openrouter")
+            finally:
+                os.chdir(previous)
+
+    def test_search_cannot_call_cloud_after_concurrent_first_configuration(self):
+        with (
+            TemporaryDirectory() as temporary,
+            patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
+            patch("tarel.application.HTTPEmbedding") as cloud_embedding,
+            patch("tarel.retrieval.rerank.rerank_remote") as cloud_reranker,
+        ):
+            sdk = Tarel(temporary)
+            model = Path(temporary) / "local.gguf"
+            model.write_bytes(b"local model")
+            graph = _retrieval_graph()
+            sdk.runtime.graph_store().save(graph)
+            built = sdk.index.build(graph.name, model_path=model)
+
+            def configure_and_load(name):
+                sdk.retrieval.configure(RetrievalSettings(
+                    ModelChoice("openrouter", "embedding"),
+                    ModelChoice("openrouter", "typesafe/jev-1.13"),
+                ))
+                return graph
+
+            with patch("tarel.application._graph_store") as store:
+                store.return_value.load.side_effect = configure_and_load
+                hits = sdk.search.graph(graph.name, "internet revenue", mode="hybrid",
+                                        model_path=model)
+            self.assertTrue(hits.hits)
+            self.assertTrue(built.path.is_file())
+            self.assertEqual(sdk.retrieval.settings().embedding.provider, "openrouter")
+            cloud_embedding.assert_not_called()
+            cloud_reranker.assert_not_called()
+
+    def test_workspace_build_keeps_one_selection_during_first_configuration(self):
+        with (
+            TemporaryDirectory() as temporary,
+            patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
+            patch("tarel.application.HTTPEmbedding") as cloud,
+        ):
+            sdk = Tarel(temporary)
+            model = Path(temporary) / "local.gguf"
+            model.write_bytes(b"local model")
+            graphs = (_retrieval_graph(), replace(_retrieval_graph(), name="second"))
+            for graph in graphs:
+                sdk.runtime.graph_store().save(graph)
+            sdk.runtime.workspace_store().save(define_system(
+                create_workspace("estate"), "analytics",
+                graph_names=tuple(graph.name for graph in graphs),
+                graphs={graph.name: graph for graph in graphs},
+            ))
+
+            def configure(determined, total, stage):
+                sdk.retrieval.configure(RetrievalSettings(ModelChoice("openrouter", "embedding")))
+
+            result = sdk.index.build_workspace("estate", model_path=model, progress=configure)
+            self.assertEqual(result["built_graphs"], 2)
+            self.assertTrue(result["status"]["ready"])
+            for built in result["built"]:
+                self.assertEqual(Path(built["path"]), sdk.root / "indexes"
+                                 / built["graph"] / "index.sqlite")
+            self.assertEqual(sdk.retrieval.settings().embedding.provider, "openrouter")
+            cloud.assert_not_called()
 
     def test_cli_respects_text_and_json_for_settings_configure_and_catalog(self):
         with TemporaryDirectory() as temporary:
@@ -306,6 +470,9 @@ class RetrievalSelectionTests(TestCase):
             model = root / "model.gguf"
             model.write_bytes(b"test model")
             local = Tarel(root / "state")
+            local.retrieval.configure(RetrievalSettings(
+                embedding=ModelChoice(model_path=str(model)),
+            ))
             graph = _retrieval_graph()
             local.runtime.graph_store().save(graph)
             with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
@@ -327,7 +494,8 @@ class RetrievalSelectionTests(TestCase):
             self.assertEqual(len(set(paths + [original.path])), 3)
             self.assertEqual(original.path.read_bytes(), before)
             local.retrieval.configure(
-                RetrievalSettings(reranker=ModelChoice("openrouter", "typesafe/jev-1.13"))
+                replace(local.retrieval.settings(),
+                        reranker=ModelChoice("openrouter", "typesafe/jev-1.13"))
             )
             self.assertEqual(local.runtime.retrieval_index().path(graph.name), original.path)
             self.assertTrue(local.index.status(graph.name, model_path=model)["ready"])

@@ -36,6 +36,8 @@ class TarelRuntime:
 
     root: Path
     retrieval_settings: RetrievalSettings | None = field(default=None, repr=False)
+    # Pin defaults during requests while retaining legacy paths and recorded-model updates.
+    _implicit_retrieval_settings: bool = field(default=False, repr=False, compare=False)
     _embedding_backends: dict[tuple[str, int | None, str], Any] = field(
         default_factory=dict, compare=False, repr=False,
     )
