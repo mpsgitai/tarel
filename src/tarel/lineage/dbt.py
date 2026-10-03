@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NoReturn
+from urllib.parse import quote
 
 from tarel.lineage.contracts import LineageFailure
 from tarel.lineage.source import (
@@ -84,9 +85,7 @@ def load_dbt_manifest(
         name = _text(node.get("name"), f"{key}.name")
         # Evidence identity must survive a new artifact directory on the next dbt run.
         # The current artifact path remains available as the document source_reference.
-        node_reference = (
-            "dbt-manifest:" + project + "#/nodes/" + key.replace("~", "~0").replace("/", "~1")
-        )
+        node_reference = _resource_reference(project, key)
         declaration = {
             "resource_type": node["resource_type"],
             "materialized": _object(node["config"], key)["materialized"],
@@ -119,7 +118,7 @@ def load_dbt_manifest(
                     definition_external_id=key,
                     operation="read",
                     target=target,
-                    source_reference=node_reference,
+                    source_reference=_resource_reference(project, key, dependency=parent),
                     reason=f"dbt manifest {key} depends_on.nodes declares {parent}. "
                     + (
                         "Input is a logical ephemeral model, not a physical table. "
@@ -151,6 +150,14 @@ def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             _invalid("Manifest JSON contains duplicate object keys.")
         result[key] = value
     return result
+
+
+def _resource_reference(project: str, key: str, *, dependency: str | None = None) -> str:
+    # Distinct dbt source aliases can resolve to the same physical relation. Keep
+    # their evidence identities separate without depending on an array index.
+    selector = "" if dependency is None else "?dependency=" + quote(dependency, safe="")
+    pointer = key.replace("~", "~0").replace("/", "~1")
+    return "dbt-manifest:" + project + selector + "#/nodes/" + pointer
 
 
 def _resources(value: Any, label: str) -> dict[str, dict[str, Any]]:
@@ -225,10 +232,9 @@ def _relation(node: dict[str, Any], key: str, adapter: str, mappings: dict[str, 
     observed = node.get("relation_name")
     if observed is not None:
         observed = _text(observed, f"{key}.relation_name")
-        if adapter == "bigquery" and observed.startswith("`") and observed.endswith("`"):
-            actual = tuple(observed[1:-1].split("."))
-        else:
-            actual = _relation_parts(observed)
+        actual = _relation_parts(observed)
+        if adapter == "bigquery" and observed.startswith("`") and len(actual) == 1:
+            actual = tuple(actual[0].split("."))
         if actual != parts:
             _invalid(f"relation_name disagrees with declared database/schema/identifier: {key}")
     return ".".join(_quote(p) for p in (mappings.get(parts[0], parts[0]), *parts[1:]))

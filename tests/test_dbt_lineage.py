@@ -336,6 +336,54 @@ class DbtLineageTests(TestCase):
             load_dbt_manifest(self.manifest)
         self.assertEqual(error.exception.code, "dbt_manifest_not_found")
 
+    def test_bigquery_accepts_component_and_partial_quoting(self) -> None:
+        self.payload["metadata"]["adapter_type"] = "bigquery"
+        for relation in (
+            "`Warehouse`.`gold`.`sales_by_day`",
+            "`Warehouse`.gold.`sales_by_day`",
+            "Warehouse.`gold`.sales_by_day",
+        ):
+            self.payload["nodes"][_DAILY]["relation_name"] = relation
+            self.write()
+            with self.subTest(relation=relation):
+                result = self.sdk.lineage.import_dbt("shop", manifest=self.manifest)
+                self.assertIn(
+                    "Warehouse.gold.sales_by_day",
+                    {m.target for m in result.document.materializations},
+                )
+
+    def test_source_aliases_keep_distinct_dependency_evidence_and_reviews(self) -> None:
+        original = "source.shop.raw.orders"
+        alias = "source.shop.alias.orders"
+        self.payload["sources"][alias] = {
+            **self.payload["sources"][original],
+            "unique_id": alias,
+        }
+        self.payload["nodes"][_STAGE]["depends_on"]["nodes"].append(alias)
+        self.write()
+        result = self.sdk.lineage.import_dbt("shop", manifest=self.manifest)
+        reads = [c for c in result.document.claims if c.target == "Warehouse.raw.orders"]
+        self.assertEqual(len(reads), 2)
+        self.assertEqual(len({c.id for c in reads}), 2)
+        self.assertEqual(len({c.evidence.reference for c in reads}), 2)
+        for parent in (alias, original):
+            self.assertTrue(any(parent in c.evidence.reason for c in reads))
+        for claim, decision in zip(reads, ("validate", "reject"), strict=True):
+            self.sdk.lineage.decide("shop", claim.id, decision=decision, reason="Human checked.")
+        before = self.sdk.lineage.load("shop")
+        self.payload["nodes"][_STAGE]["depends_on"]["nodes"].reverse()
+        self.write()
+        moved = self.root / "new-alias-run.json"
+        moved.write_bytes(self.manifest.read_bytes())
+        refreshed = self.sdk.lineage.import_dbt("shop", manifest=moved)
+        self.assertEqual(before.claims, refreshed.document.claims)
+        links = [
+            link
+            for link in table_lineage(refreshed.document)
+            if link.source == "Warehouse.raw.orders"
+        ]
+        self.assertEqual(len(links), 1)
+
     def test_failed_refresh_does_not_mutate_existing_lineage_or_reviews(self) -> None:
         result = self.sdk.lineage.import_dbt("shop", manifest=self.manifest)
         self.sdk.lineage.decide(

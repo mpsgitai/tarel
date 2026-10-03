@@ -71,7 +71,9 @@ separately: order alone does not prove a data read. `alias`/`identifier`, not th
 display name, determines the physical relation. Database and schema qualifiers are
 required; the adapter never fills them from an unrelated project, profile, or environment.
 When present, `relation_name` must agree with those structured components. Common quoted
-SQL identifiers and BigQuery whole-backtick paths are supported.
+SQL identifiers and BigQuery whole-path, component, and partial backtick quoting are
+supported. Distinct source declarations may share a physical relation; their read
+evidence includes the parent resource identity so their claims and reviews stay distinct.
 
 Reads and materializations start in the existing **draft** state with declaration
 provenance. They are not human-approved, observed runtime reads, successful dbt runs, or
@@ -148,9 +150,9 @@ or OSG parity tests. The manifest-specific path has no equivalent native OSG imp
 the Lakehouse comparison instead uses the existing canonical input and common projection.
 Import latency was approximately half a second in each check, not a performance guarantee.
 
-The complete Python 3.11 and 3.12 development-environment runs each ran **802 tests**
+The complete Python 3.11 and 3.12 development-environment runs each ran **804 tests**
 with no failures and ten existing optional `sqlite-vec` experiment skips (the package
-was not installed). The 20 adapter tests plus 15 canonical
+was not installed). The 22 adapter tests plus 15 canonical
 lineage tests also passed on Python 3.11 and 3.13 without optional packages. A broader
 bare-runtime run initially failed because the SQLGlot tests require the `sql-lineage`
 extra; those tests passed in the development environment with that dependency installed.
@@ -166,3 +168,17 @@ See the [CLI reference](cli-reference.md#tarel-lineage-import-dbt),
 [existing static analysis](static-lineage.md),
 [dbt manifest documentation](https://docs.getdbt.com/reference/artifacts/manifest-json),
 and [official v12 schema](https://schemas.getdbt.com/dbt/manifest/v12.json).
+
+### GitHub review regression checks
+
+Codex found two valid P2 issues in the first PR revision. The added tests reproduced both
+failures before their fixes:
+
+- `test_bigquery_accepts_component_and_partial_quoting`: component and mixed quoting
+  must use the normal identifier parser; only a single quoted whole path is split.
+- `test_source_aliases_keep_distinct_dependency_evidence_and_reviews`: two declared
+  parents of one model may identify the same physical input. Both claims must import,
+  retain distinct evidence/reviews after dependency reordering and artifact relocation,
+  and not duplicate the physical table projection.
+
+Both fixes are adapter-local; no lineage ID algorithm or persisted core contract changed.

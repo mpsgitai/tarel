@@ -4929,7 +4929,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `context_packet_hash_mismatch` | [tarel/context_packets.py](../src/tarel/context_packets.py#L162) |
 | `context_packet_not_found` | [tarel/context_packets.py](../src/tarel/context_packets.py#L122) |
 | `database_not_found` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L251) |
-| `dbt_manifest_not_found` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L35) |
+| `dbt_manifest_not_found` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L36) |
 | `demo_create_failed` | [tarel/demo.py](../src/tarel/demo.py#L74) |
 | `demo_exists` | [tarel/demo.py](../src/tarel/demo.py#L52) |
 | `derived_relation_already_reviewed` | [topology/contracts.py](../src/tarel/topology/contracts.py#L639) |
@@ -5057,7 +5057,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_context_packet` | [tarel/context_guidance.py](../src/tarel/context_guidance.py#L553), [tarel/context_guidance.py](../src/tarel/context_guidance.py#L605), [tarel/context_guidance.py](../src/tarel/context_guidance.py#L621), [tarel/context_guidance.py](../src/tarel/context_guidance.py#L654), [tarel/context_guidance.py](../src/tarel/context_guidance.py#L696), [tarel/context_guidance.py](../src/tarel/context_guidance.py#L704), [tarel/context_guidance.py](../src/tarel/context_guidance.py#L712), [tarel/context_guidance.py](../src/tarel/context_guidance.py#L720), [tarel/context_packets.py](../src/tarel/context_packets.py#L127), [tarel/context_packets.py](../src/tarel/context_packets.py#L132), [tarel/context_packets.py](../src/tarel/context_packets.py#L294), [tarel/context_packets.py](../src/tarel/context_packets.py#L304), [tarel/context_packets.py](../src/tarel/context_packets.py#L311), [tarel/context_packets.py](../src/tarel/context_packets.py#L317), [tarel/context_packets.py](../src/tarel/context_packets.py#L322), [tarel/context_packets.py](../src/tarel/context_packets.py#L351), [tarel/context_packets.py](../src/tarel/context_packets.py#L355), [tarel/context_packets.py](../src/tarel/context_packets.py#L369), [tarel/context_packets.py](../src/tarel/context_packets.py#L375) |
 | `invalid_context_selection` | [ui/query_tools.py](../src/tarel/ui/query_tools.py#L212), [ui/query_tools.py](../src/tarel/ui/query_tools.py#L214) |
 | `invalid_cube` | [semantics/cube.py](../src/tarel/semantics/cube.py#L68), [semantics/cube.py](../src/tarel/semantics/cube.py#L324), [semantics/cube.py](../src/tarel/semantics/cube.py#L332), [semantics/cube.py](../src/tarel/semantics/cube.py#L338) |
-| `invalid_dbt_manifest` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L37), [lineage/dbt.py](../src/tarel/lineage/dbt.py#L351) |
+| `invalid_dbt_manifest` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L38), [lineage/dbt.py](../src/tarel/lineage/dbt.py#L357) |
 | `invalid_dbt_mapping` | [lineage/cli.py](../src/tarel/lineage/cli.py#L257) |
 | `invalid_demo_data` | [tarel/demo.py](../src/tarel/demo.py#L95) |
 | `invalid_demo_version` | [tarel/demo.py](../src/tarel/demo.py#L46) |
@@ -5446,8 +5446,8 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `unsupported_change_report` | [graph/refresh.py](../src/tarel/graph/refresh.py#L124) |
 | `unsupported_context_packet` | [tarel/context_packets.py](../src/tarel/context_packets.py#L139) |
 | `unsupported_contract` | [connectors/contracts.py](../src/tarel/connectors/contracts.py#L55) |
-| `unsupported_dbt_manifest` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L41) |
-| `unsupported_dbt_materialization` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L200) |
+| `unsupported_dbt_manifest` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L42) |
+| `unsupported_dbt_materialization` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L207) |
 | `unsupported_discovery` | [discovery/contracts.py](../src/tarel/discovery/contracts.py#L894), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1096), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1103), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1111), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1119), [discovery/contracts.py](../src/tarel/discovery/contracts.py#L1123) |
 | `unsupported_discovery_promotion` | [discovery/application.py](../src/tarel/discovery/application.py#L567) |
 | `unsupported_entity_resolution` | [entity_resolution/contracts.py](../src/tarel/entity_resolution/contracts.py#L268), [entity_resolution/contracts.py](../src/tarel/entity_resolution/contracts.py#L475), [entity_resolution/contracts.py](../src/tarel/entity_resolution/contracts.py#L656) |
