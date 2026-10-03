@@ -62,6 +62,7 @@ from tarel.reference_mapping.contracts import (
     ReferenceMappingProvenance,
     ReferenceMappingReview,
 )
+from tarel.retrieval.settings import ModelChoice, RetrievalSettings
 from tarel.runtime import TarelRuntime
 from tarel.sdk.client import Tarel
 from tarel.sdk.setup import create_demo, install_agent_skill, scaffold_connector, scaffold_provider
@@ -90,6 +91,8 @@ from tarel.topology.endpoint_contracts import LogicalEndpoint, ResolvedLogicalEn
 from tarel.workspaces.scope import ScopeSelection as WorkspaceScope
 
 __all__ = [
+    "ModelChoice",
+    "RetrievalSettings",
     "SearchFilters",
     "ContextExpansion",
     "ExpansionInput",

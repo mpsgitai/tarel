@@ -124,7 +124,7 @@ from tarel.relationships.core import (
     relationship_candidates,
     relationship_pair,
 )
-from tarel.retrieval.contracts import IndexBuildResult, RetrievalFailure
+from tarel.retrieval.contracts import EmbeddingBackend, IndexBuildResult, RetrievalFailure
 from tarel.retrieval.index import (
     FileRetrievalIndex,
     search_retrieval,
@@ -140,6 +140,14 @@ from tarel.retrieval.local import (
     model_spec,
     resolve_model_path,
     sha256_file,
+)
+from tarel.retrieval.remote import HTTPEmbedding, remote_identity
+from tarel.retrieval.rerank import candidate_limit, rerank_results
+from tarel.retrieval.settings import (
+    index_namespace,
+    load_settings,
+    selected_local_path,
+    snapshot_runtime,
 )
 from tarel.runtime import TarelRuntime
 from tarel.search import (
@@ -295,7 +303,10 @@ def _knowledge_store(runtime: TarelRuntime | None) -> FileKnowledgeStore:
 
 
 def _retrieval_index(runtime: TarelRuntime | None) -> FileRetrievalIndex:
-    return FileRetrievalIndex() if runtime is None else runtime.retrieval_index()
+    return (
+        FileRetrievalIndex(namespace=index_namespace(None))
+        if runtime is None else runtime.retrieval_index()
+    )
 
 
 def create_demo_use_case(
@@ -1110,7 +1121,12 @@ def search_graph_use_case(
     scope_object_ids: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
+    runtime = snapshot_runtime(runtime)
     validate_bm25_weight(mode, bm25_weight)
+    if not 1 <= limit <= 100:
+        raise SearchFailure("invalid_limit", "Search limit must be between 1 and 100.")
+    requested_limit = limit
+    limit = candidate_limit(runtime, limit)
     graph = _graph_store(runtime).load(name)
     selected_states = selected_annotation_states(
         annotation_states,
@@ -1146,10 +1162,13 @@ def search_graph_use_case(
         filters=filters, inventory=inventory,
     )
     results = replace(results, warnings=scope_warnings)
-    return with_family_hits(results, family_name_hits(
+    results = with_family_hits(results, family_name_hits(
         graph, results, mode=family_mode, namespace=namespace,
         object_ids=object_ids, runtime=runtime,
     ), limit=limit)
+    return rerank_results(
+        results, (graph,), runtime=runtime, limit=requested_limit, n_threads=n_threads,
+    )
 
 
 def search_workspace_use_case(
@@ -1174,9 +1193,12 @@ def search_workspace_use_case(
     filters: SearchFilters | None = None,
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
+    runtime = snapshot_runtime(runtime)
     validate_bm25_weight(mode, bm25_weight)
     if not 1 <= limit <= 100:
         raise SearchFailure("invalid_limit", "Search limit must be between 1 and 100.")
+    requested_limit = limit
+    limit = candidate_limit(runtime, limit)
     _workspace, loaded, scope = _load_workspace_scope(
         workspace_name,
         systems=systems,
@@ -1192,19 +1214,27 @@ def search_workspace_use_case(
         annotation_states,
         validated_only=validated_only,
     )
-    resolved_model = resolve_model_path(model_path) if mode in {"vector", "hybrid"} else None
+    resolved_model = (
+        _resolved_embedding_model(runtime, model_path) if mode in {"vector", "hybrid"} else None
+    )
     model_sha256 = (
         _embedding_model_sha256(runtime, resolved_model)
-        if resolved_model is not None
+        if mode in {"vector", "hybrid"}
         else None
     )
     embedder = (
         _embedding_backend(
             runtime, resolved_model, model_sha256=model_sha256, n_threads=n_threads,
         )
-        if resolved_model is not None and model_sha256 is not None
+        if model_sha256 is not None
         else None
     )
+    if embedder is not None:
+        for graph in loaded.values():
+            _retrieval_index(runtime).validate_selection(
+                graph, model_path=resolved_model, model_sha256=model_sha256,
+                annotation_states=selected_states,
+            )
     query_vector = embedder.embed_query(query) if embedder is not None else None
     results_list: list[SearchResults] = []
     inventories: list[SearchInventory] = []
@@ -1264,7 +1294,9 @@ def search_workspace_use_case(
             object_ids=filtered_ids[graph_name], runtime=runtime,
         )
     )
-    return with_family_hits(combined, families, limit=limit)
+    combined = with_family_hits(combined, families, limit=limit)
+    return rerank_results(combined, tuple(loaded.values()), runtime=runtime,
+                          limit=requested_limit, n_threads=n_threads)
 
 
 def _search_loaded_graph(
@@ -1278,7 +1310,7 @@ def _search_loaded_graph(
     model_path: Path | None = None,
     resolved_model: Path | None = None,
     model_sha256: str | None = None,
-    embedder: LlamaCppEmbedding | None = None,
+    embedder: EmbeddingBackend | None = None,
     query_vector: tuple[float, ...] | None = None,
     n_threads: int | None = None,
     bm25_weight: float | None = None,
@@ -1305,7 +1337,7 @@ def _search_loaded_graph(
             annotation_states=annotation_states,
             bm25_weight=bm25_weight,
         )
-    selected_model = resolved_model or resolve_model_path(model_path)
+    selected_model = resolved_model or _resolved_embedding_model(runtime, model_path)
     selected_model_sha256 = model_sha256 or _embedding_model_sha256(runtime, selected_model)
     selected_embedder = embedder or _embedding_backend(
         runtime, selected_model, model_sha256=selected_model_sha256, n_threads=n_threads,
@@ -1848,6 +1880,7 @@ def build_retrieval_index_use_case(
     validated_only: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> IndexBuildResult:
+    runtime = snapshot_runtime(runtime)
     if not 1 <= batch_size <= 256:
         raise RetrievalFailure("invalid_batch_size", "Batch size must be between 1 and 256.")
     graph = _graph_store(runtime).load(name)
@@ -1862,15 +1895,22 @@ def build_retrieval_index_use_case(
     except RetrievalFailure as exc:
         if exc.code != "index_not_found":
             raise
+    selected_model = _selected_retrieval_model(runtime, model_path)
     if (
-        model_path is None
+        selected_model is None
         and metadata is not None
         and Path(metadata.model_path).is_file()
     ):
         resolved_model = Path(metadata.model_path)
     else:
-        resolved_model = resolve_model_path(model_path)
-    model_sha256 = _embedding_model_sha256(runtime, resolved_model)
+        resolved_model = (
+            selected_model[0] if selected_model is not None
+            else _resolved_embedding_model(runtime, model_path)
+        )
+    model_sha256 = (
+        selected_model[1] if selected_model is not None
+        else _embedding_model_sha256(runtime, resolved_model)
+    )
     model_matches = metadata is not None and metadata.model_sha256 == model_sha256
     storage_complete = metadata is not None and store.storage_complete(
         name, metadata=metadata, annotation_states=selected_states,
@@ -1905,8 +1945,9 @@ def retrieval_index_status_use_case(
     runtime: TarelRuntime | None = None,
     annotation_states: frozenset[str] | None = None,
     validated_only: bool = False,
-    _selected_model: tuple[Path, str] | None = None,
+    _selected_model: tuple[Path | None, str] | None = None,
 ) -> dict[str, object]:
+    runtime = snapshot_runtime(runtime)
     graph = _graph_store(runtime).load(name)
     store = _retrieval_index(runtime)
     selected_states = selected_annotation_states(
@@ -1942,6 +1983,8 @@ def retrieval_index_status_use_case(
     )
     stored_model_available = Path(metadata.model_path).is_file()
     model_available = stored_model_available
+    if selected_model is not None and selected_model[0] is None:
+        model_available = True
     if selected_model is None and stored_model_available:
         stored_model = Path(metadata.model_path)
         selected_model = (stored_model, _embedding_model_sha256(runtime, stored_model))
@@ -1979,6 +2022,7 @@ def retrieval_workspace_status_use_case(
     validated_only: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> dict[str, object]:
+    runtime = snapshot_runtime(runtime)
     runtime = runtime or TarelRuntime.local(Path.cwd() / ".tarel")
     selected_model = _selected_retrieval_model(runtime, model_path)
     scope = resolve_workspace_scope_use_case(
@@ -2040,6 +2084,7 @@ def build_retrieval_workspace_indexes_use_case(
     validated_only: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> dict[str, object]:
+    runtime = snapshot_runtime(runtime)
     if not 1 <= max_graphs <= 100:
         raise RetrievalFailure("invalid_graph_limit", "Graph limit must be between 1 and 100.")
     runtime = runtime or TarelRuntime.local(Path.cwd() / ".tarel")
@@ -2085,11 +2130,18 @@ def build_retrieval_workspace_indexes_use_case(
 
 def _embedding_backend(
     runtime: TarelRuntime | None,
-    model_path: Path,
+    model_path: Path | None,
     *,
     model_sha256: str,
     n_threads: int | None,
-) -> LlamaCppEmbedding:
+) -> EmbeddingBackend:
+    if model_path is None:
+        choice = load_settings(runtime).embedding
+        if remote_identity(choice) != model_sha256:
+            raise RetrievalFailure(
+                "model_changed_during_load", "Provider profile changed during selection.",
+            )
+        return HTTPEmbedding(choice)
     if runtime is None:
         if sha256_file(model_path) != model_sha256:
             raise RetrievalFailure(
@@ -2112,17 +2164,31 @@ def _embedding_backend(
     )
 
 
-def _embedding_model_sha256(runtime: TarelRuntime | None, model_path: Path) -> str:
+def _embedding_model_sha256(runtime: TarelRuntime | None, model_path: Path | None) -> str:
+    if model_path is None:
+        return remote_identity(load_settings(runtime).embedding)
     return runtime.model_sha256(model_path) if runtime is not None else sha256_file(model_path)
+
+
+def _resolved_embedding_model(runtime: TarelRuntime | None, model_path: Path | None) -> Path | None:
+    choice = load_settings(runtime).embedding
+    path = selected_local_path(runtime, model_path)
+    return resolve_model_path(path) if choice.provider == "local" else None
 
 
 def _selected_retrieval_model(
     runtime: TarelRuntime | None,
     model_path: Path | None,
-) -> tuple[Path, str] | None:
-    if model_path is None:
+) -> tuple[Path | None, str] | None:
+    choice = load_settings(runtime).embedding
+    selected_path = selected_local_path(runtime, model_path)
+    if choice.provider != "local":
+        return None, remote_identity(choice)
+    if selected_path is None and (
+        runtime is None or runtime.retrieval_settings is None
+    ):
         return None
-    resolved = resolve_model_path(model_path)
+    resolved = resolve_model_path(selected_path)
     return resolved, _embedding_model_sha256(runtime, resolved)
 
 

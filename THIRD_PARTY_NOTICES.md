@@ -8,14 +8,17 @@ downloaded only when a user explicitly enables their capability.
 |---|---|---|---|
 | [Cytoscape.js](https://js.cytoscape.org/) | Local graph and lineage browser | `3.34.0` (bundled static asset) | MIT |
 | [pymssql](https://github.com/pymssql/pymssql) | SQL Server connector | `>=2.3,<3` | [LGPL-2.1](https://github.com/pymssql/pymssql/blob/master/LICENSE) |
-| [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) | Local CPU embeddings | `>=0.3.16,<0.4` | [MIT](https://github.com/abetlen/llama-cpp-python/blob/main/LICENSE.md) |
+| [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) | Local CPU embeddings and optional reranking | `>=0.3.16,<0.4` | [MIT](https://github.com/abetlen/llama-cpp-python/blob/main/LICENSE.md) |
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) | Native runtime used by `llama-cpp-python` | selected by `llama-cpp-python` | [MIT](https://github.com/ggml-org/llama.cpp/blob/master/LICENSE) |
 | [sqlite-vec](https://github.com/asg017/sqlite-vec) | Optional in-SQLite exact vector ranking | `0.1.9` | MIT OR Apache-2.0 |
 | [SQLGlot](https://github.com/tobymao/sqlglot) | Optional local static SQL-lineage analysis | `>=30.19,<30.20` | [MIT](https://github.com/tobymao/sqlglot/blob/main/LICENSE) |
 | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) | Recommended embedding model | upstream model | Apache-2.0 |
 | [Qwen3-Embedding-0.6B Q4_K_M GGUF](https://huggingface.co/enacimie/Qwen3-Embedding-0.6B-Q4_K_M-GGUF) | Recommended quantized artifact | revision `51fe2a65af23d8cfd3c9c1d89846cf9073f8902b` | Apache-2.0 |
+| [Qwen3-Reranker-0.6B](https://huggingface.co/Qwen/Qwen3-Reranker-0.6B) | Optional local relevance reranking | upstream model | Apache-2.0 |
+| [Qwen3-Reranker-0.6B Q4_K_M GGUF](https://huggingface.co/Mungert/Qwen3-Reranker-0.6B-GGUF) | Optional quantized reranker | revision `041387f8ed7ead711b9496b153b682c5b2f5d158` | Apache-2.0 |
 
-The GGUF artifact is downloaded only by `tarel model download`. TAREL pins its immutable revision,
+GGUF artifacts are downloaded only by `tarel model download` or an explicit browser download.
+TAREL pins each immutable revision,
 expected size, and SHA-256 checksum. Users who supply a different model are responsible for that
 model's license and usage terms.
 

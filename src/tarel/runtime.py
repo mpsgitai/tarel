@@ -26,6 +26,7 @@ from tarel.workspaces.store import FileWorkspaceStore
 if TYPE_CHECKING:
     from tarel.object_families.store import FileObjectFamilyStore
     from tarel.reference_mapping.store import FileReferenceMappingStore
+    from tarel.retrieval.settings import RetrievalSettings
     from tarel.topology.store import FileLogicalTopologyStore
 
 
@@ -34,10 +35,14 @@ class TarelRuntime:
     """Filesystem-backed TAREL state rooted at one explicit ``.tarel`` directory."""
 
     root: Path
+    retrieval_settings: RetrievalSettings | None = field(default=None, repr=False)
     _embedding_backends: dict[tuple[str, int | None, str], Any] = field(
         default_factory=dict, compare=False, repr=False,
     )
     _model_hashes: dict[tuple[str, int, int, int, int, int], str] = field(
+        default_factory=dict, compare=False, repr=False,
+    )
+    _rerank_backends: dict[tuple[str, str, int | None], Any] = field(
         default_factory=dict, compare=False, repr=False,
     )
     _embedding_cache_lock: Any = field(
@@ -76,7 +81,9 @@ class TarelRuntime:
         return FileWorkspaceStore(self.root / "workspaces")
 
     def retrieval_index(self) -> FileRetrievalIndex:
-        return FileRetrievalIndex(self.root / "indexes")
+        from tarel.retrieval.settings import index_namespace
+
+        return FileRetrievalIndex(self.root / "indexes", namespace=index_namespace(self))
 
     def embedding_backend(
         self,

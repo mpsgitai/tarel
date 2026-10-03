@@ -18,6 +18,7 @@ const queryTools = {
   indexStatus: null,
   indexStatusRequest: 0,
   indexBuilding: false,
+  requireSubmit: false,
 };
 
 async function loadIndexStatus() {
@@ -91,18 +92,22 @@ function scheduleProjectSearch() {
   queryTools.searchRequest += 1;
   queryTools.searchResult = null;
   queryTools.searchError = null;
-  queryTools.searchLoading = projectSearchActive();
+  queryTools.searchLoading = projectSearchActive() && !queryTools.requireSubmit;
   const active = projectSearchActive();
   $("#project-search-status").hidden = !active;
   $('[data-kind="all"]').parentElement.hidden = active;
   if (!active) { renderObjectList(); return; }
   renderProjectSearch();
+  if (queryTools.requireSubmit) return;
   queryTools.searchTimer = setTimeout(runProjectSearch, 300);
 }
 
 async function runProjectSearch() {
   const query = $("#object-search").value.trim();
   if (!query) return;
+  queryTools.searchLoading = true;
+  queryTools.searchError = null;
+  renderProjectSearch();
   const request = ++queryTools.searchRequest;
   try {
     const type = $("#search-object-type").value;
@@ -144,10 +149,15 @@ function renderProjectSearch() {
   if (queryTools.searchError) {
     status.textContent = "Project search failed. Display filters were not used.";
     $("#object-list").innerHTML = `<div class="empty-state compact"><p>${escapeHtml(queryTools.searchError)}</p><button id="retry-project-search" class="quiet-button">Retry search</button></div>`;
-    $("#retry-project-search").addEventListener("click", scheduleProjectSearch);
+    $("#retry-project-search").addEventListener("click", runProjectSearch);
     return;
   }
   const hits = queryTools.searchResult?.results.hits || [];
+  if (queryTools.requireSubmit && !queryTools.searchResult) {
+    status.textContent = "Press Enter or Search to run the selected models.";
+    $("#object-list").innerHTML = '<div class="empty-state compact"><p>Search is started explicitly for cloud models and rerankers.</p></div>';
+    return;
+  }
   const inventory = queryTools.searchResult?.results.inventory;
   const mode = queryTools.searchResult?.results.mode || "metadata";
   status.textContent = `${hits.length} result${hits.length === 1 ? "" : "s"} · ${mode}${inventory ? ` · ${inventory.objects_after_filters}/${inventory.objects_in_scope} objects after filters` : ""}`;
@@ -468,6 +478,7 @@ function downloadContextPacket() {
 }
 
 function initializeQueryTools() {
+  if (typeof initializeRetrievalModels === "function") initializeRetrievalModels();
   $("#open-context").addEventListener("click", openContextDialog);
   $("#close-context").addEventListener("click", () => $("#context-dialog").close());
   $("#context-dialog").addEventListener("close", () => {

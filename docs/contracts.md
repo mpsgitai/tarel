@@ -835,7 +835,8 @@ TAREL uses retrieval only to choose graph anchors. The graph compiler remains re
 tables, fields, reviewed relationships, expansion paths, and the final agent context.
 
 ```text
-question -> BM25 + local vectors -> reciprocal-rank fusion
+question -> BM25 + selected embeddings -> reciprocal-rank fusion
+         -> optional relevance reranking
          -> object anchors -> reviewed graph expansion -> TAREL context
 ```
 
@@ -851,6 +852,98 @@ Retrieval returns candidates, including nearby matches when the requested concep
 A high rank does not establish a business definition, a valid join, or the presence of an answer.
 Inspect descriptions, grain, fields, and relationship evidence before compiling the selected
 context. Narrowing the working scope helps distinguish equally named objects across systems.
+
+### Retrieval model selection
+
+Embedding and reranking have independent provider/model choices. The default remains local
+Qwen3-Embedding-0.6B with reranking disabled. Selection alone does not download weights, call a
+model, or build an index. Search mode (`bm25`, `vector`, `hybrid`) and fusion weight are still
+explicit search options; BM25 does not call the selected embedding provider.
+
+```bash
+tarel retrieval settings --format json
+tarel retrieval models --task embedding
+tarel retrieval models --task reranker
+tarel retrieval models --provider openrouter --task embedding
+tarel retrieval configure \
+  --embedding-provider openrouter --embedding-model perplexity/pplx-embed-v1-4b \
+  --reranker-provider openrouter --reranker-model typesafe/jev-1.13 --rerank-depth 10
+tarel index build adventureworks_dw
+tarel search adventureworks_dw "internet revenue" --mode hybrid
+```
+
+HTTP choices reuse existing `tarel provider` profiles and their private credentials, including
+`OPENROUTER_API_KEY`. The profile's chat model does not change the chosen retrieval models.
+OpenRouter Qwen3 embedding IDs use the same query-only retrieval instruction as local Qwen;
+other model IDs receive the query unchanged. Document metadata is never prefixed.
+The OpenRouter embedding catalog is fetched only when requested. Jev is listed separately because
+it uses the [Decisions API](https://openrouter.ai/typesafe/jev-1.13), rather than the chat catalog:
+each bounded candidate receives a typed relevance probability, without generated answers. Other
+HTTP rerankers must provide `/rerank` with indexed `relevance_score` results; embeddings require
+`/embeddings` with indexed float vectors. Model IDs can be entered explicitly. Generic HTTP
+`/models` catalogs do not guarantee that every entry supports the requested task.
+
+Local reranking uses Qwen3-Reranker-0.6B on the CPU through the same optional `local-rag` extra.
+It scores yes/no logits without generating text. Its immutable GGUF revision, byte size and
+checksum are pinned in the existing model registry; download it explicitly:
+
+```bash
+tarel model download --name qwen3-reranker-0.6b-q4-k-m
+tarel retrieval configure --embedding-provider local \
+  --reranker-provider local --reranker-model qwen3-reranker-0.6b-q4-k-m
+tarel retrieval configure --reranker-provider none
+```
+
+The SDK shares the same choices and index paths:
+
+```python
+from tarel.sdk import ModelChoice, RetrievalSettings, Tarel
+
+sdk = Tarel(".tarel")
+sdk.retrieval.configure(RetrievalSettings(
+    embedding=ModelChoice("openrouter", "perplexity/pplx-embed-v1-4b"),
+    reranker=ModelChoice("openrouter", "typesafe/jev-1.13"),
+    rerank_depth=10,
+))
+sdk.index.build("adventureworks_dw")
+hits = sdk.search.graph("adventureworks_dw", "internet revenue", mode="hybrid")
+```
+
+`Tarel(root, retrieval=settings)` instead pins an independent client override without saving
+project settings. Its `retrieval.configure()` rejects persistence while that override is active;
+use a regular client to change project defaults. This makes local/cloud comparisons possible
+without changing each other's selections. A local `ModelChoice` may additionally name a
+`model_path`; a cloud choice cannot use a local GGUF path or a search/build `--model` override.
+
+The browser's collapsed **Search models** panel exposes the same independent selections,
+explicit catalogs and local downloads. **Apply** saves the model choices, sets the current
+browser search mode and refreshes the selected index status. Changing the mode in this panel
+affects the current browser session; CLI/SDK mode arguments remain independent. With cloud
+embeddings or any reranker selected, press **Search** or Enter: typing does not initiate model
+calls. **Update** builds only the currently selected embedding index.
+
+Project defaults are stored atomically in `<state>/retrieval.json`, without API keys. The
+default local choice continues using its existing index path. Other embedding choices use
+`<state>/indexes/<graph>/models/<selection-hash>/index{policy}.sqlite`, keyed by provider, model,
+local path and remote endpoint. Annotation policies keep their existing separate files. Cloud
+vectors are returned by the provider and stored locally; no graph/vector upload to a hosted
+vector database is involved. Switching back reuses an existing matching index. Changing only
+the reranker or its depth never rebuilds embeddings.
+
+Incremental updates, stale-projection checks, atomic replacement and interrupted-build resume
+apply to every model choice. A workspace search embeds its query once, then reranks one combined,
+scoped candidate list. Reranking processes at most the configured depth (1–100); it preserves the
+remaining candidate order and never expands family hits or bypasses annotation/scope policies.
+Candidate documents are the permitted metadata projection, capped at 4,000 characters per
+object; local documents also fit within the reranker's 4,096-token context. Scores express model
+relevance, not evidence approval or answer correctness.
+
+Cloud index builds transmit permitted metadata documents; cloud searches transmit the query and,
+if enabled, the bounded rerank candidates. Requests have explicit time/size limits, do not follow
+redirects with credentials, and fail visibly without silently falling back or retrying paid
+calls. Missing or stale indexes fail before query embedding. HTTP identity records the profile,
+endpoint and model ID, not a provider's mutable internal weight revision; use versioned model IDs
+or explicitly rebuild if the provider changes a model behind the same ID.
 
 ### Model and runtime
 
@@ -869,9 +962,9 @@ not a safe number of document sequences. This avoids multi-sequence decode failu
 changing the index format. A long-lived SDK or browser runtime keeps one loaded model per resolved
 path, thread setting, and current model SHA-256. Replacing a GGUF at the same path invalidates that
 entry. Creation and calls on the shared llama.cpp instance are serialized because the native
-embedding context is mutable; separate CLI processes remain independent. No local generation
-model, reranker, API server, LlamaIndex, vector database, Torch, or Sentence Transformers layer is
-involved.
+embedding context is mutable; separate CLI processes remain independent. The default pipeline
+does not use a reranker. No local generation server, LlamaIndex, vector database, Torch, or
+Sentence Transformers layer is involved.
 
 Install `tarel[local-rag]` for local embeddings, or `tarel[local-rag,vector]` to also enable native
 SQLite ranking. The `vector` extra alone does not provide an embedding model or llama.cpp runtime.
