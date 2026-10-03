@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -232,9 +233,11 @@ from tarel.reference_mapping.contracts import (
 )
 from tarel.retrieval.contracts import IndexBuildResult
 from tarel.retrieval.local import DEFAULT_MODEL_NAME, ModelDownloadResult
+from tarel.retrieval.settings import RetrievalSettings
 from tarel.runtime import TarelRuntime
 from tarel.sdk.connectors import ConnectorAPI
 from tarel.sdk.providers import ProviderAPI
+from tarel.sdk.retrieval import RetrievalAPI
 from tarel.search import SearchFilters, SearchResults
 from tarel.semantic_concepts.application import (
     SemanticConceptMatch,
@@ -310,6 +313,7 @@ class Tarel:
         "provider",
         "reference_mapping",
         "relationship",
+        "retrieval",
         "runtime",
         "search",
         "semantic",
@@ -320,8 +324,10 @@ class Tarel:
         "workspace",
     )
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, retrieval: RetrievalSettings | None = None) -> None:
         self.runtime = TarelRuntime.local(root)
+        if retrieval is not None:
+            self.runtime = replace(self.runtime, retrieval_settings=retrieval)
         self.graph = GraphAPI(self.runtime)
         self.workspace = WorkspaceAPI(self.runtime)
         self.search = SearchAPI(self.runtime)
@@ -345,6 +351,7 @@ class Tarel:
         self.model = ModelAPI(self.runtime)
         self.provider = ProviderAPI()
         self.index = IndexAPI(self.runtime)
+        self.retrieval = RetrievalAPI(self.runtime)
         self.knowledge = KnowledgeAPI(self.runtime)
         self.view = ViewAPI(self.runtime)
         self.ui = UIAPI(self.runtime)

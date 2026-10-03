@@ -24,6 +24,10 @@ _QUERY_INSTRUCTION = (
 )
 
 
+def qwen_embedding_query(text: str) -> str:
+    return f"{_QUERY_INSTRUCTION}{text.strip()}"
+
+
 @dataclass(frozen=True, slots=True)
 class ModelSpec:
     name: str
@@ -32,6 +36,7 @@ class ModelSpec:
     sha256: str
     size: int
     source: str
+    task: str = "embedding"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +60,16 @@ MODEL_SPECS = {
         size=396_474_560,
         source="https://huggingface.co/enacimie/Qwen3-Embedding-0.6B-Q4_K_M-GGUF",
     ),
+    "qwen3-reranker-0.6b-q4-k-m": ModelSpec(
+        name="qwen3-reranker-0.6b-q4-k-m",
+        filename="Qwen3-Reranker-0.6B-q4_k_m.gguf",
+        url=("https://huggingface.co/Mungert/Qwen3-Reranker-0.6B-GGUF/resolve/"
+             "041387f8ed7ead711b9496b153b682c5b2f5d158/Qwen3-Reranker-0.6B-q4_k_m.gguf"),
+        sha256="66867f47323e058f9dbfe24a13268859a84d9e9a8bb89ad0789c7c52131267e2",
+        size=394_705_248,
+        source="https://huggingface.co/Mungert/Qwen3-Reranker-0.6B-GGUF",
+        task="reranker",
+    ),
 }
 
 
@@ -76,7 +91,7 @@ def model_spec(name: str) -> ModelSpec:
     try:
         return MODEL_SPECS[name]
     except KeyError as exc:
-        raise RetrievalFailure("unknown_model", f"Unknown local embedding model: {name}") from exc
+        raise RetrievalFailure("unknown_model", f"Unknown local retrieval model: {name}") from exc
 
 
 def resolve_model_path(path: Path | None = None) -> Path:
@@ -242,7 +257,7 @@ class LlamaCppEmbedding:
     def embed_query(self, text: str) -> tuple[float, ...]:
         with self._embedding_lock:
             embedded = self._model.embed(
-                f"{_QUERY_INSTRUCTION}{text.strip()}",
+                qwen_embedding_query(text),
                 normalize=True,
                 truncate=True,
             )

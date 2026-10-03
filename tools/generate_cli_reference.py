@@ -113,12 +113,11 @@ GROUPS = {
         "tarel provider list",
     ),
     "model": (
-        "Local embedding model",
-        "Manage the optional local embedding model used by vector and hybrid retrieval.",
+        "Local retrieval models",
+        "Manage optional local embedding and reranker model artifacts.",
         (
             "Download fetches a model artifact; status reports availability. "
-            "This is an embedding model, not a local annotation/generation mo"
-            "del."
+            "Installation does not download weights. Model selection is separate."
         ),
         "local-retrieval.md",
         "tarel model status --format json",
@@ -127,13 +126,22 @@ GROUPS = {
         "Retrieval indexes",
         "Prepare and inspect rebuildable local retrieval indexes for a graph or workspace.",
         (
-            "Build updates only changed retrieval documents and may perform local CPU embedding "
-            "computation. A workspace build processes a bounded graph batch. Resume only reuses "
+            "Build updates only changed retrieval documents using the selected local or HTTP "
+            "embedding model. A workspace build processes a bounded graph batch. Resume reuses "
             "a compatible checkpoint; model changes require full re-embedding, including a "
             "replacement at the recorded path. Check ready and remaining_graphs before searching."
         ),
         "local-retrieval.md",
         "tarel index status --workspace enterprise",
+    ),
+    "retrieval": (
+        "Retrieval model selection",
+        "Select embedding and reranker models independently across local and HTTP providers.",
+        "Configure saves credential-free project choices without model calls or downloads. "
+        "Models lists local artifacts or explicitly fetches a provider catalog. "
+        "Settings reports the selection; reranking is off by default.",
+        "local-retrieval.md",
+        "tarel retrieval settings --format json",
     ),
     "graph": (
         "Source graphs",
@@ -688,7 +696,8 @@ RESULTS = {
         "red test result, or scaffold location. Configuration is private "
         "rather than graph metadata."
     ),
-    "model": "Download/status information for the embedding model artifact.",
+    "model": "Download/status information for a local retrieval model artifact.",
+    "retrieval": "Credential-free embedding/reranker selection or a task-specific model catalog.",
     "index": "Index build/status information, including checkpoint compatibility when applicable.",
     "graph": (
         "A graph summary for build/show, change information for refresh, "

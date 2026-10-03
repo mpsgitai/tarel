@@ -93,6 +93,12 @@ bounded group of workspace graphs through the CLI, SDK, or browser. The optional
 extra runs vector ranking inside the existing SQLite index; see
 [local retrieval and index maintenance](docs/contracts.md#local-retrieval).
 
+Select embedding and reranker models independently through `tarel retrieval`, `sdk.retrieval`,
+or the browser's **Search models** panel. Local CPU retrieval remains the default, with reranking
+off. Optional HTTP profiles support cloud embeddings and relevance reranking, including OpenRouter
+embeddings and Jev Decisions. Each selected embedding model keeps a separate local SQLite index;
+see [retrieval model selection](docs/contracts.md#retrieval-model-selection).
+
 In the CLI, SDK, and browser you can set a hard working scope, filter physical candidates before
 ranking, inspect why each result matched, turn exact results into a stable context packet, and load
 bounded metadata deltas later without replacing the cacheable base.
