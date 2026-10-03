@@ -58,6 +58,11 @@ SQL definitions can be analyzed by a configured provider or, after installing th
 definitions. The base installation does not include or import SQLGlot. See
 [static lineage analysis](docs/static-lineage.md).
 
+Import declared dbt manifest dependencies without a provider or SQL parsing using
+`tarel lineage import-dbt NAME --manifest target/manifest.json`. The matching SDK method
+uses the same build/refresh path. See [dbt lineage import](docs/dbt-lineage.md) for supported
+resources, ephemeral models, evidence states, and explicit catalog mappings.
+
 ![TAREL switching from schema structure to data and process lineage](docs/assets/space-to-lineage.gif)
 
 *The same information system, organized by schema or traced through data flow.

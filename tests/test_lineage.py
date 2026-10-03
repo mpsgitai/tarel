@@ -29,6 +29,27 @@ _FIXTURE = Path(__file__).parent / "fixtures/lineage/adventureworks/sales_refres
 
 
 class LineageTests(TestCase):
+    def test_changed_definition_retains_declared_claim_review_history(self) -> None:
+        source = load_lineage_input(_FIXTURE)
+        declaration = SourceObservation(
+            definition_external_id=source.definitions[0].external_id,
+            operation="read", target="Demo.raw.Sales", source_reference="manifest#model.sales",
+            reason="Declared dependency", line_start=1, line_end=1,
+        )
+        source = replace(source, observations=(declaration,))
+        document = build_lineage("declared-review", source)
+        document, reviewed = decide_lineage_item(
+            document, document.claims[0].id, decision="validate", reason="Human checked.",
+        )
+        changed = replace(source, definitions=(
+            replace(source.definitions[0], content=source.definitions[0].content + "\n-- changed"),
+            *source.definitions[1:],
+        ))
+        refreshed, report = refresh_lineage(document, changed)
+        self.assertEqual(refreshed.claims[0].state, "review_required")
+        self.assertEqual(refreshed.claims[0].reviews, reviewed.reviews)
+        self.assertEqual(report.stale_items[0].previous_state, "validated")
+
     def test_input_contract_is_strict_and_revision_is_deterministic(self) -> None:
         first = load_lineage_input(_FIXTURE)
         second = load_lineage_input(_FIXTURE)

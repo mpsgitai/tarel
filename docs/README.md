@@ -8,6 +8,7 @@ Start with the [Retail DWH demo](retail-demo.md) for a local, credential-free wa
 | [Architecture and extensions](architecture.md) | Understand the graph, adapter boundaries, and reviewed self-modification |
 | [Portable `.tarel` packages](package-format.md) | Share verified metadata snapshots without indexes, credentials, or source data |
 | [Static lineage analysis](static-lineage.md) | Use coding-agent, provider, or optional local SQLGlot analysis |
+| [Declared dbt lineage](dbt-lineage.md) | Import manifest dependencies through the shared CLI/SDK build and refresh path |
 | [Demo warehouse](retail-demo.md) | Build and inspect a reproducible source |
 | [Three-day workshop](workshop.md) | Apply TAREL to an enterprise landscape with a harness |
 | [Experimental architecture browser](architecture-ui.md) | Explore layers and collections; edit a separate local architecture map |

@@ -84,6 +84,11 @@ jobs:
             "annual net sales by channel" \
             --source retail-local \
             --format json > grounding.json
+          "$RUNNER_TEMP/tarel-wheel/bin/tarel" lineage import-dbt shop \
+            --manifest "$GITHUB_WORKSPACE/tests/fixtures/lineage/dbt/manifest-v12.json" \
+            --format json > dbt.json
+          "$RUNNER_TEMP/tarel-wheel/bin/tarel" lineage upstream Warehouse.gold.sales_by_day \
+            --lineage shop --max-hops 30 --format json > dbt-trace.json
           "$RUNNER_TEMP/tarel-wheel/bin/python" -c \
             'import json; assert json.load(open("probe.json"))["read_only"] is True'
           "$RUNNER_TEMP/tarel-wheel/bin/python" -c \
@@ -92,6 +97,10 @@ jobs:
             'import json; assert json.load(open("check.json"))["config_status"] == "resolved"'
           "$RUNNER_TEMP/tarel-wheel/bin/python" -c \
             'import json; assert json.load(open("grounding.json"))["stable"]["sources"][0]["source"] == "retail-local"'
+          "$RUNNER_TEMP/tarel-wheel/bin/python" -c \
+            'import json; assert len(json.load(open("dbt.json"))["lineage"]["definitions"]) == 6'
+          "$RUNNER_TEMP/tarel-wheel/bin/python" -c \
+            'import json; trace = json.load(open("dbt-trace.json")); assert not trace["truncated"]; assert [o["reference"] for o in trace["origins"]] == ["Warehouse.raw.orders"]'
 
   secrets:
     name: Secret scan

@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+    "project_name": "shop",
+    "adapter_type": "postgres"
+  },
+  "nodes": {
+    "model.shop.stg_orders": {
+      "unique_id": "model.shop.stg_orders", "resource_type": "model", "name": "stg_orders",
+      "database": "Warehouse", "schema": "silver", "alias": "orders_clean",
+      "relation_name": "\"Warehouse\".\"silver\".\"orders_clean\"",
+      "config": {"materialized": "view"}, "language": "sql",
+      "compiled_code": "select order_id, amount from \"Warehouse\".raw.orders",
+      "depends_on": {"nodes": ["source.shop.raw.orders"], "macros": []}
+    },
+    "model.shop.filtered": {
+      "unique_id": "model.shop.filtered", "resource_type": "model", "name": "filtered",
+      "database": "Warehouse", "schema": "silver", "alias": "filtered", "relation_name": null,
+      "config": {"materialized": "ephemeral"}, "language": "sql",
+      "raw_code": "select * from {{ ref('stg_orders') }} where amount > 0",
+      "depends_on": {"nodes": ["model.shop.stg_orders"], "macros": []}
+    },
+    "model.shop.daily_sales": {
+      "unique_id": "model.shop.daily_sales", "resource_type": "model", "name": "daily_sales",
+      "database": "Warehouse", "schema": "gold", "alias": "sales_by_day",
+      "relation_name": "\"Warehouse\".\"gold\".\"sales_by_day\"",
+      "config": {"materialized": "table"}, "language": "sql",
+      "depends_on": {"nodes": ["model.shop.filtered"], "macros": []}
+    },
+    "model.shop.sales_history": {
+      "unique_id": "model.shop.sales_history", "resource_type": "model", "name": "sales_history",
+      "database": "Warehouse", "schema": "gold", "alias": "sales_history",
+      "relation_name": "\"Warehouse\".\"gold\".\"sales_history\"",
+      "config": {"materialized": "incremental"}, "language": "sql",
+      "depends_on": {"nodes": ["model.shop.daily_sales", "seed.shop.country_codes"], "macros": []}
+    },
+    "seed.shop.country_codes": {
+      "unique_id": "seed.shop.country_codes", "resource_type": "seed", "name": "country_codes",
+      "database": "Warehouse", "schema": "raw", "alias": "country_codes",
+      "relation_name": "\"Warehouse\".\"raw\".\"country_codes\"",
+      "config": {"materialized": "seed"}, "depends_on": {"macros": []}
+    },
+    "snapshot.shop.orders_history": {
+      "unique_id": "snapshot.shop.orders_history", "resource_type": "snapshot", "name": "orders_history",
+      "database": "Warehouse", "schema": "history", "alias": "orders_history",
+      "relation_name": "\"Warehouse\".\"history\".\"orders_history\"",
+      "config": {"materialized": "snapshot"}, "language": "sql",
+      "depends_on": {"nodes": ["model.shop.stg_orders"], "macros": []}
+    },
+    "test.shop.unique_orders": {
+      "unique_id": "test.shop.unique_orders", "resource_type": "test", "name": "unique_orders",
+      "config": {"store_failures": true}, "depends_on": {"nodes": ["model.shop.stg_orders"]}
+    }
+  },
+  "sources": {
+    "source.shop.raw.orders": {
+      "unique_id": "source.shop.raw.orders", "resource_type": "source", "name": "orders",
+      "database": "Warehouse", "schema": "raw", "identifier": "orders",
+      "relation_name": "\"Warehouse\".\"raw\".\"orders\""
+    }
+  },
+  "exposures": {
+    "exposure.shop.report": {"name": "report", "depends_on": {"nodes": ["model.shop.daily_sales"]}}
+  }
+}
