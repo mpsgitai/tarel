@@ -130,6 +130,29 @@ class AnnotationReviewTests(TestCase):
         restored = GraphDocument.from_dict(validated.to_dict())
         self.assertEqual(restored.to_dict(), validated.to_dict())
 
+    def test_include_fields_decides_proposals_and_leaves_fields_without_one(self) -> None:
+        graph = _review_graph()
+        field = next(node for node in graph.nodes if node.type == "field")
+        without_proposal = replace(
+            field, id=f"{field.id}-c2", label="warehouse.T1.C2", annotation=None
+        )
+        graph = replace(graph, nodes=(*graph.nodes, without_proposal))
+
+        decided, records = decide_annotation_scope(
+            graph,
+            "warehouse.T1",
+            state="validated",
+            reason="Table and proposed field meanings are approved.",
+            include_fields=True,
+        )
+
+        by_id = {node.id: node for node in decided.nodes}
+        self.assertEqual([record.node.id for record in records][1:], [field.id])
+        self.assertEqual(by_id[field.id].annotation.state, "validated")
+        self.assertIsNone(by_id[without_proposal.id].annotation)
+        table = next(node for node in decided.nodes if node.type == "table")
+        self.assertEqual(table.annotation.state, "validated")
+
     def test_rejected_semantics_are_hidden_but_the_technical_schema_remains(self) -> None:
         graph, _record = decide_annotation(
             _review_graph(),

@@ -360,7 +360,9 @@ def _browser_payload(
     if family_mode is not None:
         payload["object_families"] = {
             "mode": family_mode,
-            "scope_revision": family_view_scope_revision(graphs, focus_documents, scope),
+            "scope_revision": family_view_scope_revision_from_revisions(
+                revisions, focus_documents, scope,
+            ),
             "collapsed_member_count": len(collapsed),
             "stale_graphs": sorted(set(object_family_stale_graphs) & graph_names),
             "notice": (

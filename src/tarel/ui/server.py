@@ -6,7 +6,7 @@ import json
 import secrets
 import threading
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,7 +16,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from tarel.annotations.contracts import AnnotationFailure
-from tarel.annotations.review import resolve_annotation_target
 from tarel.application import (
     build_retrieval_index_use_case,
     build_retrieval_workspace_indexes_use_case,
@@ -32,6 +31,7 @@ from tarel.application import (
     list_workspaces_use_case,
     load_focus_use_case,
     load_graph_use_case,
+    load_workspace_scope_use_case,
     load_workspace_use_case,
     resolve_workspace_scope_use_case,
     retrieval_index_status_use_case,
@@ -99,6 +99,7 @@ from tarel.ui.presentation import (
     browser_lineages,
     browser_workspace,
     family_view_scope_revision,
+    family_view_scope_revision_from_revisions,
     focus_physical_objects,
     workspace_revision,
 )
@@ -227,18 +228,28 @@ class TarelUIBackend:
                     record["available_context_document_ids"] = []
                 return payload
             fallback_reason = attempted.fallback_reason or "full_projection_required"
-        selected_focuses = self._selected_focus_documents(names) if names else ()
-        documents = tuple(
-            load_lineage_use_case(name, **self._runtime_options()) for name in self._lineages
-        )
         workspace = None
         scope = None
         if self.config.workspace:
-            workspace = load_workspace_use_case(self.config.workspace, **self._runtime_options())
-            scope = self._scope()
-            graphs = tuple(
-                load_graph_use_case(name, **self._runtime_options()) for name in scope.graph_names
+            workspace, loaded_graphs, scope = load_workspace_scope_use_case(
+                self.config.workspace, systems=self.config.systems,
+                graphs=self.config.graphs, areas=self.config.areas,
+                schemas=self.config.schemas, zones=self.config.zones,
+                **self._runtime_options(),
             )
+            graphs = tuple(loaded_graphs[name] for name in scope.graph_names)
+        else:
+            graph = load_graph_use_case(self._single_graph(), **self._runtime_options())
+            loaded_graphs = {graph.name: graph}
+            graphs = (graph,)
+        focus_documents = self._focus_documents(graph_names=tuple(item.name for item in graphs))
+        selected_focuses = self._selected_focus_documents(
+            names, documents=focus_documents, loaded_graphs=loaded_graphs,
+        ) if names else ()
+        documents = tuple(
+            load_lineage_use_case(name, **self._runtime_options()) for name in self._lineages
+        )
+        if self.config.workspace:
             families = (
                 project_families_for_graphs_use_case(
                     graphs, mode=family_mode, **self._runtime_options(),
@@ -297,8 +308,6 @@ class TarelUIBackend:
                 focus_documents=selected_focuses if family_mode is not None else (),
             )
         else:
-            graph = load_graph_use_case(self._single_graph(), **self._runtime_options())
-            graphs = (graph,)
             families = (
                 project_families_for_graphs_use_case(
                     graphs, mode=family_mode, **self._runtime_options(),
@@ -345,10 +354,12 @@ class TarelUIBackend:
                 object_family_stale_graphs=families.stale_graphs if families else (),
                 focus_documents=selected_focuses if family_mode is not None else (),
             )
-        focus_documents = self._focus_documents()
         payload["focuses"] = browser_focus_catalog(
             focus_documents,
-            stale_reasons=self._focus_stale_reasons(focus_documents),
+            stale_reasons=self._focus_stale_reasons(
+                focus_documents, loaded_graphs=loaded_graphs,
+                loaded_lineages={item.name: item for item in documents},
+            ),
         )
         if "focus_selection" not in payload:
             payload["focus_selection"] = (
@@ -365,7 +376,9 @@ class TarelUIBackend:
             payload["review_summary"] = _review_summary(graphs, allowed)
         payload.update(
             optional_metadata={"state": "not_loaded", "kinds": list(_OPTIONAL_KINDS)},
-            scope_revision=family_view_scope_revision(graphs, selected_focuses, scope),
+            scope_revision=family_view_scope_revision_from_revisions(
+                payload["revisions"], selected_focuses, scope,
+            ),
             derived_enabled=derived,
         )
         # Evidence documents belong to the explicit Review workflow, not object navigation.
@@ -439,15 +452,15 @@ class TarelUIBackend:
             for item in knowledge_documents
         ]
         graph_by_name = {item.name: item for item in graphs}
+        # Review rows already carry authoritative physical IDs. Index each graph
+        # once instead of resolving every label through all objects and fields.
+        nodes_by_graph = {item.name: item.node_by_id() for item in graphs}
         for record in payload["review"]:
             if not isinstance(record, dict):
                 continue
             try:
                 record_graph = graph_by_name[str(record["graph"])]
-                node, _reference = resolve_annotation_target(
-                    record_graph,
-                    str(record["label"]),
-                )
+                node = nodes_by_graph[record_graph.name][str(record["object_id"])]
                 context = resolve_knowledge(
                     knowledge_documents,
                     record_graph,
@@ -638,7 +651,6 @@ class TarelUIBackend:
                 allowed_ids = focused_ids if allowed_ids is None else allowed_ids & focused_ids
             if scope is None and not focuses:
                 from tarel.object_families.application import _graphs
-                from tarel.ui.presentation import family_view_scope_revision_from_revisions
 
                 header = _graphs(self.runtime).header(self._single_graph())
                 revision = family_view_scope_revision_from_revisions({header.name: header.revision})
@@ -795,13 +807,15 @@ class TarelUIBackend:
             return self._save_zone(payload)
         raise UIFailure("route_not_found", "Unknown UI API route.", status=404)
 
-    def _focus_documents(self) -> tuple[FocusDocument, ...]:
-        graph_names = set(self._graph_names())
+    def _focus_documents(
+        self, *, graph_names: tuple[str, ...] | None = None,
+    ) -> tuple[FocusDocument, ...]:
+        allowed_graphs = set(self._graph_names() if graph_names is None else graph_names)
         documents: list[FocusDocument] = []
         for name in list_focuses_use_case(**self._runtime_options()):
             document = load_focus_use_case(name, **self._runtime_options())
             required = {item.name for item in document.sources if item.kind == "graph"}
-            if required and required <= graph_names:
+            if required and required <= allowed_graphs:
                 documents.append(document)
         return tuple(documents)
 
@@ -816,10 +830,15 @@ class TarelUIBackend:
             "scope_revision": family_view_scope_revision(graphs, focuses, scope),
         }
 
-    def _selected_focus_documents(self, names: tuple[str, ...]) -> tuple[FocusDocument, ...]:
+    def _selected_focus_documents(
+        self, names: tuple[str, ...], *, documents: tuple[FocusDocument, ...] | None = None,
+        loaded_graphs: Mapping[str, GraphDocument] | None = None,
+    ) -> tuple[FocusDocument, ...]:
         if len(names) != len(set(names)):
             raise UIFailure("duplicate_focus", "Select every focus at most once.")
-        allowed = {item.name: item for item in self._focus_documents()}
+        allowed = {item.name: item for item in (
+            self._focus_documents() if documents is None else documents
+        )}
         outside = sorted(set(names) - set(allowed))
         if outside:
             raise UIFailure(
@@ -827,7 +846,7 @@ class TarelUIBackend:
                 f"Focus is outside the UI scope: {', '.join(outside)}",
             )
         documents = tuple(allowed[name] for name in names)
-        stale = self._focus_stale_reasons(documents)
+        stale = self._focus_stale_reasons(documents, loaded_graphs=loaded_graphs)
         if stale:
             name = sorted(stale)[0]
             raise FocusFailure("focus_stale", stale[name])
@@ -836,6 +855,9 @@ class TarelUIBackend:
     def _focus_stale_reasons(
         self,
         documents: tuple[FocusDocument, ...],
+        *,
+        loaded_graphs: Mapping[str, GraphDocument] | None = None,
+        loaded_lineages: Mapping[str, LineageDocument] | None = None,
     ) -> dict[str, str]:
         graph_names = sorted(
             {
@@ -858,12 +880,19 @@ class TarelUIBackend:
         missing: dict[tuple[str, str], str] = {}
         for name in graph_names:
             try:
-                graphs[name] = load_graph_use_case(name, **self._runtime_options())
+                graphs[name] = (
+                    loaded_graphs[name] if loaded_graphs is not None and name in loaded_graphs
+                    else load_graph_use_case(name, **self._runtime_options())
+                )
             except GraphFailure:
                 missing[("graph", name)] = f"Missing graph source: {name}"
         for name in lineage_names:
             try:
-                lineages[name] = load_lineage_use_case(name, **self._runtime_options())
+                lineages[name] = (
+                    loaded_lineages[name]
+                    if loaded_lineages is not None and name in loaded_lineages
+                    else load_lineage_use_case(name, **self._runtime_options())
+                )
             except LineageFailure:
                 missing[("lineage", name)] = f"Missing lineage source: {name}"
         stale: dict[str, str] = {}
@@ -1180,6 +1209,7 @@ class _Handler(BaseHTTPRequestHandler):
             "optional_details.js",
             "estate_navigation.js",
             "architecture.js", "architecture_actions.js", "architecture.css",
+            "atlas.css", "atlas.js",
         }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return

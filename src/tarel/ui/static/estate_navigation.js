@@ -45,6 +45,25 @@ function bindCanvasZoom() {
   };
   state.cy.on("zoom", update);
   update();
+  bindFastWheelZoom($("#graph-canvas"));
+  window.TarelAtlas?.attach(state.cy);
+}
+
+// Ctrl/Cmd + wheel (and trackpad pinch) zooms much faster than the plain wheel, towards the
+// pointer. The container survives graph re-renders, so the listener is bound once.
+function bindFastWheelZoom(container) {
+  if (container.dataset.fastWheel) return;
+  container.dataset.fastWheel = "1";
+  container.addEventListener("wheel", event => {
+    if (!(event.ctrlKey || event.metaKey) || !state.cy || state.cy.destroyed()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const cy = state.cy, box = container.getBoundingClientRect();
+    const delta = event.deltaY * (event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1);
+    const factor = 2 ** (-Math.max(-300, Math.min(300, delta)) / 200);
+    cy.zoom({level: Math.max(cy.minZoom(), Math.min(cy.maxZoom(), cy.zoom() * factor)),
+      renderedPosition: {x: event.clientX - box.left, y: event.clientY - box.top}});
+  }, {capture: true, passive: false});
 }
 
 function zoomCanvas(factor) {
@@ -58,6 +77,10 @@ function showSystems() {
   state.canvasMode = "space";
   state.structureLevel = "systems";
   state.traceOnCanvas = false;
+  if (state.drilldownOverviewFilters) {
+    state.scopeFilters = state.drilldownOverviewFilters;
+    state.drilldownOverviewFilters = null;
+  }
   if (state.systemOverviewScope) {
     state.scopeFilters.systems = state.systemOverviewScope;
     state.systemOverviewScope = null;

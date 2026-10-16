@@ -66,10 +66,153 @@ class ProjectQueryLayoutTests(TestCase):
     return {ready:false,state:'update_required'};
   };
   queryToolsScopeChanged();
-  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(requests, []); // let the loaded graph paint first
+  await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(requests, ['/api/index/status']);
   assert.equal(queryTools.indexStatus.state, 'update_required');
   assert.equal($('#update-index').hidden, false);
+})()
+""")
+
+    def test_initial_settings_do_not_resolve_the_project_scope(self) -> None:
+        self._script((STATIC / "retrieval_models.js").read_text() + r"""
+(async () => {
+  const requests = [];
+  api = async path => {
+    requests.push(path);
+    return {settings:{embedding:{provider:'local',model:'embed'},reranker:null,
+      rerank_depth:10},search_mode:'lexical'};
+  };
+  initializeQueryTools();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(requests, ['/api/retrieval/settings']);
+  assert.equal(currentSearchMode(), 'lexical');
+})()
+""")
+
+    def test_semantic_options_follow_the_applied_embedding_index(self) -> None:
+        self._script((STATIC / "retrieval_models.js").read_text() + r"""
+const select = $('#retrieval-mode');
+select.options = ['lexical','bm25','hybrid','vector'].map(value => ({value}));
+const settings = {embedding:{provider:'local',model:'embed'},reranker:null,rerank_depth:10};
+queryTools.indexStatus = {ready:false,workspace:'estate',ready_graphs:1,graph_count:2};
+renderRetrievalModels({settings,search_mode:'hybrid'});
+assert.ok(select.options.find(o => o.value === 'vector').disabled);
+assert.ok(select.options.find(o => o.value === 'hybrid').textContent.includes('1/2'));
+assert.ok($('#search-mode-note').textContent.includes('no keyword evidence'));
+queryTools.indexStatus = {ready:true};
+renderSearchMode();
+assert.ok(!select.options.find(o => o.value === 'vector').disabled);
+$('#embedding-model').value = 'different-model';
+renderSearchMode();
+assert.ok(select.options.find(o => o.value === 'vector').disabled);
+select.value = 'bm25';
+renderSearchMode();
+assert.equal(currentSearchMode(), 'hybrid',
+  'editing the form must not change the active server mode');
+$('#context-kind').value = 'question';
+renderContextPolicySummary();
+assert.ok($('#context-policy-summary').textContent.includes('Hybrid'));
+assert.equal($('#context-policy-summary').className, 'caution');
+""")
+
+    def test_model_apply_discards_status_for_the_previous_model(self) -> None:
+        self._script((STATIC / "retrieval_models.js").read_text() + r"""
+(async () => {
+  const pending = [];
+  const settings = {embedding:{provider:'local',model:'old'},reranker:null,rerank_depth:10};
+  renderRetrievalModels({settings,search_mode:'bm25'});
+  api = path => path === '/api/index/status'
+    ? new Promise(resolve => pending.push(resolve))
+    : Promise.resolve({settings:{...settings,embedding:{provider:'local',model:'new'}},
+      search_mode:'bm25'});
+  const oldStatus = loadIndexStatus();
+  $('#embedding-model').value = 'new';
+  const applying = applyRetrievalModels();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  pending[0]({ready:true});
+  await Promise.all([oldStatus, applying]);
+  assert.equal(queryTools.indexStatus, null);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(pending.length, 2);
+  pending[1]({ready:false});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(queryTools.indexStatus.ready, false);
+})()
+""")
+
+    def test_immediate_refresh_consumes_a_queued_status_read(self) -> None:
+        self._script(r"""
+(async () => {
+  let calls = 0;
+  api = async () => { calls++; return {ready:true}; };
+  scheduleIndexStatus();
+  await loadIndexStatus();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(calls, 1);
+})()
+""")
+
+    def test_semantic_only_search_hits_keep_the_evidence_warning(self) -> None:
+        self._script(r"""
+state.data = {objects:[]}; visibleObjects = () => [];
+queryTools.searchResult = {results:{graph:'sales',mode:'hybrid',hits:[
+  {id:'a',type:'table',label:'Similarity',reasons:['retrieval:vector score=0.8']},
+  {id:'b',type:'table',label:'Both',reasons:['name matched','retrieval:vector score=0.7']}
+]}};
+renderProjectSearch();
+assert.ok($('#object-list').innerHTML.includes('Semantic only · no keyword evidence'));
+assert.ok($('#object-list').innerHTML.includes('Keyword + semantic'));
+assert.ok($('#project-search-status').textContent.includes('1 by similarity only'));
+""")
+
+    def test_simultaneous_status_reads_share_one_request(self) -> None:
+        self._script(r"""
+(async () => {
+  let finish, calls = 0;
+  api = () => { calls++; return new Promise(resolve => finish = resolve); };
+  const first = loadIndexStatus(), second = loadIndexStatus();
+  assert.equal(calls, 1);
+  finish({ready:false, state:'missing'});
+  await Promise.all([first, second]);
+  assert.equal(queryTools.indexStatus.state, 'missing');
+  assert.equal(queryTools.indexStatusPending, null);
+})()
+""")
+
+    def test_projection_changes_queue_one_refresh_and_discard_old_status(self) -> None:
+        self._script(r"""
+(async () => {
+  const pending = [];
+  api = () => new Promise(resolve => pending.push(resolve));
+  const first = loadIndexStatus();
+  queryToolsScopeChanged();
+  queryToolsScopeChanged();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(pending.length, 1);
+  pending[0]({ready:true, state:'obsolete'});
+  await first;
+  assert.equal(queryTools.indexStatus, null);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(pending.length, 2);
+  pending[1]({ready:false, state:'update_required'});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(queryTools.indexStatus.state, 'update_required');
+})()
+""")
+
+    def test_failed_status_read_remains_visible_and_can_be_retried(self) -> None:
+        self._script(r"""
+(async () => {
+  api = async () => { throw new Error('Status unavailable'); };
+  await loadIndexStatus();
+  assert.ok($('#index-health-label').textContent.includes('Status unavailable'));
+  assert.equal($('#index-health-dot').className, 'is-error');
+  assert.equal(queryTools.indexStatusPending, null);
+  api = async () => ({ready:true, state:'ready'});
+  await loadIndexStatus();
+  assert.equal(queryTools.indexStatus.state, 'ready');
+  assert.equal($('#index-health-dot').className, 'is-ready');
 })()
 """)
 
@@ -111,7 +254,7 @@ assert.equal(payload.reviewed_annotations_only, true);
 assert.equal(payload.logical_hints, null);
 assert.equal(payload.seed_limit, 1);
 assert.equal(payload.expected_scope_identity, 'pinned');
-for (const forbidden of ['focuses','object_ids','graphs','schemas','query_sql']) {
+for (const forbidden of ['focuses','object_ids','graphs','schemas','query_sql','mode']) {
   assert.ok(!(forbidden in payload));
 }
 """)
@@ -254,7 +397,8 @@ class Element {
   setAttribute(){}
   reportValidity(){return true;}
 }
-const context = vm.createContext({assert,navigator:{},setTimeout,clearTimeout,document:{
+const context = vm.createContext({assert,navigator:{},setTimeout,clearTimeout,
+requestAnimationFrame:callback=>setTimeout(callback,0),document:{
   querySelector(selector){
     if (!elements.has(selector)) elements.set(selector,new Element());
     return elements.get(selector);

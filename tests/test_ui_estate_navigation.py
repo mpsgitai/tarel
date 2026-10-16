@@ -91,6 +91,21 @@ state.cy=null;
 zoomCanvas(1);
 """)
 
+    def test_systems_restores_filters_before_architecture_or_quick_open_drilldown(self) -> None:
+        self.script(r"""
+const overview = {systems:new Set(['a','b']), graphs:new Set(['one','two'])};
+const state = {canvasMode:'space', structureLevel:'objects', systemOverviewScope:null,
+  drilldownOverviewFilters:overview,
+  scopeFilters:{systems:new Set(['a']),graphs:new Set(['one'])}};
+function $$(){return [];}
+function setPanel(){}
+function applyVisualScope(){}
+showSystems();
+assert.equal(state.structureLevel,'systems');
+assert.equal(state.scopeFilters,overview);
+assert.equal(state.drilldownOverviewFilters,null);
+""")
+
     def test_overview_grid_uses_available_space_and_handles_empty_scopes(self) -> None:
         self.script(r"""
 assert.equal(systemOverviewColumns(37,1416,910),6);

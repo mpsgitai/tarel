@@ -190,7 +190,9 @@ class FamilyFocusBackendTests(TestCase):
         self.backend = TarelUIBackend(UIConfig(workspace="estate"))
         with (
             patch.object(self.backend, "_scope", return_value=scope),
-            patch("tarel.ui.server.load_workspace_use_case", return_value=workspace),
+            patch("tarel.ui.server.load_workspace_scope_use_case", return_value=(
+                workspace, {self.graph.name: self.graph}, scope,
+            )),
         ):
             view = self._view([self.focus.name, self.other.name])
             page = self.backend.mutate("/api/families/members", self._request(

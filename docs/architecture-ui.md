@@ -7,12 +7,32 @@ proof that a pipeline ran. Opening this view does not query sources or invoke a 
 
 This is a UI prototype with an experimental sidecar format, not a stable graph or SDK
 contract. No real landscape, predefined business connections, or database configuration
-is shipped. The new architecture controls currently use German labels.
+is shipped. All browser controls use English labels.
 
 Embedded applications should use the normal graph, workspace, context, and lineage SDK
 surfaces. The sidecar deliberately has no public SDK read/write facade: adding one would
 stabilize an experimental UI persistence format before its inventory and migration rules
 have been proven.
+
+## Browser
+
+Atlas is the default browser. Choose light or dark appearance with `?atlas=light|dark`,
+the appearance button, or Ctrl/Cmd+Shift+L. Graph | Table switches between entity cards
+and a sortable object inventory. Ctrl/Cmd+K opens the command palette. Click selects an
+object; double-click opens its neighbourhood or the objects in an architecture card.
+Ctrl/Cmd+mouse wheel zooms faster. Structure, lineage, the inspector and review evidence
+remain views over the same metadata and review states.
+
+Search models are selected centrally in the existing model panel. Semantic and hybrid
+options require a complete index for the applied embedding model. Similarity-only hits
+are labelled separately from keyword-backed hits; neither similarity nor a generated
+annotation establishes meaning, grain or join evidence. Question-based agent context
+shows its active ranking mode and cautions when semantic retrieval is involved. Cloud
+models and rerankers retain explicit search submission.
+
+Large views still render the full projection: “All objects” at about 4,000 objects can
+require roughly 7–14 seconds on a local machine, depending on hardware and load. Edge
+bundling and progressive projection loading are not implemented.
 
 ## Open a landscape
 
@@ -85,22 +105,22 @@ the UI additionally performs that comparison at bootstrap.
 
 ## Navigate and edit
 
-- **Sammlung** selects an overlapping collection; **Detailtiefe** switches between
+- **Collection** selects an overlapping collection; **Detail level** switches between
   system/area cards, individual source-area cards, and compact system cards.
 - Global layers group cards independently of collections. Collapse a layer, search
   architecture labels, or highlight a system. Existing workspace zones are not redefined.
-- Select a card to see its metadata; **Objekte öffnen** opens the technical object view.
+- Select a card to see its metadata; **Open objects** opens the technical object view.
   It first clears any active report focus, reloading focused family views when needed.
   If that reset fails, navigation stops and the error remains visible.
   Drag cards or a layer frame to rearrange them. Shift supports multiple selection.
-- **Anordnen** computes a layout; **Rückgängig** undoes layout changes. **Auswahl einpassen**
+- **Arrange** computes a layout; **Undo** undoes layout changes. **Fit selection**
   fits the selection; **Fit** fits the visible canvas. Zoom buttons and the mouse wheel
-  work in Structure as well. **Mehr Platz** hides the architecture sidebar.
-- **Layout speichern** persists card positions. Unsaved positions stay in the browser;
+  work in Structure as well. **More space** hides the architecture sidebar.
+- **Save layout** persists card positions. Unsaved positions stay in the browser;
   zoom, pan, selected collection, and filters are not persisted. Positions are shared
   across collections rather than being separate saved views.
-- **+ Sammlung** creates a collection of systems, areas, graphs, or source-area cards.
-  **+ Verbindung** creates a directed connection with a reason and evidence or planning
+- **+ Collection** creates a collection of systems, areas, graphs, or source-area cards.
+  **+ Connection** creates a directed connection with a reason and evidence or planning
   reference. Select a connection to edit or delete it.
 
 Manual states are planned, unverified, documented, or manually confirmed. Connection
@@ -114,6 +134,30 @@ views initially show a display-only system overview; **Systems**, **All objects*
 the system selector navigate between levels without creating persisted graph nodes.
 
 ## Persistence and recovery
+
+### Request-local loading
+
+The workspace bootstrap reuses the documents returned by the existing Application scope
+loader for projection and focus validation. The architecture inventory check retains its
+fresh workspace read after projection, including empty catalogs. Revisions already
+computed for the projection are reused for its scope identity. This is request-local reuse,
+with no shared projection cache or change to graph identities, persisted contracts, review
+states, or retrieval rules. Each subsequent bootstrap loads and validates fresh documents.
+Workspace reference validation indexes each graph once per system validation rather than
+once per zone member. The existing Application loader is exposed through the experimental
+`load_workspace_scope_use_case` adapter; it does not add an SDK contract.
+
+The existing `GET /api/retrieval/settings` supplies the server-owned model and search-mode
+selection. Startup does not resolve an additional query scope for search defaults.
+Exact query scopes still use the existing token-protected `/api/query/scope` path when
+needed for search and context. After the bootstrap is displayed, the browser schedules one
+index-status request. Concurrent readers share a pending request; projection changes discard
+its obsolete result and schedule one fresh read. Failures remain visible and retryable.
+
+The bootstrap still projects the complete authorized object/field inventory. Progressive
+loading and Canvas rendering optimizations are separate work.
+
+### Sidecar writes
 
 Writes use the existing local session-token gate, an independent edit permission,
 revision checks, an exclusive lock file, and atomic replacement. Stale-tab writes fail
@@ -129,8 +173,8 @@ The implementation is bounded to 4 MiB per sidecar, 2,000 source-area cards and 
 30 layers, and 200 collections. Layout POST requests permit 4 MiB plus 1 KiB for the revision
 and JSON envelope; other UI requests retain their 256 KiB cap. Saved sidecars still cannot
 exceed 4 MiB. The prototype does not migrate sidecars, infer new
-connections, or automatically reconcile changed inventories. It adds no GUI embedding
-search; project search retains its existing lexical behavior.
+connections, or automatically reconcile changed inventories. Architecture connections do
+not affect the separate project search and retrieval settings.
 
 See [browser scope and review](contracts.md#browser-scope-and-review) for the underlying
 browser, [CLI reference](cli-reference.md#tarel-ui) for flags, and

@@ -10,6 +10,7 @@ const state = {
   canvasMode: "space",
   structureLevel: null,
   systemOverviewScope: null,
+  drilldownOverviewFilters: null,
   focusNames: null,
   focusSelection: null,
   focusSelectedOnly: false,
@@ -32,16 +33,27 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
-async function api(path, payload) {
+async function api(path, payload, timeoutMs = 0) {
   const options = payload === undefined ? {} : {
     method: "POST",
     headers: {"Content-Type": "application/json", "X-Tarel-Token": TOKEN},
     body: JSON.stringify(payload),
   };
-  const response = await fetch(path, options);
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message || `Request failed (${response.status})`);
-  return body;
+  const controller = new AbortController();
+  const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetch(path, {...options, signal: controller.signal});
+    const body = await response.json();
+    if (!response.ok) {
+      const failure = new Error(body.error?.message || `Request failed (${response.status})`);
+      failure.code = body.error?.code || null;
+      throw failure;
+    }
+    return body;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("Loading timed out. Please retry.");
+    throw error;
+  } finally { clearTimeout(timer); }
 }
 
 async function load(familyMode = state.familyMode, focusNames = undefined, derivedSelection = undefined) {
@@ -57,6 +69,7 @@ async function load(familyMode = state.familyMode, focusNames = undefined, deriv
   const nextMode = data.object_families?.mode || null;
   if (nextMode !== state.familyMode || focusNames !== undefined) state.scopeFilters = null;
   state.data = data;
+  state.drilldownOverviewFilters = null;
   state.showDerived = data.derived_enabled ?? derivedSelection ?? state.showDerived;
   clearLoadedHintEdges();
   $("#toggle-derived-relations").checked = state.showDerived;
@@ -387,12 +400,14 @@ function renderGraph() {
   const objectIds = new Set(objects.map(item => item.id));
   const lanes = unique(objects.map(item => `${item.system || "Standalone"} · ${item.area || item.graph} · ${item.namespace}`));
   const counts = new Map();
+  // Computed once: per-object evaluation made "All objects" quadratic on large estates.
+  const groupedSpace = state.canvasMode === "space" && showSpaceGroups(objects);
   const elements = objects.map(item => {
     const laneName = `${item.system || "Standalone"} · ${item.area || item.graph} · ${item.namespace}`;
     const lane = lanes.indexOf(laneName);
     const index = counts.get(laneName) || 0;
     counts.set(laneName, index + 1);
-    return {data: {id: item.id, label: item.name, type: item.type, state: item.state || item.annotation?.state || "missing", namespace: item.namespace, graph: item.graph, parent: state.canvasMode === "space" && showSpaceGroups(objects) ? spaceGroupIds(item).schema : undefined}, position: {x: lane * 300 + (index % 2) * 130, y: Math.floor(index / 2) * 82}};
+    return {data: {id: item.id, label: item.name, type: item.type, state: item.state || item.annotation?.state || "missing", namespace: item.namespace, graph: item.graph, parent: groupedSpace ? spaceGroupIds(item).schema : undefined}, position: {x: lane * 300 + (index % 2) * 130, y: Math.floor(index / 2) * 82}};
   });
   if (state.canvasMode === "space") {
     elements.unshift(...spaceGroupElements(objects));
@@ -436,7 +451,10 @@ function renderGraph() {
     ],
   });
   bindCanvasZoom();
-  state.cy.on("tap", 'node[type = "table"], node[type = "view"], node[type = "derived_relation"], node[type = "object_family"]', event => selectObject(event.target.id()));
+  // One click inspects an object in place; a double click opens its neighbour view.
+  const objectNodes = 'node[type = "table"], node[type = "view"], node[type = "derived_relation"], node[type = "object_family"]';
+  state.cy.on("tap", objectNodes, event => inspectObject(event.target.id()));
+  state.cy.on("dbltap", objectNodes, event => selectObject(event.target.id()));
   state.cy.on("tap", 'node[type = "asset"], node[type = "procedure"], node[type = "query"], node[type = "script"]', event => {
     const reference = event.target.data("reference");
     if (!reference) return;
@@ -582,6 +600,16 @@ function selectObject(id) {
   setPanel("objects", false);
   setPanel("inspector", true);
   if (state.cy) { state.cy.nodes().unselect(); state.cy.$id(id).select(); focusSelected(); }
+}
+
+// Select without re-laying out the canvas: the graph keeps its position and zoom.
+function inspectObject(id) {
+  state.selectedId = id;
+  renderObjectList();
+  renderInspector();
+  setPanel("objects", false);
+  setPanel("inspector", true);
+  if (state.cy) { state.cy.nodes().unselect(); state.cy.$id(id).select(); }
 }
 
 function focusSelected() {
@@ -829,7 +857,7 @@ function fieldAnnotationCard(field) {
   return `<details class="field-card">
     <summary>
       <span class="field-summary-copy"><strong>${escapeHtml(field.label)}</strong><small class="mono">${escapeHtml(field.data_type || "—")}</small>${annotation?.description ? `<small class="field-summary-description">${escapeHtml(annotation.description)}</small>` : ""}</span>
-      <span class="field-summary-badges">${field.source_change ? '<span class="source-change-pill">Source changed</span>' : ""}${field.semantic_type ? `<span class="semantic-pill">${escapeHtml(field.semantic_type)}</span>` : ""}<span class="state-badge">${escapeHtml(stateLabel(annotation?.state || "missing"))}</span></span>
+      <span class="field-summary-badges">${field.source_change ? '<span class="source-change-pill">Source changed</span>' : ""}${field.semantic_type ? `<span class="semantic-pill">${escapeHtml(field.semantic_type)}</span>` : ""}<span class="state-badge" data-state="${escapeAttr(annotation?.state || "missing")}">${escapeHtml(stateLabel(annotation?.state || "missing"))}</span></span>
     </summary>
     <div class="field-annotation-body">
       ${sourceChangeNotice(field.source_change)}
@@ -844,7 +872,7 @@ function fieldAnnotationCard(field) {
           <div class="field-provenance"><strong>Provenance</strong><span>${escapeHtml(provenance?.source || "unknown")}${provenance?.provider ? ` · ${escapeHtml(provenance.provider)}` : ""}${provenance?.model ? ` · ${escapeHtml(provenance.model)}` : ""}</span></div>
           ${latestReview ? fieldDetail(`Human review · ${reviewActionLabel(latestReview.action)}`, latestReview.reason) : ""}
           ${contextDocuments.length ? fieldDetail("Context documents", contextDocuments.map(item => `${item.id}@${item.revision}`).join(" · ")) : ""}
-        </div></details>` : `<p class="field-missing">No TAREL field annotation yet.</p>${state.data.editable ? `<form class="field-quick-annotation" data-graph="${escapeAttr(selectedObject().graph)}" data-reference="${escapeAttr(field.reference)}"><label><span>Description</span><textarea name="description" required placeholder="What does this field mean?"></textarea></label><details><summary>Optional synonyms &amp; tags</summary><label><span>Synonyms · one per line</span><textarea name="synonyms"></textarea></label><label><span>Tags · one per line</span><textarea name="tags"></textarea></label></details><button class="quiet-button">Add annotation</button></form>` : ""}`}
+        </div></details>` : `<p class="field-missing">No TAREL field annotation yet.</p>${state.data.editable ? `<form class="field-quick-annotation" data-graph="${escapeAttr(selectedObject().graph)}" data-reference="${escapeAttr(field.reference)}"><label><span>Description</span><textarea name="description" required placeholder="What does this field mean?"></textarea></label><details><summary>Optional synonyms &amp; tags</summary><label class="form-half"><span>Synonyms · one per line</span><textarea name="synonyms"></textarea></label><label class="form-half"><span>Tags · one per line</span><textarea name="tags"></textarea></label></details><button class="quiet-button">Add annotation</button></form>` : ""}`}
       ${sourceSemantics.length ? `<div class="field-source-semantics"><strong>Imported source semantics</strong><div>${sourceSemantics.map(entry => `<span class="source-pill" title="${escapeAttr(entry.import_name)}">${escapeHtml(entry.name)}</span>`).join(" ")}</div></div>` : ""}
     </div>
   </details>`;
@@ -878,7 +906,7 @@ function sourceSemanticCards(entries, title) {
     <form class="source-semantic-card source-semantic-form" data-import-name="${escapeAttr(entry.import_name)}" data-target-id="${escapeAttr(entry.target_id)}" data-revision="${escapeAttr(entry.import_revision)}">
       <header><span><strong>${escapeHtml(entry.display_label || entry.field_label || entry.name)}</strong><small>${escapeHtml(entry.import_name)} · ${escapeHtml(entry.kind)}</small></span><span class="source-state">${entry.patch_count ? `${entry.patch_count} edit${entry.patch_count === 1 ? "" : "s"}` : "source"}</span></header>
       <label><span>Description</span><textarea name="description" ${state.data.editable ? "" : "disabled"}>${escapeHtml(entry.description || "")}</textarea></label>
-      <label><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${state.data.editable ? "" : "disabled"}>${escapeHtml((entry.synonyms || []).join("\n"))}</textarea></label>
+      <label class="form-half"><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${state.data.editable ? "" : "disabled"}>${escapeHtml((entry.synonyms || []).join("\n"))}</textarea></label>
       <label><span>Edit reason</span><input name="reason" value="Reviewed in the local TAREL UI." required ${state.data.editable ? "" : "disabled"} /></label>
       <div class="source-actions"><small class="mono">${escapeHtml(entry.source_reference)}</small><button class="quiet-button" type="submit" ${state.data.editable ? "" : "disabled"}>Save source overlay</button></div>
       ${entry.original ? `<details><summary>Original imported values</summary><p>${escapeHtml(entry.original.description || "No description")}</p><small>${escapeHtml((entry.original.synonyms || []).join(" · ") || "No synonyms")}</small></details>` : '<p class="semantic-origin">Original source snapshots are intentionally not included in this projection.</p>'}
@@ -992,7 +1020,7 @@ async function loadReview() {
   state.reviewError = null;
   renderReview();
   try {
-    const payload = await api("/api/review/view", {focuses: state.focusSelection?.focuses || []});
+    const payload = await api("/api/review/view", {focuses: state.focusSelection?.focuses || []}, 60000);
     if (request !== state.reviewRequest) return;
     state.reviewData = payload;
     state.reviewLoading = false;
@@ -1026,7 +1054,7 @@ function renderReview() {
   const records = state.reviewFilter === "pending" ? pending : scopedReview;
   if (!records.some(item => item.id === state.reviewId)) state.reviewId = records[0]?.id || null;
   $("#review-list").innerHTML = records.map(item => `
-    <button class="review-item${item.id === state.reviewId ? " is-active" : ""}" data-review="${escapeAttr(item.id)}"><i class="state-dot ${item.pending_field_count ? "draft" : escapeAttr(item.state)}"></i><span><strong>${escapeHtml(item.label)}</strong><small>${item.pending_field_count ? `${item.pending_field_count} field proposal${item.pending_field_count === 1 ? "" : "s"} pending · ` : ""}${escapeHtml(item.annotation?.description || "No semantic description")}</small></span><span class="state-badge">${stateLabel(item.state)}</span></button>`).join("") || '<div class="empty-state"><p>No proposals in this filter.</p></div>';
+    <button class="review-item${item.id === state.reviewId ? " is-active" : ""}" data-review="${escapeAttr(item.id)}"><i class="state-dot ${item.pending_field_count ? "draft" : escapeAttr(item.state)}"></i><span><strong>${escapeHtml(item.label)}</strong><small>${item.pending_field_count ? `${item.pending_field_count} field proposal${item.pending_field_count === 1 ? "" : "s"} pending · ` : ""}${escapeHtml(item.annotation?.description || "No semantic description")}</small></span><span class="state-badge" data-state="${escapeAttr(item.state)}">${stateLabel(item.state)}</span></button>`).join("") || '<div class="empty-state"><p>No proposals in this filter.</p></div>';
   $$(".review-item").forEach(button => button.addEventListener("click", () => { state.reviewId = button.dataset.review; setPanel("review-queue", false); renderReview(); }));
   renderReviewEditor();
 }
@@ -1048,7 +1076,7 @@ function renderReviewEditor() {
   const documentById = new Map((state.reviewData.knowledge_documents || []).map(item => [item.id, item]));
   const availableDocuments = (record.available_context_document_ids || []).map(id => documentById.get(id)).filter(Boolean);
   $("#review-editor").innerHTML = `
-    <div class="review-title"><div><p class="eyebrow">${escapeHtml(record.type)} annotation</p><h2>${escapeHtml(record.label)}</h2><p>${record.field_count} fields · ${stateLabel(record.state)}</p></div><span class="state-badge">${stateLabel(record.state)}</span></div>
+    <div class="review-title"><div><p class="eyebrow">${escapeHtml(record.type)} annotation</p><h2>${escapeHtml(record.label)}</h2><p>${record.field_count} fields · ${stateLabel(record.state)}</p></div><span class="state-badge" data-state="${escapeAttr(record.state)}">${stateLabel(record.state)}</span></div>
     <div class="step-strip"><div class="step"><strong>1 · Read</strong>Understand the proposal</div><div class="step"><strong>2 · Check</strong>Compare evidence</div><div class="step"><strong>3 · Edit</strong>Correct meaning</div><div class="step"><strong>4 · Decide</strong>Approve or reject</div></div>
     ${!state.data.editable ? '<p class="review-field-notice">Read-only session. Evidence and proposals are inspectable; restart with <code>--edit</code> to record a decision.</p>' : ""}
     ${record.pending_field_count ? `<div class="review-field-notice"><strong>${record.pending_field_count} field proposals also need review.</strong><p>Approving only the table does not approve its fields. Inspect the field descriptions before applying a decision to them.</p><button id="inspect-review-fields" class="quiet-button">Inspect fields${state.familyMode ? " · physical view" : ""}</button></div>` : ""}
@@ -1057,23 +1085,40 @@ function renderReviewEditor() {
     <form id="annotation-form" class="editor-form">
       <label><span>Business description</span><textarea name="description" required ${disabled ? "disabled" : ""}>${escapeHtml(annotation.description)}</textarea></label>
       <div class="field-grid"><label><span>Business role</span><input name="role" value="${escapeAttr(annotation.role || "")}" ${disabled ? "disabled" : ""} /></label><label><span>Grain</span><input name="grain" value="${escapeAttr(record.grain || "")}" ${disabled ? "disabled" : ""} /></label></div>
-      <label><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.synonyms || []).join("\n"))}</textarea></label>
-      <label><span>Tags · one per line</span><textarea class="short-textarea" name="tags" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.tags || []).join("\n"))}</textarea></label>
+      <label class="form-half"><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.synonyms || []).join("\n"))}</textarea></label>
+      <label class="form-half"><span>Tags · one per line</span><textarea class="short-textarea" name="tags" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.tags || []).join("\n"))}</textarea></label>
       <label><span>Warnings · one per line</span><textarea class="short-textarea" name="warnings" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.warnings || []).join("\n"))}</textarea></label>
       <label><span>Human review reason</span><input name="reason" value="Reviewed in the local TAREL UI." required ${disabled ? "disabled" : ""} /></label>
-      <label class="checkbox"><input name="include_fields" type="checkbox" ${disabled ? "disabled" : ""} /><span>Apply the final decision to all ${record.field_count} field proposals too</span></label>
+      ${includeFieldsOption(record, disabled)}
     </form>
     <div class="editor-actions"><button class="danger-button" data-review-action="reject" ${disabled ? "disabled" : ""}>Reject</button><button class="quiet-button" data-review-action="later">Later</button><button class="quiet-button" data-review-action="save" ${disabled ? "disabled" : ""}>Save edits</button><span class="spacer"></span><button class="primary-button" data-review-action="approve" ${disabled ? "disabled" : ""}>Approve &amp; next</button></div>`}`;
   $$('[data-review-action]').forEach(button => button.addEventListener("click", () => reviewAction(button.dataset.reviewAction)));
-  $("#inspect-review-fields")?.addEventListener("click", async () => {
-    try {
-      if (state.familyMode) await load(null);
-      switchView("graph");
-      selectObject(record.id);
-      $("#inspector .field-list")?.scrollIntoView({block: "start", behavior: "smooth"});
-    } catch (error) { toast(error.message); }
-  });
+  $("#inspect-review-fields")?.addEventListener("click", () => inspectReviewFields(record));
   renderEvidence(record);
+}
+
+// The decision can include the fields that have a proposal; fields without one stay
+// unchanged in the application. Say which fields are affected before submitting.
+function includeFieldsOption(record, disabled) {
+  const missing = record.missing_field_count || 0;
+  const proposals = record.field_count - missing;
+  if (!proposals) return `<p class="include-fields-note">This table has no field proposals; the decision applies to the table only.</p>`;
+  const plural = proposals === 1 ? "" : "s";
+  return `<label class="checkbox"><input name="include_fields" type="checkbox" ${disabled ? "disabled" : ""} ${missing ? 'aria-describedby="include-fields-why"' : ""} /><span>Apply the final decision to the ${proposals} field proposal${plural} too</span></label>
+    ${missing ? `<p id="include-fields-why" class="include-fields-note">${missing} of ${record.field_count} fields have no proposal yet and stay unchanged.</p>` : ""}`;
+}
+
+async function inspectReviewFields(record) {
+  try {
+    if (state.familyMode) await load(null);
+    state.canvasMode = "space";
+    state.structureLevel = "objects";
+    state.traceOnCanvas = false;
+    switchView("graph");
+    renderGraph();
+    selectObject(record.id);
+    $("#inspector .field-list")?.scrollIntoView({block: "start", behavior: "smooth"});
+  } catch (error) { toast(error.message); }
 }
 
 function knowledgeContextPanel(record, used, available) {
@@ -1106,7 +1151,14 @@ async function reviewAction(action) {
     }
     toast(action === "approve" ? "Annotation approved." : action === "reject" ? "Annotation rejected." : "Edits saved as a draft.");
     const previous = record.id; await load(); if (action !== "save") advanceReview(previous);
-  } catch (error) { toast(error.message); }
+  } catch (error) {
+    if (error.code === "annotation_not_found" && values.get("include_fields") === "on") {
+      toast("Decision not saved: at least one field has no proposal yet. Decide the table without its fields, or create the missing field proposals first.");
+      await load();
+      return;
+    }
+    toast(error.message);
+  }
 }
 
 function advanceReview(previousId) {
@@ -1136,7 +1188,7 @@ function renderManualLineage() {
       <article class="manual-document">
         <header><span><strong>${escapeHtml(document.name)}</strong><small>${document.jobs.length} jobs · ${document.hops.length} hops</small></span><code>${escapeHtml(document.revision.slice(0, 10))}</code></header>
         <div class="manual-jobs">${document.jobs.map(job => `<div class="manual-job"><span class="kind-icon">${job.kind === "procedure" ? "SP" : "S"}</span><span><strong>${escapeHtml(job.qualified_name)}</strong><small>${escapeHtml(job.description || job.source_reference)}</small></span></div>`).join("")}</div>
-        <div class="manual-hops">${document.hops.map(hop => `<div class="manual-hop"><span><strong>${escapeHtml(hop.source)}</strong><small>${escapeHtml(hop.role)}</small></span><span class="hop-relation">${escapeHtml(hop.operation)} →</span><span><strong>${escapeHtml(hop.target)}</strong><small>via ${escapeHtml(hop.job)}</small></span><span class="state-badge">${stateLabel(hop.state)}</span>${hop.state === "draft" && state.data.editable ? `<span class="manual-review-actions"><button class="quiet-button" data-lineage-decision="reject" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Reject</button><button class="primary-button" data-lineage-decision="validate" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Approve</button></span>` : ""}</div>`).join("") || '<p class="guidance">No data-flow hops yet.</p>'}</div>
+        <div class="manual-hops">${document.hops.map(hop => `<div class="manual-hop"><span><strong>${escapeHtml(hop.source)}</strong><small>${escapeHtml(hop.role)}</small></span><span class="hop-relation">${escapeHtml(hop.operation)} →</span><span><strong>${escapeHtml(hop.target)}</strong><small>via ${escapeHtml(hop.job)}</small></span><span class="state-badge" data-state="${escapeAttr(hop.state)}">${stateLabel(hop.state)}</span>${hop.state === "draft" && state.data.editable ? `<span class="manual-review-actions"><button class="quiet-button" data-lineage-decision="reject" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Reject</button><button class="primary-button" data-lineage-decision="validate" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Approve</button></span>` : ""}</div>`).join("") || '<p class="guidance">No data-flow hops yet.</p>'}</div>
       </article>`).join("");
   }
   $$('[data-lineage-decision]').forEach(button => button.addEventListener("click", () => decideManualHop(button)));
@@ -1322,6 +1374,24 @@ function changed(record, patch) { const a = record.annotation; return patch.desc
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[character]); }
 function escapeAttr(value) { return escapeHtml(value); }
 function setFooter(value) { $("#footer-status").textContent = value; }
+// Drawing thousands of objects blocks the page for seconds. Show what is happening
+// first, let the browser paint it, then render; small graphs render immediately.
+function withCanvasBusy(count, work) {
+  const busy = $("#canvas-busy");
+  if (count < 1500 || !busy) { work(); return; }
+  busy.querySelector("strong").textContent = `Drawing ${count.toLocaleString()} objects…`;
+  busy.hidden = false;
+  $("#graph-canvas").setAttribute("aria-busy", "true");
+  setFooter(`Drawing ${count.toLocaleString()} objects…`);
+  requestAnimationFrame(() => setTimeout(() => {
+    try { work(); }
+    finally {
+      busy.hidden = true;
+      $("#graph-canvas").removeAttribute("aria-busy");
+      setFooter("Ready");
+    }
+  }, 0));
+}
 function toast(value) { const element = $("#toast"); element.textContent = value; element.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { element.hidden = true; }, 4200); }
 
 $("#object-search").addEventListener("input", () => {
@@ -1377,7 +1447,7 @@ $("#show-all").addEventListener("click", () => {
   if (state.canvasMode === "architecture") state.canvasMode = "space";
   state.traceOnCanvas = false;
   state.structureLevel = "objects";
-  renderGraph();
+  withCanvasBusy(visibleObjects().length, renderGraph);
 });
 $("#toggle-entity-resolution").addEventListener("change", event => { state.showEntityResolution = event.target.checked; renderGraph(); });
 $("#toggle-derived-relations").addEventListener("change", async event => {
