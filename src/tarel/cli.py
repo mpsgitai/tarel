@@ -1137,7 +1137,10 @@ def build_parser() -> argparse.ArgumentParser:
         annotation_decision.add_argument(
             "--include-fields",
             action="store_true",
-            help="Apply the decision to the selected table or view and all of its fields.",
+            help=(
+                "Apply the decision to the selected table or view and to each of its "
+                "fields that has a proposal; fields without a proposal stay unchanged."
+            ),
         )
         _add_format_argument(annotation_decision)
 

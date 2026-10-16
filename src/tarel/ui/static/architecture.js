@@ -2,8 +2,9 @@
 
 const arch = {snapshot: null, level: "area", collection: "", search: "", spotlight: "",
   collapsed: new Set(), positions: {}, dirty: false, undo: [], busy: false, visible: [], connecting: null};
-const archStates = {documented: "Dokumentiert", planned: "Geplant", unverified: "Ungeprüft", confirmed: "Manuell bestätigt"};
-const archKinds = {data_flow: "Datenfluss", orchestration: "Steuerung", reference: "Referenz", replica: "Replikation"};
+const archStates = {documented: "Documented", planned: "Planned", unverified: "Unverified", confirmed: "Manually confirmed"};
+const archKinds = {data_flow: "Data flow", orchestration: "Orchestration", reference: "Reference", replica: "Replica"};
+const archCount = (count, noun) => `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
 
 function acceptArchitecture(snapshot, initial = false) {
   arch.snapshot = snapshot;
@@ -11,7 +12,7 @@ function acceptArchitecture(snapshot, initial = false) {
   $("#architecture-mode").hidden = false;
   for (const id of ["arch-add-edge", "arch-save-layout", "arch-add-collection", "arch-edit-collection"])
     $(`#${id}`).disabled = !snapshot.editable;
-  $("#arch-permission").textContent = snapshot.editable ? "Karte editierbar · technische Graphen separat" : "Architektur schreibgeschützt";
+  $("#arch-permission").textContent = snapshot.editable ? "Map editable · technical graphs separate" : "Architecture read-only";
   renderArchitectureFilters();
 }
 
@@ -19,7 +20,7 @@ function architectureEndpoints() {
   const result = new Map();
   for (const node of arch.snapshot.document.nodes) {
     for (const [id, label] of [[node.id, `${node.label} · ${node.area}`],
-      [`graph::${node.graph}`, `Quelle · ${node.graph}`], [`area::${node.system}::${node.area}`, `Area · ${node.system} / ${node.area}`],
+      [`graph::${node.graph}`, `Source · ${node.graph}`], [`area::${node.system}::${node.area}`, `Area · ${node.system} / ${node.area}`],
       [`system::${node.system}`, `System · ${node.system}`]]) {
       if (!result.has(id)) result.set(id, {id, label, members: []});
       result.get(id).members.push(node.id);
@@ -31,15 +32,15 @@ function architectureEndpoints() {
 function renderArchitectureFilters() {
   const document = arch.snapshot.document;
   const select = $("#arch-collection");
-  select.replaceChildren(new Option("Gesamte Landschaft", ""));
+  select.replaceChildren(new Option("Whole landscape", ""));
   document.collections.forEach(item => select.add(new Option(item.label, item.id)));
   if (!document.collections.some(item => item.id === arch.collection)) arch.collection = "";
   select.value = arch.collection;
   $("#arch-collection-description").textContent = document.collections.find(c=>c.id===arch.collection)?.description ||
-    "Alle Quellen, auch leere Datenbanken. Sammlungen dürfen sich überlappen.";
+    "All sources, including empty databases. Collections may overlap.";
   $("#arch-edit-collection").disabled = !arch.snapshot.editable || !arch.collection;
   const spotlight = $("#arch-spotlight");
-  spotlight.replaceChildren(new Option("Kein System hervorheben", ""));
+  spotlight.replaceChildren(new Option("No system highlighted", ""));
   [...new Set(document.nodes.map(n=>n.system))].sort().forEach(name=>spotlight.add(new Option(name,name)));
   spotlight.value = arch.spotlight;
   $("#arch-layers").innerHTML = document.layers.map(layer => {
@@ -72,7 +73,7 @@ function architectureView() {
     const first = card.members[0], graphs = new Set(card.members.map(n=>n.graph));
     const title = card.id.startsWith("collapsed::") ? document.layers.find(l=>l.id===card.layer).label :
       arch.level === "system" ? first.system : arch.level === "area" ? `${first.system} / ${first.area}` : first.label;
-    card.label = `${title}\n${card.objects.toLocaleString()} Objekte · ${graphs.size} Quelle${graphs.size===1?"":"n"}\n${arch.level === "graph" ? `${first.source_type} · ${first.area}` : [...new Set(card.members.map(n=>n.source_type))].join(" · ")}`;
+    card.label = `${title}\n${archCount(card.objects, "object")} · ${archCount(graphs.size, "source")}\n${arch.level === "graph" ? `${first.source_type} · ${first.area}` : [...new Set(card.members.map(n=>n.source_type))].join(" · ")}`;
   }
   const resolve = endpoint => {
     const group = endpoints.get(endpoint);
@@ -82,7 +83,7 @@ function architectureView() {
     // A broad system/graph endpoint is shown once, never fanned out into invented flows.
     if (!cards.has(endpoint)) cards.set(endpoint, {id:endpoint, endpoint, layer:"context", objects:0,
       members: group.members.map(id=>document.nodes.find(n=>n.id===id)),
-      label:`${group.label}\nÜbergreifender Endpunkt\nkeine zusätzlichen Objekte`, proxy:true});
+      label:`${group.label}\nCross-cutting endpoint\nno additional objects`, proxy:true});
     return endpoint;
   };
   const edges = [];
@@ -99,7 +100,7 @@ function architectureView() {
 }
 
 function architecturePositions(cards) {
-  const positions = {}, layers = [...arch.snapshot.document.layers, {id:"context",label:"Übergreifende Beziehungen",color:"#a78bfa"}];
+  const positions = {}, layers = [...arch.snapshot.document.layers, {id:"context",label:"Cross-cutting relationships",color:"#a78bfa"}];
   let left = 0;
   for (const layer of layers) {
     const nodes = cards.filter(c=>c.layer===layer.id).sort((a,b)=>a.label.localeCompare(b.label));
@@ -131,14 +132,14 @@ function renderArchitecture(preserveViewport = false) {
   const previous = state.cy && preserveViewport ? {zoom:state.cy.zoom(),pan:state.cy.pan()} : null;
   const view = architectureView(); arch.visible = view.cards;
   const positions = architecturePositions(view.cards);
-  const layers = [...arch.snapshot.document.layers, {id:"context",label:"Übergreifende Endpunkte",color:"#a78bfa"}];
+  const layers = [...arch.snapshot.document.layers, {id:"context",label:"Cross-cutting endpoints",color:"#a78bfa"}];
   const colors = Object.fromEntries(layers.map(l=>[l.id,l.color]));
   const elements = view.cards.map(card=>({data:{...card, color:colors[card.layer],
     parent:arch.level==="system"?undefined:`lane::${card.layer}`, type:"architecture-card"},
     position:arch.positions[card.id] || positions[card.id]}));
   if (arch.level!=="system") for (const layer of layers) {
     const cards = view.cards.filter(c=>c.layer===layer.id);
-    if (cards.length) elements.unshift({data:{id:`lane::${layer.id}`,label:`${layer.label}\n${layer.id==="context"?"System- / Quellenbeziehungen":`${view.leaves.filter(n=>n.layer===layer.id).length} Quellenbereiche`}`,color:layer.color,type:"architecture-layer"},grabbable:true,selectable:false});
+    if (cards.length) elements.unshift({data:{id:`lane::${layer.id}`,label:`${layer.label}\n${layer.id==="context"?"System / source relationships":archCount(view.leaves.filter(n=>n.layer===layer.id).length, "source area")}`,color:layer.color,type:"architecture-layer"},grabbable:true,selectable:false});
     if (cards.length && view.cards.length<=24) {
       const allY=view.cards.map(card=>(arch.positions[card.id]||positions[card.id]).y);
       [Math.min(...allY)-35,Math.max(...allY)+35].forEach((y,index)=>elements.push({
@@ -184,9 +185,9 @@ function renderArchitecture(preserveViewport = false) {
     captureArchitecturePositions(); arch.dirty=true; architectureDirty();
   });
   architectureSpotlight(); architectureSelection();
-  $("#canvas-title").textContent = "Architektur · " + ($("#arch-collection").selectedOptions[0]?.textContent || "Gesamte Landschaft");
-  $("#canvas-subtitle").textContent = `${new Set(view.leaves.map(n=>n.system)).size} Systeme · ${new Set(view.leaves.map(n=>n.graph)).size} Quellen · ${view.leaves.reduce((s,n)=>s+n.objects,0).toLocaleString()} Objekte · ${view.edges.length} Architekturverbindungen (${view.hidden} intern / ausgeblendet)`;
-  $("#arch-node-list").innerHTML = view.cards.map(card=>`<button data-arch-pick="${escapeAttr(card.id)}">${escapeHtml(card.label.split("\n")[0])}<small>${card.objects.toLocaleString()} Objekte</small></button>`).join("");
+  $("#canvas-title").textContent = "Architecture · " + ($("#arch-collection").selectedOptions[0]?.textContent || "Whole landscape");
+  $("#canvas-subtitle").textContent = `${archCount(new Set(view.leaves.map(n=>n.system)).size, "system")} · ${archCount(new Set(view.leaves.map(n=>n.graph)).size, "source")} · ${archCount(view.leaves.reduce((s,n)=>s+n.objects,0), "object")} · ${archCount(view.edges.length, "architecture connection")} (${view.hidden} internal / hidden)`;
+  $("#arch-node-list").innerHTML = view.cards.map(card=>`<button data-arch-pick="${escapeAttr(card.id)}">${escapeHtml(card.label.split("\n")[0])}<small>${archCount(card.objects, "object")}</small></button>`).join("");
   $$('[data-arch-pick]').forEach(button=>button.addEventListener("click",()=>{
     state.cy.elements().unselect();const node=state.cy.$id(button.dataset.archPick);node.select();state.cy.animate({center:{eles:node},zoom:Math.max(state.cy.zoom(),.85)},{duration:220});
   }));
@@ -196,7 +197,7 @@ function renderArchitecture(preserveViewport = false) {
     $("#arch-selection").scrollIntoView({block:"nearest"});
   });
   architectureDirty();
-  $("#graph-canvas").setAttribute("aria-label","Interaktive Architekturkarte: markieren, verschieben und zoomen");
+  $("#graph-canvas").setAttribute("aria-label","Interactive architecture map: select, move and zoom");
 }
 
 function captureArchitecturePositions() {
@@ -204,7 +205,7 @@ function captureArchitecturePositions() {
 }
 
 function architectureDirty() {
-  $("#arch-layout-state").textContent = arch.dirty ? "Layout ungespeichert" : "Layout gespeichert / Standard";
+  $("#arch-layout-state").textContent = arch.dirty ? "Layout unsaved" : "Layout saved / default";
   $("#arch-save-layout").disabled = !arch.snapshot?.editable || !arch.dirty || arch.busy;
   $("#arch-undo").disabled = !arch.undo.length;
 }
@@ -218,34 +219,36 @@ function architectureSpotlight() {
 function architectureSelection() {
   const selected=state.cy.elements(":selected"), details=$("#arch-selection");
   state.cy.elements().removeClass("arch-muted");
-  if (!selected.length) {details.innerHTML="<h2>Deine Landschaft</h2><p>Karte anklicken: Details. Karte ziehen: verschieben. Shift + Hintergrund ziehen: mehrere Karten markieren. Mausrad / − +: Zoom.</p>";return;}
+  if (!selected.length) {details.innerHTML="<h2>Your landscape</h2><p>Click a card: details. Drag a card: move. Shift + drag background: select several cards. Mouse wheel / − +: zoom; Ctrl + wheel zooms fast.</p>";return;}
   const neighbourhood=selected.closedNeighborhood();
   state.cy.elements().difference(neighbourhood.union(neighbourhood.nodes().ancestors())).addClass("arch-muted");
   if (selected.length>1) {
-    details.innerHTML=`<h2>${selected.length} Elemente markiert</h2><p>Markierte Karten gemeinsam verschieben. Zwei Karten können direkt verbunden werden.</p><button id="arch-connect-selected" class="primary-button">Verbinden…</button>`;
+    details.innerHTML=`<h2>${selected.length} items selected</h2><p>Move the selected cards together. Two cards can be connected directly.</p><button id="arch-connect-selected" class="primary-button">Connect…</button>`;
     $("#arch-connect-selected").onclick=()=>openArchitectureConnection();return;
   }
   const item=selected[0];
   if (item.isEdge()) {
     const edge=arch.snapshot.document.connections.find(e=>e.id===item.data("recordId"));
-    details.innerHTML=`<p class="eyebrow">Architekturverbindung · keine Tabellen-Lineage</p><h2>${escapeHtml(edge.label)}</h2><p>${escapeHtml(archKinds[edge.kind])} · <strong>${escapeHtml(archStates[edge.state])}</strong></p><p>${escapeHtml(edge.reason)}</p><p class="arch-evidence">${escapeHtml(edge.evidence)}</p><p>${escapeHtml(edge.mechanism||"Verfahren nicht angegeben")} · ${escapeHtml(edge.frequency||"Häufigkeit nicht angegeben")}</p><button id="arch-edit-selected" class="primary-button">Bearbeiten…</button>`;
+    details.innerHTML=`<p class="eyebrow">Architecture connection · not table lineage</p><h2>${escapeHtml(edge.label)}</h2><p>${escapeHtml(archKinds[edge.kind])} · <strong>${escapeHtml(archStates[edge.state])}</strong></p><p>${escapeHtml(edge.reason)}</p><p class="arch-evidence">${escapeHtml(edge.evidence)}</p><p>${escapeHtml(edge.mechanism||"Mechanism not stated")} · ${escapeHtml(edge.frequency||"Frequency not stated")}</p><button id="arch-edit-selected" class="primary-button">Edit…</button>`;
     $("#arch-edit-selected").onclick=()=>openArchitectureConnection(edge);return;
   }
   const card=item.data(), members=card.members || [];
   const endpoints=architectureEndpoints();
   const collections=arch.snapshot.document.collections.filter(c=>c.members.some(id=>endpoints.get(id).members.some(m=>members.some(n=>n.id===m))));
-  details.innerHTML=`<p class="eyebrow">${card.proxy?"Übergreifender Endpunkt":"Architekturkarte"}</p><h2>${escapeHtml(card.label.split("\n")[0])}</h2><p>${members.reduce((s,n)=>s+n.objects,0).toLocaleString()} Objekte · ${new Set(members.map(n=>n.graph)).size} Quellen</p><div class="arch-badges">${collections.map(c=>`<span>${escapeHtml(c.label)}</span>`).join("")}</div><p class="arch-evidence">${escapeHtml([...new Set(members.map(n=>n.method))].join(" · "))}</p><div class="arch-buttons"><button id="arch-open-objects" class="quiet-button">Objekte öffnen</button><button id="arch-connect-from" class="primary-button">Von hier verbinden…</button></div>`;
+  details.innerHTML=`<p class="eyebrow">${card.proxy?"Cross-cutting endpoint":"Architecture card"}</p><h2>${escapeHtml(card.label.split("\n")[0])}</h2><p>${archCount(members.reduce((s,n)=>s+n.objects,0), "object")} · ${archCount(new Set(members.map(n=>n.graph)).size, "source")}</p><div class="arch-badges">${collections.map(c=>`<span>${escapeHtml(c.label)}</span>`).join("")}</div><p class="arch-evidence">${escapeHtml([...new Set(members.map(n=>n.method))].join(" · "))}</p><div class="arch-buttons"><button id="arch-open-objects" class="quiet-button">Open objects</button><button id="arch-connect-from" class="primary-button">Connect from here…</button></div>`;
   $("#arch-open-objects").onclick=()=>openArchitectureObjects(members);
   $("#arch-connect-from").disabled=!card.endpoint || !arch.snapshot.editable;
-  $("#arch-connect-from").onclick=()=>{arch.connecting=card.endpoint;toast("Zielkarte anklicken (Esc bricht ab).");};
+  $("#arch-connect-from").onclick=()=>{arch.connecting=card.endpoint;toast("Click the target card (Esc cancels).");};
 }
 
 async function openArchitectureObjects(members) {
-  if (!members.some(n=>n.objects)) return toast("Leere Quelle: keine Tabellen im gespeicherten Katalog.");
+  if (!members.some(n=>n.objects)) return toast("Empty source: no tables in the stored catalog.");
   // A saved report can also restrict a family payload, so await its full reset.
   if (state.focusSelection?.focuses.length && !(await clearFocuses())) return;
   state.canvasMode="space";state.structureLevel="objects";
   state.scopeFilters=null;initializeScopeFilters();
+  state.systemOverviewScope=null;
+  state.drilldownOverviewFilters={...state.scopeFilters};
   state.scopeFilters.systems=new Set(members.map(n=>n.system));
   state.scopeFilters.graphs=new Set(members.map(n=>n.graph));
   state.scopeFilters.areas=new Set(members.map(n=>`${n.system}:${n.area}`));

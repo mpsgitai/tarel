@@ -212,11 +212,15 @@ def decide_annotation_scope(
             "invalid_annotation_scope",
             "--include-fields requires a table or view target.",
         )
+    # Only fields that carry a proposal can be decided. Fields without one stay
+    # unchanged instead of failing the whole table decision.
     fields = sorted(
         (
             node
             for node in updated.nodes
-            if node.type == "field" and node.metadata.get("object_id") == root.node.id
+            if node.type == "field"
+            and node.metadata.get("object_id") == root.node.id
+            and node.annotation is not None
         ),
         key=lambda node: (int(node.metadata.get("position") or 9999), node.id),
     )

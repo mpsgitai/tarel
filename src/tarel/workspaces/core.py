@@ -314,18 +314,26 @@ def validate_system_references(
             )
 
     schema_areas = _schema_areas(system)
+    namespaces_by_graph: dict[str, set[str]] = {}
     for graph_name, namespace in schema_areas:
         graph = graphs[graph_name]
-        if namespace not in _graph_namespaces(graph):
+        if graph_name not in namespaces_by_graph:
+            namespaces_by_graph[graph_name] = _graph_namespaces(graph)
+        if namespace not in namespaces_by_graph[graph_name]:
             raise WorkspaceFailure(
                 "schema_not_found",
                 f"Schema not found in graph {graph_name}: {namespace}",
             )
 
+    # A graph can occur in thousands of zone memberships. Build its index once
+    # for this validation only; later requests must still inspect fresh graphs.
+    nodes_by_graph: dict[str, dict[str, GraphNode]] = {}
     for zone in system.zones:
         for member in zone.members:
             graph = graphs[member.graph]
-            node = graph.node_by_id().get(member.object_id)
+            if member.graph not in nodes_by_graph:
+                nodes_by_graph[member.graph] = graph.node_by_id()
+            node = nodes_by_graph[member.graph].get(member.object_id)
             if node is None or node.type not in {"table", "view"}:
                 raise WorkspaceFailure(
                     "zone_member_not_found",

@@ -9,7 +9,7 @@ async function architectureWrite(action, payload, closeDialog = null) {
     if (action==="layout") arch.dirty=false;
     if (closeDialog) $(closeDialog).close();
     renderArchitecture(true);
-    toast("Architektur gespeichert. Technische Graphen unverändert.");
+    toast("Architecture saved. Technical graphs unchanged.");
   } catch (error) {
     const target=closeDialog ? $(`${closeDialog} .arch-form-error`) : $("#arch-error");
     target.textContent=error.message;
@@ -18,11 +18,11 @@ async function architectureWrite(action, payload, closeDialog = null) {
 }
 
 function endpointOptions(select, value = "") {
-  select.replaceChildren(new Option("Endpunkt auswählen…", ""));
+  select.replaceChildren(new Option("Select endpoint…", ""));
   const groups=new Map();
   for (const entry of architectureEndpoints().values()) {
     const group=entry.id.split("::")[0];
-    if (!groups.has(group)) {const opt=document.createElement("optgroup");opt.label={asset:"Quellbereiche",graph:"Gesamte Quellen",area:"Areas",system:"Systeme"}[group];groups.set(group,opt);select.append(opt);}
+    if (!groups.has(group)) {const opt=document.createElement("optgroup");opt.label={asset:"Source areas",graph:"Whole sources",area:"Areas",system:"Systems"}[group];groups.set(group,opt);select.append(opt);}
     groups.get(group).append(new Option(entry.label,entry.id));
   }
   select.value=value;
@@ -37,7 +37,7 @@ function openArchitectureConnection(edge = null, source = null, target = null) {
   for (const name of ["label","kind","state","reason","evidence","frequency","mechanism"]) {
     if (edge?.[name]) form.elements[name].value=edge[name];
   }
-  $("#arch-connection-title").textContent=edge?"Verbindung bearbeiten":"Verbindung hinzufügen";
+  $("#arch-connection-title").textContent=edge?"Edit connection":"Add connection";
   $("#arch-connection-delete").hidden=!edge || !arch.snapshot.editable;
   $("#arch-connection-save").disabled=!arch.snapshot.editable;
   $("#arch-connection-dialog .arch-form-error").hidden=true;
@@ -47,7 +47,7 @@ function openArchitectureConnection(edge = null, source = null, target = null) {
 function architectureConnectTarget(target) {
   if (!target) return;
   const source=arch.connecting;arch.connecting=null;
-  if (source===target) return toast("Bitte einen anderen Endpunkt wählen.");
+  if (source===target) return toast("Choose a different endpoint.");
   openArchitectureConnection(null,source,target);
 }
 
@@ -69,7 +69,7 @@ function openArchitectureCollection(edit = false) {
 function toggleArchitectureSurface() {
   const active=state.canvasMode==="architecture" && Boolean(arch.snapshot);
   document.body.classList.toggle("architecture-mode",active);
-  $("#mode").textContent=active&&arch.snapshot.editable?`Karte editierbar · Graph ${state.data.editable?"editierbar":"read-only"}`:state.data.editable?"Edit enabled":"Read only";
+  $("#mode").textContent=active&&arch.snapshot.editable?`Map editable · graph ${state.data.editable?"editable":"read-only"}`:state.data.editable?"Edit enabled":"Read only";
   $("#architecture-sidebar").hidden=!active;
   $("#architecture-toolbar").hidden=!active;
   for (const id of ["show-systems","system-jump","show-all","fit-graph","view-options","trace-selected","open-inspector","open-objects"])
@@ -102,7 +102,7 @@ function initializeArchitectureActions() {
   $("#arch-fit-selected").onclick=()=>{const selected=state.cy.elements(":selected");state.cy.fit(selected.length?selected:state.cy.elements(),70);};
   $("#arch-save-layout").onclick=()=>architectureWrite("layout",{positions:arch.positions});
   $("#arch-reload").onclick=async()=>{
-    if (arch.dirty && !confirm("Ungespeicherte Layoutänderungen verwerfen?")) return;
+    if (arch.dirty && !confirm("Discard unsaved layout changes?")) return;
     try {acceptArchitecture(await api("/api/architecture"),true);arch.dirty=false;arch.undo=[];$("#arch-error").hidden=true;renderArchitecture();}
     catch(error){$("#arch-error").textContent=error.message;$("#arch-error").hidden=false;}
   };
@@ -117,7 +117,7 @@ function initializeArchitectureActions() {
     event.preventDefault();architectureWrite("connection",{item:Object.fromEntries(new FormData(event.target))},"#arch-connection-dialog");
   };
   $("#arch-connection-delete").onclick=()=>{
-    if(confirm("Diese Architekturverbindung löschen? Die letzte Dateiversion bleibt als Backup erhalten."))
+    if(confirm("Delete this architecture connection? The previous file version is kept as a backup."))
       architectureWrite("connection-delete",{id:$("#arch-connection-form").elements.id.value},"#arch-connection-dialog");
   };
   $("#arch-collection-form").onsubmit=event=>{
@@ -127,7 +127,7 @@ function initializeArchitectureActions() {
     architectureWrite("collection",{item},"#arch-collection-dialog");
   };
   $("#arch-collection-delete").onclick=()=>{
-    if(confirm("Sammlung löschen? Quellen und Verbindungen bleiben erhalten."))
+    if(confirm("Delete collection? Sources and connections are kept."))
       architectureWrite("collection-delete",{id:$("#arch-collection-form").elements.id.value},"#arch-collection-dialog");
   };
   $$('[data-arch-close]').forEach(button=>button.onclick=()=>$(button.dataset.archClose).close());

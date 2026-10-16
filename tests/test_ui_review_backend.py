@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 from tarel.focus.contracts import FocusFailure
 from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.revision import graph_revision
+from tarel.knowledge.contracts import KnowledgeDocument, KnowledgeScope
 from tarel.sdk import Tarel
 from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
 from tarel.workspaces.contracts import Area, SchemaReference
@@ -100,6 +101,31 @@ class ReviewViewBackendTests(TestCase):
         self.assertEqual(requested["review_summary"]["pending_tables"], 3)
         self.assertEqual(requested["review_summary"]["pending_fields"], 3)
         self.assertEqual(requested["focuses"], [self.focus.name])
+
+    def test_review_knowledge_uses_physical_ids_even_when_labels_collide(self):
+        tables = [node for node in self.graph.nodes if node.type == "table"]
+        first, second = tables[:2]
+        graph = replace(self.graph, nodes=tuple(
+            replace(node, label="same_label") if node.id in {first.id, second.id} else node
+            for node in self.graph.nodes
+        ))
+        self.sdk.runtime.graph_store().save(graph)
+        documents = tuple(
+            KnowledgeDocument(
+                id=f"context-{index}", title=f"Context {index}",
+                scope=KnowledgeScope(kind="object", graph=graph.name, reference=node.id),
+                content="Synthetic object context.", source_name="test.md",
+            )
+            for index, node in enumerate((first, second))
+        )
+        with patch("tarel.ui.server.list_knowledge_documents_use_case", return_value=documents):
+            result = self.backend.mutate("/api/review/view", {})
+        records = {record["object_id"]: record for record in result["review"]}
+        self.assertEqual(records[first.id]["available_context_document_ids"], ["context-0"])
+        self.assertEqual(records[second.id]["available_context_document_ids"], ["context-1"])
+        self.assertEqual(records[tables[2].id]["available_context_document_ids"], [])
+        self.assertEqual(len(records), 80)
+        self.assertEqual(result["revisions"], {graph.name: graph_revision(graph)})
 
     def test_focused_bootstrap_counts_match_review_without_restricting_graph_projection(self):
         backend = TarelUIBackend(UIConfig(graph=self.graph.name, focuses=(self.focus.name,)))

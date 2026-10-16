@@ -1,9 +1,10 @@
 "use strict";
 
-const retrievalModels = {settings:null, requests:{embedding:0, reranker:0}};
+const retrievalModels = {settings:null, searchMode:null, requests:{embedding:0, reranker:0}};
 
 function renderRetrievalModels(payload) {
   retrievalModels.settings = payload.settings;
+  retrievalModels.searchMode = payload.search_mode;
   const settings = payload.settings;
   for (const task of ["embedding", "reranker"]) {
     const choice = settings[task];
@@ -21,6 +22,8 @@ function renderRetrievalModels(payload) {
   const embedding = `${settings.embedding.provider} · ${settings.embedding.model}`;
   const reranker = settings.reranker ? `${settings.reranker.provider} · ${settings.reranker.model}` : "off";
   $("#retrieval-selection-label").textContent = `Embedding: ${embedding}; reranker: ${reranker}`;
+  renderSearchMode();
+  renderContextPolicySummary();
 }
 
 function updateModelControls(task) {
@@ -57,6 +60,8 @@ async function applyRetrievalModels() {
   $("#apply-retrieval").disabled = true;
   try {
     const payload = await api("/api/retrieval/settings", {settings, search_mode:$("#retrieval-mode").value});
+    queryTools.indexStatus = null;
+    scheduleIndexStatus();
     renderRetrievalModels(payload);
     queryTools.searchRequest += 1;
     clearTimeout(queryTools.searchTimer);
@@ -98,11 +103,13 @@ async function initializeRetrievalModels() {
       $(`#${task}-models`).innerHTML = "";
       $(`#${task}-model`).value = "";
       updateModelControls(task);
-      if (task === "embedding") $("#retrieval-mode").value = "hybrid";
+      renderSearchMode();
     });
+    $(`#${task}-model`).addEventListener("input", renderSearchMode);
     $(`#${task}-catalog`).addEventListener("click", () => loadModelCatalog(task));
     $(`#${task}-download`).addEventListener("click", () => downloadRetrievalModel(task));
   }
+  $("#retrieval-mode").addEventListener("change", renderSearchMode);
   $("#apply-retrieval").addEventListener("click", applyRetrievalModels);
   $("#run-model-search").addEventListener("click", runProjectSearch);
   $("#object-search").addEventListener("keydown", event => {

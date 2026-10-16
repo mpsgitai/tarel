@@ -17,22 +17,83 @@ const queryTools = {
   selectedObjects: new Set(),
   indexStatus: null,
   indexStatusRequest: 0,
+  indexStatusPending: null,
+  indexStatusScheduled: false,
+  indexStatusDirty: false,
   indexBuilding: false,
   requireSubmit: false,
 };
 
-async function loadIndexStatus() {
-  const request = ++queryTools.indexStatusRequest;
-  try {
-    const status = await api("/api/index/status");
-    if (request !== queryTools.indexStatusRequest) return;
-    queryTools.indexStatus = status;
-    renderIndexStatus();
-  } catch (error) {
-    if (request !== queryTools.indexStatusRequest) return;
-    $("#index-health-label").textContent = `Local search status unavailable: ${error.message}`;
-    $("#index-health-dot").className = "is-error";
+const SEMANTIC_MODES = new Set(["vector", "hybrid"]);
+const SEARCH_MODE_NAMES = {lexical: "Exact text", bm25: "Keywords (BM25)", vector: "Semantic", hybrid: "Hybrid"};
+
+function currentSearchMode() {
+  return typeof retrievalModels === "undefined" ? "bm25" : retrievalModels.searchMode || "bm25";
+}
+
+function renderSearchMode() {
+  const select = $("#retrieval-mode");
+  if (!select?.options) return;
+  const status = queryTools.indexStatus;
+  const applied = typeof retrievalModels !== "undefined" ? retrievalModels.settings?.embedding : null;
+  const matches = applied && $("#embedding-provider").value === applied.provider && $("#embedding-model").value.trim() === applied.model;
+  const ready = Boolean(status?.ready && matches);
+  const coverage = status && matches ? (status.workspace ? `${status.ready_graphs}/${status.graph_count}` : status.ready ? "1/1" : "0/1") : "…";
+  for (const option of select.options) {
+    const semantic = SEMANTIC_MODES.has(option.value);
+    option.disabled = semantic && !ready;
+    const base = SEARCH_MODE_NAMES[option.value] || option.value;
+    option.textContent = semantic && !ready ? `${base} — needs index (${coverage})` : base;
   }
+  const note = $("#search-mode-note");
+  const mode = select.value || currentSearchMode();
+  let text = "";
+  if (mode === "vector") text = "Similarity is not evidence of meaning, grain or joins.";
+  else if (mode === "hybrid") text = "“Semantic only” results have no keyword evidence; check them before using them as context.";
+  if (!ready) text += `${text ? " " : ""}Semantic modes need a complete index for the applied embedding selection (${coverage} graphs ready).`;
+  note.hidden = !text;
+  note.textContent = text;
+  note.className = `search-mode-note${SEMANTIC_MODES.has(mode) ? " caution" : ""}`;
+}
+
+async function loadIndexStatus() {
+  if (queryTools.indexStatusPending) return queryTools.indexStatusPending;
+  queryTools.indexStatusDirty = false;
+  const request = ++queryTools.indexStatusRequest;
+  const pending = (async () => {
+    try {
+      const status = await api("/api/index/status");
+      if (request !== queryTools.indexStatusRequest) return;
+      queryTools.indexStatus = status;
+      renderIndexStatus();
+    } catch (error) {
+      if (request !== queryTools.indexStatusRequest) return;
+      $("#index-health-label").textContent = `Local search status unavailable: ${error.message}`;
+      $("#index-health-dot").className = "is-error";
+    }
+  })();
+  queryTools.indexStatusPending = pending;
+  try {
+    await pending;
+  } finally {
+    queryTools.indexStatusPending = null;
+    if (queryTools.indexStatusDirty) scheduleIndexStatus();
+  }
+}
+
+function scheduleIndexStatus() {
+  queryTools.indexStatusDirty = true;
+  queryTools.indexStatus = null;
+  renderSearchMode();
+  // A changed projection invalidates an in-flight status, but its request is
+  // shared until it finishes. At most one fresh request follows it.
+  queryTools.indexStatusRequest += 1;
+  if (queryTools.indexStatusScheduled) return;
+  queryTools.indexStatusScheduled = true;
+  requestAnimationFrame(() => setTimeout(() => {
+    queryTools.indexStatusScheduled = false;
+    if (queryTools.indexStatusDirty) loadIndexStatus();
+  }, 0));
 }
 
 function renderIndexStatus() {
@@ -51,6 +112,7 @@ function renderIndexStatus() {
   $("#update-index").hidden = status.ready;
   $("#update-index").disabled = queryTools.indexBuilding;
   $("#update-index").textContent = queryTools.indexBuilding ? "Updating…" : "Update";
+  renderSearchMode();
 }
 
 async function updateIndex() {
@@ -160,13 +222,22 @@ function renderProjectSearch() {
   }
   const inventory = queryTools.searchResult?.results.inventory;
   const mode = queryTools.searchResult?.results.mode || "metadata";
-  status.textContent = `${hits.length} result${hits.length === 1 ? "" : "s"} · ${mode}${inventory ? ` · ${inventory.objects_after_filters}/${inventory.objects_in_scope} objects after filters` : ""}`;
+  const semanticOnly = hit => {
+    // Reranker provenance describes ordering, not keyword evidence.
+    const reasons = (hit.reasons || []).filter(reason => String(reason).startsWith("retrieval:"));
+    return reasons.length > 0 && reasons.every(reason => String(reason).startsWith("retrieval:vector"));
+  };
+  const similarityOnly = hits.filter(semanticOnly).length;
+  status.textContent = `${hits.length} result${hits.length === 1 ? "" : "s"} · ${SEARCH_MODE_NAMES[mode] || mode}${similarityOnly ? ` · ${similarityOnly} by similarity only` : ""}${inventory ? ` · ${inventory.objects_after_filters}/${inventory.objects_in_scope} objects after filters` : ""}`;
   $("#object-list").innerHTML = hits.map((hit, index) => {
     const object = searchHitObject(hit);
     const outside = !object || !visibleObjects().some(item => item.id === object.id);
     const action = hit.family ? (outside ? "Show family · clear display filters" : "Show reviewed family") : outside ? "Inspect · clear display filters" : "Inspect object";
     const metadata = hit.metadata || {};
-    return `<article class="search-hit"><div class="search-hit-heading"><span class="kind-icon">${hit.family ? "F" : hit.type === "view" ? "V" : "T"}</span><strong>${escapeHtml(hit.label)}</strong></div>
+    const evidence = semanticOnly(hit)
+      ? '<span class="search-evidence semantic" title="Ranked by embedding similarity only; no keyword in names, fields or annotations matched.">Semantic only · no keyword evidence</span>'
+      : hit.reasons?.some(reason => String(reason).startsWith("retrieval:vector")) ? '<span class="search-evidence both">Keyword + semantic</span>' : "";
+    return `<article class="search-hit${semanticOnly(hit) ? " is-semantic-only" : ""}"><div class="search-hit-heading"><span class="kind-icon">${hit.family ? "F" : hit.type === "view" ? "V" : "T"}</span><strong>${escapeHtml(hit.label)}</strong></div>${evidence}
       <p>Graph: ${[hit.source_graph || queryTools.searchResult.results.graph, metadata.namespace].filter(Boolean).map(escapeHtml).join(" · ")}</p>
       ${metadata.description ? `<p>${escapeHtml(metadata.description)}</p>` : '<p>Meaning not documented.</p>'}
       ${metadata.role || metadata.grain || metadata.annotation_state ? `<p>${metadata.role ? `Role: ${escapeHtml(metadata.role)}` : "Role: unknown"}${metadata.grain ? ` · Grain: ${escapeHtml(metadata.grain)}` : ""}${metadata.annotation_state ? ` · ${escapeHtml(metadata.annotation_state)}` : ""}</p>` : ""}
@@ -252,11 +323,19 @@ function clearContextPreview(message = "Options changed. Build a new project con
   $("#context-result").hidden = true;
   $("#context-result").replaceChildren();
   $("#context-request-status").textContent = message;
+  $("#context-request-status").className = "";
   $("#build-context").disabled = !queryTools.scope;
+  renderContextPolicySummary();
+}
+
+// The summary names the ranking mode, so a semantic choice in the explorer stays visible here.
+function renderContextPolicySummary() {
   const reviewed = $("#context-reviewed").checked;
   const logical = $("#context-logical-hints").value;
-  $("#context-policy-summary").textContent = `${reviewed ? "Reviewed annotations only" : "All usable annotations"} · ${logical === "include_candidates" ? "exploratory hints" : logical === "confirmed_only" ? "reviewed hints" : "logical hints off"}`;
-  $("#context-policy-summary").className = !reviewed || logical === "include_candidates" ? "caution" : "";
+  const mode = currentSearchMode();
+  const ranking = $("#context-kind").value === "question" ? ` · ranking: ${SEARCH_MODE_NAMES[mode] || mode}` : "";
+  $("#context-policy-summary").textContent = `${reviewed ? "Reviewed annotations only" : "All usable annotations"} · ${logical === "include_candidates" ? "exploratory hints" : logical === "confirmed_only" ? "reviewed hints" : "logical hints off"}${ranking}`;
+  $("#context-policy-summary").className = !reviewed || logical === "include_candidates" || (ranking && SEMANTIC_MODES.has(mode)) ? "caution" : "";
 }
 
 function queryToolsScopeChanged() {
@@ -266,7 +345,7 @@ function queryToolsScopeChanged() {
   clearContextPreview("Project view reloaded. Reload the project scope before building context.");
   if (projectSearchActive()) scheduleProjectSearch();
   if ($("#context-dialog").open) loadContextScope();
-  loadIndexStatus();
+  scheduleIndexStatus();
 }
 
 async function openContextDialog() {
@@ -280,8 +359,9 @@ async function loadContextScope() {
   queryTools.scope = null;
   clearContextPreview("Loading the project scope and revisions…");
   $("#context-project").textContent = "Loading project scope…";
+  $("#reload-context-scope").disabled = true;
   try {
-    const result = await api("/api/query/scope", {scope_objects: queryTools.scopeObjects});
+    const result = await api("/api/query/scope", {scope_objects: queryTools.scopeObjects}, 60000);
     if (request !== queryTools.scopeRequest || !$("#context-dialog").open) return;
     queryTools.scope = result;
     const name = result.scope.workspace || result.scope.graph;
@@ -293,6 +373,8 @@ async function loadContextScope() {
     if (request !== queryTools.scopeRequest) return;
     $("#context-project").textContent = "Project scope unavailable";
     $("#context-request-status").textContent = error.message;
+  } finally {
+    if (request === queryTools.scopeRequest) $("#reload-context-scope").disabled = false;
   }
 }
 
@@ -335,6 +417,7 @@ async function buildContextPreview(event) {
   clearContextPreview("Compiling project metadata…");
   const request = queryTools.previewRequest;
   const payload = contextRequestPayload();
+  const rankingMode = currentSearchMode();
   $("#build-context").disabled = true;
   try {
     const result = await api("/api/context/preview", payload);
@@ -342,7 +425,9 @@ async function buildContextPreview(event) {
     queryTools.packet = result.packet;
     renderContextPreview(result.packet, result.brief, result.delta || null);
     queryTools.lastPacket = result.packet;
-    $("#context-request-status").textContent = "Packet ready. This is metadata context, not an analytical answer.";
+    const ranked = payload.kind === "question" ? ` Ranked with ${SEARCH_MODE_NAMES[rankingMode] || rankingMode}${SEMANTIC_MODES.has(rankingMode) ? "; check objects found by similarity" : ""}.` : "";
+    $("#context-request-status").className = payload.kind === "question" && SEMANTIC_MODES.has(rankingMode) ? "caution" : "";
+    $("#context-request-status").textContent = `Packet ready.${ranked} This is metadata context, not an analytical answer.`;
   } catch (error) {
     if (request !== queryTools.previewRequest) return;
     queryTools.scope = null;
@@ -501,5 +586,5 @@ function initializeQueryTools() {
     });
   }
   updateContextKind();
-  loadIndexStatus();
+  renderSearchMode();
 }

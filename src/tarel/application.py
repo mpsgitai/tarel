@@ -937,6 +937,23 @@ def _load_workspace_scope(
     return workspace, loaded, scope
 
 
+def load_workspace_scope_use_case(
+    workspace_name: str,
+    *,
+    systems: tuple[str, ...] = (),
+    graphs: tuple[str, ...] = (),
+    areas: tuple[str, ...] = (),
+    schemas: tuple[str, ...] = (),
+    zones: tuple[str, ...] = (),
+    runtime: TarelRuntime | None = None,
+) -> tuple[WorkspaceDocument, dict[str, GraphDocument], ResolvedScope]:
+    """Reuse the validated documents within one UI request, without a shared cache."""
+    return _load_workspace_scope(
+        workspace_name, systems=systems, graphs=graphs, areas=areas,
+        schemas=schemas, zones=zones, runtime=runtime,
+    )
+
+
 def _focus_object_allowlist(
     focuses: tuple[str, ...],
     *,
