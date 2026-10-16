@@ -603,7 +603,7 @@
     }
     if (type === "system-summary") {
       const name = node.data("system");
-      const objects = (appState()?.data?.objects || []).filter(item => (item.system || "Standalone graphs") === name);
+      const objects = visibleObjects().filter(item => (item.system || "Standalone graphs") === name);
       const counts = {ok: 0, warn: 0, none: 0, err: 0};
       objects.forEach(item => { counts[status(objectState(item)).tone] += 1; });
       const graphs = new Set(objects.map(item => item.graph)), areas = [...new Set(objects.map(item => item.area).filter(Boolean))].sort();
@@ -1414,6 +1414,7 @@
     scheduleMinimap();
     checkEmpty();
     if (surface !== (kind === "architecture" ? "graph" : preferred)) setSurface(preferred, false);
+    else if (surface === "table") renderTable();
   }
 
   function activate() {

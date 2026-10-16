@@ -222,7 +222,11 @@ function renderProjectSearch() {
   }
   const inventory = queryTools.searchResult?.results.inventory;
   const mode = queryTools.searchResult?.results.mode || "metadata";
-  const semanticOnly = hit => hit.reasons?.length && hit.reasons.every(reason => String(reason).startsWith("retrieval:vector"));
+  const semanticOnly = hit => {
+    // Reranker provenance describes ordering, not keyword evidence.
+    const reasons = (hit.reasons || []).filter(reason => String(reason).startsWith("retrieval:"));
+    return reasons.length > 0 && reasons.every(reason => String(reason).startsWith("retrieval:vector"));
+  };
   const similarityOnly = hits.filter(semanticOnly).length;
   status.textContent = `${hits.length} result${hits.length === 1 ? "" : "s"} · ${SEARCH_MODE_NAMES[mode] || mode}${similarityOnly ? ` · ${similarityOnly} by similarity only` : ""}${inventory ? ` · ${inventory.objects_after_filters}/${inventory.objects_in_scope} objects after filters` : ""}`;
   $("#object-list").innerHTML = hits.map((hit, index) => {

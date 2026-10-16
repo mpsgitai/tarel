@@ -158,11 +158,29 @@ assert.equal($('#context-policy-summary').className, 'caution');
 state.data = {objects:[]}; visibleObjects = () => [];
 queryTools.searchResult = {results:{graph:'sales',mode:'hybrid',hits:[
   {id:'a',type:'table',label:'Similarity',reasons:['retrieval:vector score=0.8']},
-  {id:'b',type:'table',label:'Both',reasons:['name matched','retrieval:vector score=0.7']}
+  {id:'b',type:'table',label:'Both',reasons:['retrieval:bm25','retrieval:vector score=0.7']}
 ]}};
 renderProjectSearch();
 assert.ok($('#object-list').innerHTML.includes('Semantic only · no keyword evidence'));
 assert.ok($('#object-list').innerHTML.includes('Keyword + semantic'));
+assert.ok($('#project-search-status').textContent.includes('1 by similarity only'));
+""")
+
+    def test_reranker_provenance_does_not_count_as_keyword_evidence(self) -> None:
+        self._script(r"""
+state.data = {objects:[]}; visibleObjects = () => [];
+queryTools.searchResult = {results:{graph:'sales',mode:'hybrid',hits:[
+  {id:'a',type:'table',label:'Vector',reasons:['retrieval:vector','reranker:local:model']},
+  {id:'b',type:'table',label:'Both',
+    reasons:['retrieval:bm25','retrieval:vector','reranker:provider:model']},
+  {id:'c',type:'table',label:'Keywords',reasons:['retrieval:bm25','reranker:local:model']},
+  {id:'d',type:'table',label:'Provenance only',reasons:['reranker:provider:model']},
+  {id:'e',type:'table',label:'Unknown',reasons:[]}
+]}};
+renderProjectSearch();
+const html = $('#object-list').innerHTML;
+assert.equal((html.match(/Semantic only · no keyword evidence/g) || []).length, 1);
+assert.equal((html.match(/Keyword \+ semantic/g) || []).length, 1);
 assert.ok($('#project-search-status').textContent.includes('1 by similarity only'));
 """)
 

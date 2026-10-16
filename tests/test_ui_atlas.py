@@ -102,3 +102,61 @@ assert.deepEqual(commonPrefix([['crm', 'a', 'x'], ['dwh', 'a', 'x']]), []);
 assert.deepEqual(commonPrefix([]), []);
 """,
         )
+
+    def test_active_table_refreshes_on_bootstrap_and_scope_reload(self):
+        self.run_js(["attach"], r"""
+let current = null, view, surface = 'table', preferred = 'table', kind = 'structure';
+const listeners = new Map();
+let data = null, shown = 'Loading metadata…', tableRenders = 0;
+const ui = {legend:{querySelector:()=>({})}};
+function renderTable(){shown = data.map(x=>x.id).join(','); tableRenders++;}
+function setSurface(){surface = kind === 'architecture' ? 'graph' : preferred;
+  if (surface === 'table') renderTable();}
+function ensureUi(){} function clearCards(){} function tokens(){return {};}
+function kindOf(){return kind;} function enrich(){} function tierFor(){return 1;}
+function quantized(){return 1;} function stylesheet(){return [];}
+function arrange(){} function measureGroups(){} function applyZoomDetail(){}
+function legendFor(){return '';} function applyFocus(){} function refreshCards(){}
+function scheduleMinimap(){} function checkEmpty(){}
+function graph(){const cy={destroyed:()=>false,zoom:()=>1,style(){},scratch:()=>true};
+  listeners.set(cy,[]); return cy;}
+data = [{id:'first'},{id:'second'}]; attach(graph());
+assert.equal(shown, 'first,second');
+data = [{id:'second'}]; attach(graph());
+assert.equal(shown, 'second', 'a narrower scope must replace old rows');
+data = []; attach(graph()); assert.equal(shown, '');
+assert.equal(tableRenders, 3);
+kind = 'architecture'; attach(graph()); assert.equal(surface, 'graph');
+assert.equal(tableRenders, 3, 'architecture does not render an invisible table');
+kind = 'structure'; data = [{id:'new-load'}]; attach(graph());
+assert.equal(surface, 'table'); assert.equal(shown, 'new-load');
+""")
+
+    def test_system_card_summaries_use_only_visible_objects(self):
+        self.run_js(["cardMarkup"], r"""
+const OBJECT_TYPES = new Set();
+const all = [
+  {system:'sales',graph:'shown',area:'selected area',tone:'ok'},
+  {system:'sales',graph:'excluded',area:'hidden area',tone:'warn'},
+  {system:'other',graph:'other',area:'other area',tone:'none'}
+];
+const appState = () => ({data:{objects:all}});
+let filtered = [all[0],all[2]];
+const visibleObjects = () => filtered;
+const status = tone => ({tone}), objectState = item => item.tone;
+const esc = String, plural = (n, word) => `${n} ${word}${n===1?'':'s'}`;
+const card = {data:key=>({type:'system-summary',system:'sales'})[key]};
+const before = JSON.stringify(all);
+let html = cardMarkup(card).html;
+assert.ok(html.includes('<b>1</b>'));
+assert.ok(html.includes('1 graph'));
+assert.ok(html.includes('1 approved'));
+assert.ok(html.includes('0 draft'));
+assert.ok(html.includes('selected area'));
+assert.ok(!html.includes('hidden area'));
+assert.ok(!html.includes('other area'));
+filtered = [all[1]]; html = cardMarkup(card).html;
+assert.ok(html.includes('0 approved')); assert.ok(html.includes('1 draft'));
+assert.ok(html.includes('hidden area')); assert.ok(!html.includes('selected area'));
+assert.equal(JSON.stringify(all), before);
+""")
