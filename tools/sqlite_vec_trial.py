@@ -27,8 +27,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tarel.retrieval.contracts import RankedDocument, RetrievalDocument  # noqa: E402
-from tarel.retrieval.index import _rank_vectors, _unpack_vector  # noqa: E402
+from tarel.retrieval.contracts import RankedDocument, RetrievalDocument
+from tarel.retrieval.vectors import (
+    rank_vectors,
+    unpack_vector,
+)
 
 
 def load_extension(connection: sqlite3.Connection) -> None:
@@ -68,7 +71,7 @@ def load_python(connection: sqlite3.Connection) -> tuple:
         "SELECT d.id,d.object_id,d.field_id,d.namespace,d.label,d.text,v.dimensions,v.value "
         "FROM documents d JOIN vectors v ON v.document_id=d.id ORDER BY d.id"
     ).fetchall()
-    return tuple((RetrievalDocument(*row[:6]), _unpack_vector(row[7], row[6])) for row in rows)
+    return tuple((RetrievalDocument(*row[:6]), unpack_vector(row[7], row[6])) for row in rows)
 
 
 def rank_python(indexed: tuple, query: tuple, *, limit: int, namespace=None, object_ids=None):
@@ -78,7 +81,7 @@ def rank_python(indexed: tuple, query: tuple, *, limit: int, namespace=None, obj
         if namespace is None or document.namespace.casefold() == namespace.casefold()
         if object_ids is None or document.object_id in object_ids
     )
-    return _rank_vectors(selected, query, limit=limit)
+    return rank_vectors(selected, query, limit=limit)
 
 
 def rank_native(

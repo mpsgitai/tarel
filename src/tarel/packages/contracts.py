@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tarel import __version__
+from tarel.errors import TarelError
 
 PACKAGE_CONTRACT_VERSION = "tarel.package.v0.2"
 PACKAGE_MEDIA_TYPE = "application/vnd.tarel+zip"
@@ -43,10 +44,8 @@ _WINDOWS_RESERVED = {
 }
 
 
-class PackageFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class PackageFailure(TarelError):
+    """Raised when a package operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

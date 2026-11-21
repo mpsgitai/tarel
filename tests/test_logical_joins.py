@@ -14,10 +14,11 @@ from unittest.mock import Mock, patch
 
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
-from tarel.discovery.application import (
+from tarel.discovery.advice import (
     advise_discovery_run_use_case,
+)
+from tarel.discovery.application import (
     find_discovery_candidates_use_case,
-    promote_discovery_candidates_use_case,
     start_discovery_run_use_case,
     submit_discovery_step_use_case,
 )
@@ -25,10 +26,15 @@ from tarel.discovery.contracts import (
     DISCOVERY_CONTRACT_VERSION,
     DISCOVERY_LOGICAL_JOIN_CONTRACT_VERSION,
     DiscoveryFailure,
+)
+from tarel.discovery.logical_program import LogicalJoinProgram
+from tarel.discovery.promotion import (
+    promote_discovery_candidates_use_case,
+)
+from tarel.discovery.runs import (
     DiscoveryObservation,
     DiscoveryRun,
 )
-from tarel.discovery.logical_program import LogicalJoinProgram
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.revision import physical_graph_revision
 from tarel.logical_joins.application import (
@@ -569,7 +575,7 @@ class LogicalJoinTests(TestCase):
                 }
             ]
         }
-        with patch("tarel.discovery.application.load_provider", return_value=provider):
+        with patch("tarel.discovery.advice.load_provider", return_value=provider):
             changed = advise_discovery_run_use_case(
                 run.id, expected_revision=run.revision, count=1, runtime=self.runtime
             )

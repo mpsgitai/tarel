@@ -290,7 +290,8 @@ def _order(
     sources: dict[str, dict[str, Any]],
     parents: dict[str, tuple[str, ...]],
 ) -> tuple[str, ...]:
-    remaining, children = {}, {key: [] for key in models}
+    remaining: dict[str, int] = {}
+    children: dict[str, list[str]] = {key: [] for key in models}
     for key, dependencies in parents.items():
         for parent in dependencies:
             if parent not in models and parent not in sources:

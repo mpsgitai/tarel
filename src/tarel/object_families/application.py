@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from tarel.graph.contracts import GraphDocument, GraphNode
 from tarel.graph.revision import physical_graph_revision, physical_schema_revision
 from tarel.graph.selective import GraphHeader
-from tarel.graph.store import FileGraphStore
 from tarel.object_families.contracts import (
     FamilyAttribute,
     FamilyField,
@@ -17,8 +16,7 @@ from tarel.object_families.contracts import (
     review_family,
     validate_family,
 )
-from tarel.object_families.store import FileObjectFamilyStore
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 
 FAMILY_MODES = ("confirmed_only", "include_candidates")
 _NOTICE = (
@@ -93,7 +91,7 @@ def propose_object_family_use_case(
         raise ObjectFamilyFailure(
             "invalid_object_family", "Members must be a tuple of physical object references."
         )
-    graph = _graphs(runtime).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     objects = {node.id: node for node in graph.nodes if node.type in {"table", "view"}}
     references: dict[str, list[str]] = {}
     for node in objects.values():
@@ -111,7 +109,7 @@ def propose_object_family_use_case(
         raise ObjectFamilyFailure(
             "invalid_object_family", "A family requires at least two distinct physical members."
         )
-    schemas = _physical_schemas(graph, set(member_ids))
+    schemas = physical_schemas(graph, set(member_ids))
     family = ObjectFamily(
         graph_name=graph.name,
         graph_revision=physical_graph_revision(graph),
@@ -167,9 +165,9 @@ def _validate_families(
                 raise ObjectFamilyFailure(
                     "object_family_member_not_found", "A member is not a physical table or view."
                 )
-            _attribute_values(family.attributes, node)
+            family_attribute_values(family.attributes, node)
         members.update(family.member_ids)
-    schemas = _physical_schemas(graph, members)
+    schemas = physical_schemas(graph, members)
     for family in families:
         expected = tuple(sorted(family.schema, key=lambda item: item.name))
         if any(schemas[member_id] != expected for member_id in family.member_ids):
@@ -190,9 +188,9 @@ def import_object_family_use_case(
         raise ObjectFamilyFailure(
             "invalid_object_family_import", "New family imports must be unreviewed candidates."
         )
-    graph = _graphs(runtime).load(family.graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(family.graph_name)
     validate_object_family_against_graph(family, graph)
-    store = _families(runtime)
+    store = resolve_runtime(runtime).object_family_store()
     if store.exists(family.graph_name, family.id):
         current = store.load(family.graph_name, family.id)
         if current == family:
@@ -223,7 +221,7 @@ def load_object_family_use_case(
     runtime: TarelRuntime | None = None,
 ) -> ObjectFamily:
     """Read an audit artifact. Use members/projection for current graph-bound use."""
-    return _families(runtime).load(graph_name, family_id)
+    return resolve_runtime(runtime).object_family_store().load(graph_name, family_id)
 
 
 def review_object_family_use_case(
@@ -237,9 +235,10 @@ def review_object_family_use_case(
 ) -> ObjectFamily:
     family = load_object_family_use_case(graph_name, family_id, runtime=runtime)
     _require_revision(family, expected_revision)
-    validate_object_family_against_graph(family, _graphs(runtime).load(graph_name))
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
+    validate_object_family_against_graph(family, graph)
     changed = review_family(family, decision=decision, reason=reason)
-    _families(runtime).save(changed)
+    resolve_runtime(runtime).object_family_store().save(changed)
     return changed
 
 
@@ -275,9 +274,9 @@ def list_object_families_use_case(
     *,
     runtime: TarelRuntime | None = None,
 ) -> tuple[dict[str, object], ...]:
-    graph = _graphs(runtime).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     revision = physical_graph_revision(graph)
-    store = _families(runtime)
+    store = resolve_runtime(runtime).object_family_store()
     families = tuple(store.load(graph_name, family_id) for family_id in store.list(graph_name))
     current = tuple(family for family in families if family.graph_revision == revision)
     _validate_families(current, graph, revision=revision)
@@ -298,8 +297,8 @@ def project_families_for_graphs_use_case(
     mode: str = "confirmed_only",
     runtime: TarelRuntime | None = None,
 ) -> FamilyProjection:
-    _require_mode(mode)
-    store = _families(runtime)
+    require_family_mode(mode)
+    store = resolve_runtime(runtime).object_family_store()
     result: list[ObjectFamily] = []
     stale: set[str] = set()
     for graph in graphs:
@@ -335,7 +334,7 @@ def resolve_family_members_use_case(
     allowed_object_ids: frozenset[str] | None = None,
     runtime: TarelRuntime | None = None,
 ) -> FamilyMemberPage:
-    _require_mode(mode)
+    require_family_mode(mode)
     if namespace is not None and not isinstance(namespace, str):
         raise ObjectFamilyFailure("invalid_object_family_scope", "Namespace must be a string.")
     if allowed_object_ids is not None and (
@@ -378,7 +377,7 @@ def resolve_family_members_use_case(
         ):
             continue
         total += 1
-        values = _attribute_values(family.attributes, node)
+        values = family_attribute_values(family.attributes, node)
         if any(values[name] != value for name, value in selected_filters.items()):
             continue
         if offset <= matched < offset + limit:
@@ -399,11 +398,13 @@ def resolve_family_members_use_case(
 
 
 def validate_family_selectively(
-    family: ObjectFamily, *, runtime: TarelRuntime | None = None,
+    family: ObjectFamily,
+    *,
+    runtime: TarelRuntime | None = None,
 ) -> GraphHeader:
     """Check every physical member's exact schema without hydrating its fields."""
     validate_family(family)
-    store = _graphs(runtime)
+    store = resolve_runtime(runtime).graph_store()
     header = store.header(family.graph_name)
     if family.graph_revision != header.physical_revision:
         raise ObjectFamilyFailure(
@@ -411,40 +412,47 @@ def validate_family_selectively(
             "Object family targets a different physical graph revision.",
         )
     schemas = store.object_schema_hashes(
-        family.graph_name, family.member_ids, expected_revision=header.revision,
+        family.graph_name,
+        family.member_ids,
+        expected_revision=header.revision,
     )
-    expected = physical_schema_revision(tuple(
-        (field.name, field.data_type, field.nullable) for field in family.schema
-    ))
+    expected = physical_schema_revision(
+        tuple((field.name, field.data_type, field.nullable) for field in family.schema)
+    )
     if any(value != expected for _object_id, value in schemas.hashes):
         raise ObjectFamilyFailure(
-            "object_family_schema_mismatch", "Family member schemas differ from the declaration.",
+            "object_family_schema_mismatch",
+            "Family member schemas differ from the declaration.",
         )
     return header
 
 
 def iter_family_metadata(
-    family: ObjectFamily, *, header: GraphHeader, runtime: TarelRuntime | None = None,
+    family: ObjectFamily,
+    *,
+    header: GraphHeader,
+    runtime: TarelRuntime | None = None,
 ) -> Iterator[GraphNode]:
     """Stream physical names only; validate all declared affixes, including unselected members."""
-    store = _graphs(runtime)
+    store = resolve_runtime(runtime).graph_store()
     offset = 0
     while True:
         page = store.list_objects(
-            family.graph_name, object_ids=family.member_ids, offset=offset, limit=1000,
+            family.graph_name,
+            object_ids=family.member_ids,
+            offset=offset,
+            limit=1000,
             expected_revision=header.revision,
         )
         for node in page.objects:
-            _attribute_values(family.attributes, node)
+            family_attribute_values(family.attributes, node)
             yield node
         if page.next_offset is None:
             break
         offset = page.next_offset
 
 
-def _physical_schemas(
-    graph: GraphDocument, members: set[str]
-) -> dict[str, tuple[FamilyField, ...]]:
+def physical_schemas(graph: GraphDocument, members: set[str]) -> dict[str, tuple[FamilyField, ...]]:
     schemas: dict[str, list[FamilyField]] = {member: [] for member in members}
     for field in graph.nodes:
         parent = field.metadata.get("object_id")
@@ -466,7 +474,9 @@ def _physical_schemas(
     }
 
 
-def _attribute_values(attributes: tuple[FamilyAttribute, ...], node: GraphNode) -> dict[str, str]:
+def family_attribute_values(
+    attributes: tuple[FamilyAttribute, ...], node: GraphNode
+) -> dict[str, str]:
     values: dict[str, str] = {}
     for attribute in attributes:
         source = node.metadata.get("name" if attribute.source == "object_name" else "namespace")
@@ -490,7 +500,7 @@ def _attribute_values(attributes: tuple[FamilyAttribute, ...], node: GraphNode) 
     return values
 
 
-def _require_mode(mode: str) -> None:
+def require_family_mode(mode: str) -> None:
     if mode not in FAMILY_MODES:
         raise ObjectFamilyFailure("invalid_object_family_mode", "Unsupported object-family policy.")
 
@@ -500,11 +510,3 @@ def _require_revision(family: ObjectFamily, expected: str) -> None:
         raise ObjectFamilyFailure(
             "stale_object_family", "Family revision changed; reload before review or member paging."
         )
-
-
-def _families(runtime: TarelRuntime | None) -> FileObjectFamilyStore:
-    return runtime.object_family_store() if runtime else FileObjectFamilyStore()
-
-
-def _graphs(runtime: TarelRuntime | None) -> FileGraphStore:
-    return runtime.graph_store() if runtime else FileGraphStore()

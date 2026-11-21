@@ -1,11 +1,14 @@
 """The same retrieval selection used by CLI and GUI."""
 
 from tarel.retrieval.catalog import list_models
+from tarel.retrieval.contracts import ModelCatalog
 from tarel.retrieval.settings import RetrievalSettings, load_settings, save_settings
 from tarel.runtime import TarelRuntime
 
 
 class RetrievalAPI:
+    """Select the embedding and reranker models used by search and indexes."""
+
     def __init__(self, runtime: TarelRuntime) -> None:
         self.runtime = runtime
 
@@ -16,5 +19,5 @@ class RetrievalAPI:
         save_settings(self.runtime, settings)
         return settings
 
-    def models(self, *, provider: str = "local", task: str = "embedding") -> dict[str, object]:
+    def models(self, *, provider: str = "local", task: str = "embedding") -> ModelCatalog:
         return list_models(provider=provider, task=task)

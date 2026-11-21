@@ -55,6 +55,7 @@ sql-lineage = [
 ]
 dev = [
   "build>=1.2,<2",
+  "mypy>=1.15",
   "ruff>=0.11",
 ]
 
@@ -77,9 +78,11 @@ only-include = [
   "tests",
   "tools/check_distribution.py",
   "tools/generate_cli_reference.py",
+  "tools/generate_code_map.py",
   "tools/check_docs.py",
   "tools/readme_demo",
   "tools/run_semantic_contract_test.py",
+  "tools/smoke_demo.py",
   "tools/sqlite_vec_trial.py",
 ]
 
@@ -102,4 +105,46 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PTH"]
+# RUF001: intentional typographic characters in user-facing strings.
+# PTH100: os.path.abspath keeps symlinks, Path.resolve does not; packages rely on that.
+# PTH105/PTH101 in ui/ and tools/: one-off scripts and the deferred browser refactor.
+ignore = ["RUF001", "PTH100"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/tarel/ui/**" = ["PTH101", "PTH105"]
+"tools/**" = ["PTH101", "PTH105"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/tarel"]
+strict_equality = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+# Optional drivers and runtimes ship without type information.
+[[tool.mypy.overrides]]
+module = ["llama_cpp", "pymssql", "sqlite_vec", "yaml"]
+ignore_missing_imports = true
+
+# Type debt: modules that do not pass yet. Every other module, including all of cli/ and sdk/,
+# is checked. Fix a module, then delete it from this list; never add one.
+[[tool.mypy.overrides]]
+module = [
+  "tarel.annotations.review",
+  "tarel.context.hints_application",
+  "tarel.discovery.advice",
+  "tarel.discovery.tasks",
+  "tarel.entity_resolution.discovery",
+  "tarel.expansion.projections",
+  "tarel.lineage.dbt",
+  "tarel.lineage.review",
+  "tarel.lineage.sqlglot_adapter",
+  "tarel.lineage.traversal",
+  "tarel.object_families.proposal_contracts",
+  "tarel.retrieval.documents",
+  "tarel.retrieval.index",
+  "tarel.retrieval.settings",
+  "tarel.semantic_concepts.application",
+]
+ignore_errors = true

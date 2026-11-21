@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
-from tarel.context import ContextResult
-from tarel.context_output import canonical_json
-from tarel.context_packets import (
+from tarel.context.compiler import ContextResult
+from tarel.context.output import canonical_json
+from tarel.context.packets import (
     ContextPacketSnapshot,
     context_packet_from_dict,
     context_packet_graph_identity,
@@ -72,7 +73,8 @@ def expand_context_use_case(
         invalid("Supply a real context packet, not an asserted packet hash.")
     runtime = runtime or TarelRuntime.local(Path.cwd() / ".tarel")
     boundaries, validation = _scope(snapshot, runtime)
-    items, omissions = [], []
+    items: list[Any] = []
+    omissions: list[Any] = []
     from tarel.expansion.projections import project_expansion_target
 
     for index, target in enumerate(targets):
@@ -104,7 +106,7 @@ def expand_context_use_case(
             continue
         trial = ContextExpansion(
             snapshot.packet_hash,
-            tuple((*items, item)),
+            (*items, item),
             tuple(omissions),
             max_characters,
             validation,
@@ -112,15 +114,13 @@ def expand_context_use_case(
         # Reserve enough envelope space for one explicit omission per remaining target.
         reserved = replace(
             trial,
-            omissions=tuple(
-                (
+            omissions=(
                     *omissions,
                     *(
                         (remaining, "expansion_character_budget")
                         for remaining in range(index + 1, len(targets))
                     ),
-                )
-            ),
+                ),
         )
         if len(canonical_json(reserved.to_dict())) > max_characters:
             omissions.append((index, "expansion_character_budget"))
@@ -143,7 +143,7 @@ def _scope(
     dict[str, tuple[str, frozenset[str] | None, str | None]], tuple[tuple[str, str, bool], ...]
 ]:
     name, revision = context_packet_graph_identity(packet)
-    scope = packet.stable.get("scope")
+    scope: Any = packet.stable.get("scope")
     if not isinstance(scope, dict):
         invalid("Base packet requires an explicit scope.")
     workspace_name = scope.get("workspace")
@@ -165,7 +165,7 @@ def _scope(
         )
     # Workspace scope includes zones/relationships; revalidate using its existing authoritative
     # compiler. This path may read complete graphs; single-graph expansion stays selective.
-    from tarel.application import _load_workspace_scope
+    from tarel.workspaces.application import load_workspace_scope
     from tarel.workspaces.projection import project_workspace_scope
 
     selections = {}
@@ -174,7 +174,7 @@ def _scope(
         if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
             invalid("Base workspace selection is invalid.")
         selections[key] = tuple(values)
-    workspace, graphs, resolved = _load_workspace_scope(
+    workspace, graphs, resolved = load_workspace_scope(
         workspace_name, runtime=runtime, **selections
     )
     projection = project_workspace_scope(workspace, graphs, resolved)

@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
-import re
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 
 from tarel.annotations.states import DEFAULT_CONTEXT_ANNOTATION_STATES
 from tarel.graph.contracts import GraphDocument, GraphNode
 from tarel.lineage.contracts import (
+    LineageDefinition,
     LineageDocument,
     LineageEvidence,
     LineageFailure,
     LineageReview,
     LineageWriteSource,
+)
+from tarel.lineage.resolution import (
+    ReferenceIndex,
+    ReferenceResolution,
+    ReferenceTarget,
+    declared_catalogs,
+    local_scope,
+    normalize_reference,
+    resolve_reference,
+    scoped_label,
+    session_roots,
+    temporary_scope,
 )
 from tarel.retrieval.bm25 import rank_bm25, tokenize
 from tarel.retrieval.contracts import EmbeddingBackend, RankedDocument, RetrievalDocument
@@ -110,6 +122,11 @@ class UpstreamTrace:
 class _Node:
     value: LineageReference
     aliases: tuple[str, ...]
+    # Unqualified names ("F_SLS_01", "F_SLS_01.QTY") as scripts write them for the default schema.
+    # They resolve only when no exact alias matches and exactly one graph object carries them.
+    short_names: tuple[str, ...] = ()
+    # The graph catalog of a graph node; settles a same-named reference from a definition in it.
+    catalog: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,12 +145,25 @@ class _Edge:
     write_evidence: LineageEvidence | None = None
     reviews: tuple[LineageReview, ...] = ()
     granularity_change: str | None = None
+    # Says how a same-named reference was settled, so the trace can show it.
+    resolution_note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _Ambiguity:
+    """A reference with several candidates; it only matters once a trace depends on it."""
+
+    reference: str
+    candidates: tuple[str, ...]
+    lineage: str
 
 
 @dataclass(frozen=True, slots=True)
 class _Network:
     nodes: dict[str, _Node]
     edges: tuple[_Edge, ...]
+    # Node id -> ambiguous references that could be part of that node's upstream.
+    ambiguities: dict[str, tuple[_Ambiguity, ...]] = field(default_factory=dict)
 
     def aliases(self) -> dict[str, tuple[str, ...]]:
         result: dict[str, list[str]] = {}
@@ -380,10 +410,13 @@ def trace_upstream(
     while queue:
         target_id, depth, path = queue.popleft()
         incoming = adjacency.get(target_id, [])
+        ambiguities = network.ambiguities.get(target_id, ())
         if depth >= max_hops:
-            if incoming:
+            if incoming or ambiguities:
                 truncated = True
             continue
+        if ambiguities:
+            raise _ambiguous_on_path(ambiguities[0], network, target_id)
         for edge in incoming:
             source_depth = depth + 1
             source = network.nodes[edge.source_id].value
@@ -416,6 +449,8 @@ def trace_upstream(
                 warnings.add("The trace contains lineage that has not been human-validated.")
             if source.kind == "unresolved":
                 warnings.add(f"Unresolved upstream reference: {source.reference}")
+            if edge.resolution_note is not None:
+                warnings.add(edge.resolution_note)
             if edge.source_id in path:
                 warnings.add(f"Lineage cycle detected at: {source.reference}")
                 continue
@@ -456,6 +491,7 @@ def _build_network(
     nodes: dict[str, _Node] = {}
     edges: list[_Edge] = []
     definitions: dict[tuple[str, str], str] = {}
+    ambiguities: dict[str, list[_Ambiguity]] = {}
 
     for document in sorted(documents, key=lambda item: item.name):
         summaries = {item.definition_id: item.summary for item in document.analyses}
@@ -486,19 +522,48 @@ def _build_network(
     for graph in sorted(graphs, key=lambda item: item.name):
         _add_graph_nodes(graph, nodes, edges)
 
-    aliases = _alias_map(nodes)
+    index = _reference_index(nodes)
+    graph_catalogs = frozenset(graph.catalog.casefold() for graph in graphs)
+    declared = {item.name: declared_catalogs(item, graph_catalogs) for item in documents}
+    sessions = {
+        item.name: session_roots(
+            item,
+            index,
+            declared[item.name],
+            {definitions[(item.name, value.id)]: value.id for value in item.definitions},
+            states,
+        )
+        for item in documents
+    }
+
+    def resolve(
+        reference: str, document: LineageDocument, definition: LineageDefinition,
+    ) -> ReferenceResolution:
+        return _resolve_or_add(
+            reference, document, definition, nodes, index,
+            declared[document.name], sessions[document.name],
+        )
+
+    def defer(key: str | tuple[str, ...], item: ReferenceResolution, lineage: str) -> None:
+        ambiguity = _Ambiguity(item.reference, item.candidates, lineage)
+        for node_id in (key,) if isinstance(key, str) else key:
+            ambiguities.setdefault(node_id, []).append(ambiguity)
+
     for document in sorted(documents, key=lambda item: item.name):
         steps = _steps_by_definition(document)
         definitions_by_id = document.definition_by_id()
         for claim in document.claims:
             if claim.state not in states or claim.operation != "read":
                 continue
-            source_id = _resolve_or_add(claim.target, nodes, aliases)
             target_id = definitions[(document.name, claim.definition_id)]
+            source = resolve(claim.target, document, definitions_by_id[claim.definition_id])
+            if source.node_id is None:
+                defer(target_id, source, document.name)
+                continue
             edges.append(
                 _Edge(
                     id=f"lineage:{document.name}:claim:{claim.id}",
-                    source_id=source_id,
+                    source_id=source.node_id,
                     target_id=target_id,
                     relation="reads_from",
                     state=claim.state,
@@ -506,19 +571,24 @@ def _build_network(
                     process_steps=steps.get(claim.definition_id, ()),
                     evidence=claim.evidence,
                     reviews=claim.reviews,
+                    resolution_note=source.resolution_note,
                 )
             )
         for materialization in document.materializations:
             if materialization.state not in states:
                 continue
             source_id = definitions[(document.name, materialization.definition_id)]
-            target_id = _resolve_or_add(materialization.target, nodes, aliases)
             definition = definitions_by_id[materialization.definition_id]
+            target = resolve(materialization.target, document, definition)
+            if target.node_id is None:
+                # The write may land in any candidate, so each one has an unknown upstream.
+                defer(target.candidates, target, document.name)
+                continue
             edges.append(
                 _Edge(
                     id=f"lineage:{document.name}:materialization:{materialization.id}",
                     source_id=source_id,
-                    target_id=target_id,
+                    target_id=target.node_id,
                     relation="materializes_as",
                     state=materialization.state,
                     lineage=document.name,
@@ -526,20 +596,27 @@ def _build_network(
                     process_steps=steps.get(materialization.definition_id, ()),
                     evidence=materialization.evidence,
                     reviews=materialization.reviews,
+                    resolution_note=target.resolution_note,
                 )
             )
         for unit in document.write_units:
             if unit.state not in states:
                 continue
-            target_id = _resolve_or_add(unit.target, nodes, aliases)
             definition = definitions_by_id[unit.definition_id]
+            target = resolve(unit.target, document, definition)
+            if target.node_id is None:
+                defer(target.candidates, target, document.name)
+                continue
             for upstream in unit.sources:
-                source_id = _resolve_or_add(upstream.target, nodes, aliases)
+                source = resolve(upstream.target, document, definition)
+                if source.node_id is None:
+                    defer(target.node_id, source, document.name)
+                    continue
                 edges.append(
                     _Edge(
                         id=_write_source_edge_id(document.name, unit.id, upstream),
-                        source_id=source_id,
-                        target_id=target_id,
+                        source_id=source.node_id,
+                        target_id=target.node_id,
                         relation="derived_from",
                         state=unit.state,
                         lineage=document.name,
@@ -550,9 +627,17 @@ def _build_network(
                         evidence=upstream.evidence,
                         write_evidence=unit.evidence,
                         reviews=unit.reviews,
+                        resolution_note=source.resolution_note or target.resolution_note,
                     )
                 )
-    return _Network(nodes, tuple(sorted(edges, key=_edge_key)))
+    return _Network(
+        nodes,
+        tuple(sorted(edges, key=_edge_key)),
+        {
+            key: tuple(sorted(set(values), key=_ambiguity_key))
+            for key, values in ambiguities.items()
+        },
+    )
 
 
 def _add_graph_nodes(
@@ -567,13 +652,13 @@ def _add_graph_nodes(
             continue
         node_id = f"graph:{graph.name}:{node.id}"
         graph_ids[node.id] = node_id
-        reference, aliases = _graph_reference(graph, node, by_id)
+        reference, aliases, short_names = _graph_reference(graph, node, by_id)
         annotation = node.annotation
         description = None
         annotation_state = None
         if annotation and annotation.state in DEFAULT_CONTEXT_ANNOTATION_STATES:
             description = annotation.description
-            description_kind = "semantic_annotation"
+            description_kind: str | None = "semantic_annotation"
             annotation_state = annotation.state
         else:
             technical = node.metadata.get("technical_description")
@@ -595,6 +680,8 @@ def _add_graph_nodes(
                 annotation_state=annotation_state,
             ),
             aliases,
+            short_names,
+            graph.catalog,
         )
     for node in graph.nodes:
         if node.type != "field" or node.id not in graph_ids:
@@ -618,18 +705,19 @@ def _graph_reference(
     graph: GraphDocument,
     node: GraphNode,
     by_id: dict[str, GraphNode],
-) -> tuple[str, tuple[str, ...]]:
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    """The display reference, exact aliases and unqualified short names of one graph node."""
     if node.type in {"table", "view"}:
         reference = f"{graph.catalog}.{node.label}"
-        return reference, (node.id, node.label, reference)
+        return reference, (node.id, node.label, reference), _unqualified(node.label)
     parent_id = node.metadata.get("object_id")
     parent = by_id.get(parent_id) if isinstance(parent_id, str) else None
     if parent is None:
         reference = f"{graph.catalog}.{node.label}"
-        return reference, (node.id, reference)
+        return reference, (node.id, reference), ()
     local = f"{parent.label}.{node.label}"
     reference = f"{graph.catalog}.{local}"
-    return reference, (node.id, local, reference)
+    return reference, (node.id, local, reference), _unqualified(local)
 
 
 def _steps_by_definition(document: LineageDocument) -> dict[str, tuple[str, ...]]:
@@ -639,46 +727,66 @@ def _steps_by_definition(document: LineageDocument) -> dict[str, tuple[str, ...]
     return {key: tuple(items) for key, items in values.items()}
 
 
-def _alias_map(nodes: dict[str, _Node]) -> dict[str, tuple[str, ...]]:
-    values: dict[str, list[str]] = {}
-    for node in nodes.values():
-        for alias in node.aliases:
-            values.setdefault(_normalize(alias), []).append(node.value.id)
-    return {key: tuple(sorted(set(ids))) for key, ids in values.items()}
+def _unqualified(local_name: str) -> tuple[str, ...]:
+    """``main.F_SLS_01`` -> ``F_SLS_01``; ``main.F_SLS_01.QTY`` -> ``F_SLS_01.QTY``."""
+    _namespace, separator, rest = local_name.partition(".")
+    return (rest,) if separator and rest else ()
+
+
+def _reference_index(nodes: dict[str, _Node]) -> ReferenceIndex:
+    index = ReferenceIndex()
+    for node_id, node in nodes.items():
+        index.add(
+            node_id,
+            ReferenceTarget(node.value.source, node.value.reference, node.catalog),
+            node.aliases,
+            node.short_names,
+        )
+    return index
 
 
 def _resolve_or_add(
     reference: str,
+    document: LineageDocument,
+    definition: LineageDefinition,
     nodes: dict[str, _Node],
-    aliases: dict[str, tuple[str, ...]],
-) -> str:
-    matches = aliases.get(_normalize(reference), ())
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        labels = sorted(nodes[item].value.reference for item in matches)
-        preview = ", ".join(labels[:5])
-        raise LineageFailure(
-            "ambiguous_lineage_reference",
-            f"Lineage reference is ambiguous: {reference}. Candidates: {preview}",
-        )
-    node_id = f"external:{_normalize(reference)}"
+    index: ReferenceIndex,
+    declared: frozenset[str],
+    sessions: dict[str, str],
+) -> ReferenceResolution:
+    name = _normalize(reference)
+    if temporary_scope(reference) is None:
+        resolved = resolve_reference(reference, document, definition, index, declared)
+        if not resolved.unresolved:
+            return resolved
+    scope = local_scope(
+        reference, document, definition, sessions, ambiguous=bool(index.short_names.get(name)),
+    )
+    # Document names exclude "/" and ":", so an id cannot be read as another document's.
+    node_id = (
+        f"external:{name}" if scope is None
+        else f"external:{scope.key.replace(chr(0), '/')}:{name}"
+    )
     if node_id not in nodes:
         nodes[node_id] = _Node(
             LineageReference(
                 id=node_id,
                 reference=reference,
-                name=reference,
+                name=reference if scope is None else scoped_label(reference, scope),
                 kind="unresolved",
                 source="external",
             ),
             (reference,),
         )
-        aliases[_normalize(reference)] = (node_id,)
-    return node_id
+        if scope is None:
+            # A scoped name stays out of the index: another scope's spelling must not match it.
+            index.add(node_id, ReferenceTarget("external", reference), (reference,))
+    return ReferenceResolution(reference, node_id)
 
 
 def _resolve_start(network: _Network, reference: str) -> str:
+    if reference in network.nodes:
+        return reference
     normalized = _normalize(reference)
     exact = network.aliases().get(normalized, ())
     if len(exact) == 1:
@@ -692,7 +800,7 @@ def _resolve_start(network: _Network, reference: str) -> str:
 
 
 def _ambiguous(reference: str, matches: tuple[str, ...], network: _Network) -> LineageFailure:
-    labels = sorted(network.nodes[item].value.reference for item in matches)
+    labels = sorted(_candidate_label(network.nodes[item].value) for item in matches)
     preview = ", ".join(labels[:5])
     return LineageFailure(
         "ambiguous_lineage_reference",
@@ -700,9 +808,31 @@ def _ambiguous(reference: str, matches: tuple[str, ...], network: _Network) -> L
     )
 
 
-def _normalize(value: str) -> str:
-    unquoted = value.translate(str.maketrans("", "", '[]"`'))
-    return re.sub(r"\s*\.\s*", ".", unquoted.strip()).casefold()
+def _candidate_label(value: LineageReference) -> str:
+    """A scoped name is spelled alike in every scope, so only its id can select it."""
+    if value.kind == "unresolved" and value.name != value.reference:
+        return f"{value.name} ({value.id})"
+    return value.reference
+
+
+def _ambiguous_on_path(
+    ambiguity: _Ambiguity, network: _Network, target_id: str,
+) -> LineageFailure:
+    labels = sorted(network.nodes[item].value.reference for item in ambiguity.candidates)
+    preview = ", ".join(labels[:5])
+    return LineageFailure(
+        "ambiguous_lineage_reference",
+        f"Lineage reference is ambiguous: {ambiguity.reference}. Candidates: {preview}. "
+        f"The trace depends on it at {network.nodes[target_id].value.reference} "
+        f"(lineage {ambiguity.lineage}).",
+    )
+
+
+def _ambiguity_key(ambiguity: _Ambiguity) -> tuple[str, str]:
+    return ambiguity.reference.casefold(), ambiguity.lineage
+
+
+_normalize = normalize_reference
 
 
 def _edge_key(edge: _Edge) -> tuple[object, ...]:

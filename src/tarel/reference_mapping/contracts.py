@@ -10,11 +10,16 @@ from typing import Any
 
 from tarel.discovery.contracts import (
     REFERENCE_MAPPING_CARDINALITIES,
-    DiscoveryExecution,
     DiscoveryFailure,
+)
+from tarel.discovery.programs import (
+    ReferenceMappingProgram as ReferenceMappingProgram,
+)
+from tarel.discovery.runs import (
+    DiscoveryExecution,
     DiscoveryMetrics,
 )
-from tarel.discovery.contracts import ReferenceMappingProgram as ReferenceMappingProgram
+from tarel.errors import TarelError
 
 REFERENCE_MAPPING_CONTRACT_VERSION = (
     "tarel.reference-mapping-candidate.v0.1.experimental"
@@ -30,10 +35,8 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_TEXT = 1_000
 
 
-class ReferenceMappingFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class ReferenceMappingFailure(TarelError):
+    """Raised when a reference mapping operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

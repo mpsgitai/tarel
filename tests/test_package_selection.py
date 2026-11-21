@@ -76,7 +76,7 @@ class PackageSelectionTests(TestCase):
         self.assertNotIn("lineage/sales-job/lineage.json", members)
 
     def test_explicit_auxiliaries_and_plan_match_export_bytes_and_round_trip(self):
-        options = dict(lineage_names=("sales-job",), knowledge_ids=("global-terms",))
+        options = {"lineage_names": ("sales-job",), "knowledge_ids": ("global-terms",)}
         plan = plan_workspace(self.state, "team", **options)
         output = self.root / "team.tarel"
         pack_workspace(self.state, "team", output, **options)
@@ -173,14 +173,14 @@ class PackageSelectionTests(TestCase):
         self.assertIn("knowledge/inventory-terms/document.json", [e.path for e in plan.entries])
 
     def test_missing_explicit_auxiliary_fails_without_creating_package(self):
-        for options in (dict(lineage_names=("missing",)), dict(knowledge_ids=("missing",))):
+        for options in ({"lineage_names": ("missing",)}, {"knowledge_ids": ("missing",)}):
             with self.subTest(options=options), self.assertRaises(PackageFailure):
                 pack_workspace(self.state, "team", self.root / "absent.tarel", **options)
             self.assertFalse((self.root / "absent.tarel").exists())
         self.assertEqual(list(self.root.glob("*.tmp")), [])
 
     def test_auxiliary_paths_cannot_escape_state(self):
-        for options in (dict(lineage_names=("../outside",)), dict(knowledge_ids=("../outside",))):
+        for options in ({"lineage_names": ("../outside",)}, {"knowledge_ids": ("../outside",)}):
             with self.subTest(options=options), self.assertRaises(PackageFailure):
                 plan_workspace(self.state, "team", **options)
 

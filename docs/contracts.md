@@ -11,7 +11,7 @@ Use the [CLI reference](cli-reference.md) for syntax and defaults and [Architect
 | Graph and annotation | Catalog/proposal → persisted graph and review | [Graph records](../src/tarel/graph/contracts.py), [annotation records](../src/tarel/annotations/contracts.py) |
 | Static lineage input | Harness/importer → lineage builder | [LineageInput](../src/tarel/lineage/source.py), [stored records](../src/tarel/lineage/contracts.py) |
 | Runtime lineage input | Harness execution observations → immutable runtime document | [Runtime input and records](../src/tarel/lineage/runtime.py) |
-| Context / grounding | Compiler → harness | [Context packet serialization](../src/tarel/context_output.py), [grounding](../src/tarel/grounding.py) |
+| Context / grounding | Compiler → harness | [Context packet serialization](../src/tarel/context/output.py), [grounding](../src/tarel/context/grounding.py) |
 | Discovery | Harness proposals and observations ↔ revisioned state machine | [Discovery records and validation](../src/tarel/discovery/contracts.py) |
 
 The linked Python definitions are authoritative for exact field types and validation. The CLI can wrap a record with operation metadata such as a path or count; use its result documentation and examples rather than assuming every command emits a bare stored document.
@@ -116,10 +116,10 @@ hash.
 Use the exact same scope for retrieval and context compilation:
 
 ```bash
-tarel search enterprise "customer revenue" \
-  --workspace --system commercial --zone revenue --mode bm25
-tarel context build enterprise "customer revenue" \
-  --workspace --system commercial --zone revenue --mode bm25
+tarel search "customer revenue" \
+  --workspace enterprise --system commercial --zone revenue --mode bm25
+tarel context build "customer revenue" \
+  --workspace enterprise --system commercial --zone revenue --mode bm25
 ```
 
 An agent or browser can narrow that resolved scope to exact physical objects without inventing a
@@ -127,10 +127,10 @@ second search path. Repeat `--scope-object GRAPH:OBJECT_ID` to create a hard wor
 Search filters are then applied before every ranking mode:
 
 ```bash
-tarel search enterprise "monthly revenue" --workspace \
+tarel search "monthly revenue" --workspace enterprise \
   --scope-object warehouse:object:Warehouse/dbo/FactSales \
   --type table --role fact --has-field SalesAmount --mode bm25
-tarel context build enterprise "monthly revenue" --workspace \
+tarel context build "monthly revenue" --workspace enterprise \
   --scope-object warehouse:object:Warehouse/dbo/FactSales \
   --object warehouse:object:Warehouse/dbo/FactSales
 ```
@@ -308,6 +308,10 @@ Read statistics are visible under `storage` in result dictionaries:
 
 These are graph-object accounting metrics, not byte-level disk-I/O or database execution
 measurements. SQLite may inspect index pages to answer filters or counts.
+
+Read commands can therefore write: `cache_built` and `cache_rebuilt` create or replace the
+rebuildable cache beside the graph, without changing the graph itself. To inspect a state that must
+stay byte-identical, work on a copy.
 
 ### Freshness, recovery and limits
 
@@ -969,11 +973,24 @@ and pinned conversion declare the Apache-2.0 license. Optional runtime licenses 
 [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 The model runs in-process on the CPU through the optional `llama-cpp-python` package. TAREL sets
-`n_gpu_layers=0`, uses a 2048-token embedding context, and applies the Qwen retrieval instruction
-only to questions. `--batch-size` controls document scheduling and progress reporting; llama.cpp
-decodes each document separately because its `n_batch`/`n_ubatch` values describe token capacity,
-not a safe number of document sequences. This avoids multi-sequence decode failures without
-changing the index format. A long-lived SDK or browser runtime keeps one loaded model per resolved
+`n_gpu_layers=0` and applies the Qwen retrieval instruction only to questions.
+
+**Every text is embedded whole up to 2048 tokens, and nothing is shortened without a record.** Tokens
+are counted with the model's own tokenizer, including the token it appends and, for a question, the
+retrieval instruction. A longer question fails with `embedding_input_too_long`, because its author
+can shorten it. A longer document in an index build embeds only its first 2048 tokens and is named
+in `truncated_documents`, so one wide table cannot stop vector search for its whole graph. Its fields
+keep their own whole vectors, so what is lost is part of the object's combined representation, not
+the fields. In the audited estate of 35,386 documents the longest has 1,339 tokens, but annotated
+objects used up to 54 tokens per field, so a wide annotated table can reach the limit. `--batch-size` only schedules
+documents and reports progress: `n_ctx` and `n_batch` are the token capacity of one text, and
+llama.cpp decodes each document separately. `n_ubatch` stays at 256 because it splits the decode
+without changing the vector, while raising it to 2048 took peak memory from about 2.2 GB to 3.4 GB
+in our measurement of a 2000-token text. Remote providers decide themselves how long input is
+handled, which TAREL can only report. The optional reranker has its own bounded input and scores
+only already-found candidates.
+
+A long-lived SDK or browser runtime keeps one loaded model per resolved
 path, thread setting, and current model SHA-256. Replacing a GGUF at the same path invalidates that
 entry. Creation and calls on the shared llama.cpp instance are serialized because the native
 embedding context is mutable; separate CLI processes remain independent. The default pipeline
@@ -1001,6 +1018,10 @@ the download cache root; otherwise TAREL follows `XDG_CACHE_HOME` and then `~/.c
 
 ### Persistence contract
 
+> `tarel.retrieval.v0.4` was walked through with the maintainer. TAREL stays pre-alpha,
+> so this is an agreed format rather than a compatibility promise. An index this build rewrites
+> cannot be read by older TAREL versions. See [Embedding input](#embedding-input).
+
 The source of truth remains `.tarel/graphs/<graph>/graph.json`. The SQLite retrieval file contains
 only rebuildable documents, normalized float32 vectors, and compatibility metadata:
 
@@ -1009,7 +1030,9 @@ only rebuildable documents, normalized float32 vectors, and compatibility metada
 - model identifier, path, and SHA-256;
 - document count and vector dimensions;
 - a stable text hash for each document and a hash of the complete retrieval projection;
-- the exact annotation-state policy used to construct retrieval text.
+- the exact annotation-state policy used to construct retrieval text;
+- how text became model input, how many vectors were carried over without that record, and which
+  documents were shortened.
 
 An index update compares stable document IDs and text hashes. It embeds only added or changed
 documents, reuses unchanged vectors, and drops removed documents before atomically replacing the
@@ -1017,6 +1040,55 @@ SQLite file. Reused and resumed vectors are copied as float32 BLOBs in bounded b
 does not unpack the complete vector corpus into Python memory. Changes outside the allowlisted
 retrieval projection do not invalidate vector search. A different model still requires embedding
 every document.
+
+#### Embedding input
+
+Before `v0.4` the embedding settings were not recorded, and every released build silently cut texts
+at 256 tokens. A stored vector cannot show whether that happened, so the text hash alone no longer
+proves a vector is reusable.
+
+| Stored `embedding_input` | Selected model input | Vectors kept when the text is unchanged |
+| --- | --- | --- |
+| same as selected | any | all |
+| empty (formats before `v0.4`) | local model | only documents of at most 256 tokens |
+| empty (formats before `v0.4`) | remote provider | all, because that path did not change |
+| different | any | none |
+
+Older indexes stay usable without a rebuild, and vector and hybrid search with them warn. `index
+status` reports `embedding_input.state`:
+
+| State | Meaning |
+| --- | --- |
+| `unverified` | Format before `v0.4`. Settings unknown; long documents may be cut. |
+| `partially_verified` | Long documents were re-embedded. `unverified_documents` vectors were kept because they fit the old limit, not because they were re-embedded. |
+| `verified` | Every vector was embedded from its whole document under the recorded settings. |
+| `verified_with_truncation` | As `verified`, except for the listed `truncated_documents`. |
+| `provider_defined` | A remote provider decides; TAREL makes no claim about long input. |
+
+`index build` embeds only what the table requires, so updating an old index does not recompute it.
+Kept vectors represent their whole document, but they are not byte-identical to a fresh embedding.
+Token capacity does not change a vector within one runtime, yet the decode and the library version
+do: the stored vectors of a real `v0.1` index are reproduced only by llama-cpp-python 0.3.35 with
+16 documents per decode, and differ from a single decode on 0.3.36 (cosine 0.996 to 0.999). That is
+why they stay counted as `unverified_documents`. The recorded `embedding_input` says how much text
+was embedded; it does not pin the library version. `index build --workspace` includes `unverified`
+graphs even though they are ready.
+`partially_verified` can also list `truncated_documents`. Search and vector-based context warn about
+shortened documents and about `unverified` indexes. In a packet the warnings sit in
+`dynamic.retrieval.warnings` and appear as a `retrieval_warnings` gap in its brief; `stable` and its
+hash do not change, and without a warning the packet is byte-identical to before. Neither state
+blocks search or changes `ready`, because the index works and status must not report a defect.
+
+`embedding_runtime` names the library of the build that last embedded something, and `index status`
+shows it as `embedding_input.runtime`. It explains shifts between library versions, which move
+vectors slightly. Nothing is reused or rebuilt because of it, so such shifts stay possible between
+stored document vectors and new query vectors.
+
+TAREL opens only its own index formats. Another format, including the benchmark tool's
+`trb.vector-index.v1`, is reported as `unsupported_index` or `invalid_index` and left untouched;
+there is no conversion. Its vectors have no document identity, so they cannot be matched to current
+documents. A workspace status counts each graph's index separately, and search over a workspace
+with a missing index fails and names that graph rather than searching the indexed part silently.
 
 The base installation performs a transparent exact cosine scan in Python. Installing the optional
 `tarel[vector]` extra adds `sqlite-vec`; TAREL then runs the same exact cosine ranking inside the
@@ -1041,7 +1113,8 @@ lexical modes apply the same policy in memory and require no vector index.
 `index build --resume` commits each completed embedding batch to
 `.tarel/indexes/<graph>/index.checkpoint.sqlite`. A later CLI or SDK run resumes at the first missing
 document and reports the reused count. The checkpoint is accepted only when graph revision,
-allowlisted retrieval documents, model ID, and model SHA-256 match exactly. A mismatch fails visibly;
+allowlisted retrieval documents, model ID, model SHA-256, and embedding input match exactly. A
+mismatch fails visibly;
 run once without `--resume` for an explicit fresh rebuild.
 
 The checkpoint contains document IDs, float32 vectors, coverage counters, and compatibility hashes.
@@ -1182,22 +1255,22 @@ python -m pip install 'tarel[semantic]'
 
 tarel semantic import retail-ossie \
   --graph retail-demo \
-  --format apache-ossie \
+  --source-format apache-ossie \
   --source semantic-model.yaml \
-  --output json
+  --format json
 
 tarel semantic import retail-sml \
   --graph retail-demo \
-  --format sml \
+  --source-format sml \
   --source path/to/sml-project
 
 tarel semantic import retail-cube \
   --graph retail-demo \
-  --format cube \
+  --source-format cube \
   --source path/to/cube-model
 
 tarel semantic list --graph retail-demo
-tarel semantic show retail-ossie --output json
+tarel semantic show retail-ossie --format json
 ```
 
 Each source is limited to 8 MiB, 256 files, and UTF-8. A single file is preserved byte-for-byte as
@@ -4048,6 +4121,9 @@ the packaged browser from that client's runtime, independent of the process work
 The CLI offers the equivalent `tarel ui GRAPH --state-root STATE_ROOT`. Omitting `--state-root`
 preserves the CLI's local `.tarel` default. Both forms bind to loopback only; read-only remains the
 default and edit capability still requires the explicit `editable=True` or `--edit` switch.
+The server answers only requests addressed to its own loopback host and port, which blocks DNS
+rebinding, and every API request, reads included, must carry the session token that the served
+page embeds. Scripts that call the API directly send it as the `X-Tarel-Token` header.
 Embedded hosts can pass `on_ready` to receive the final loopback URL without parsing console text.
 
 ### Explore first, details when needed

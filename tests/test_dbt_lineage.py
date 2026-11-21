@@ -17,6 +17,9 @@ from tarel.lineage.core import build_lineage, table_lineage
 from tarel.lineage.dbt import load_dbt_manifest
 from tarel.sdk import Tarel
 
+# Patch target: where definition analysis looks up its provider.
+LOAD_PROVIDER = "tarel.lineage.analysis_application.load_provider"
+
 _FIXTURE = Path(__file__).parent / "fixtures/lineage/dbt/manifest-v12.json"
 _DAILY = "model.shop.daily_sales"
 _STAGE = "model.shop.stg_orders"
@@ -213,7 +216,7 @@ class DbtLineageTests(TestCase):
         with (
             patch("builtins.__import__", side_effect=guarded),
             patch(
-                "tarel.lineage.application.load_provider", side_effect=AssertionError("No provider")
+                LOAD_PROVIDER, side_effect=AssertionError("No provider")
             ),
         ):
             sdk_result = self.sdk.lineage.import_dbt(

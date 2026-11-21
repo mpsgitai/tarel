@@ -33,7 +33,7 @@ def physical_graph_revision(graph: GraphDocument) -> str:
     nodes = []
     for node in sorted(graph.nodes, key=lambda item: item.id):
         if node.type in {"table", "view"}:
-            metadata_keys = ("catalog", "name", "namespace", "primary_key")
+            metadata_keys: tuple[str, ...] = ("catalog", "name", "namespace", "primary_key")
         elif node.type == "field":
             metadata_keys = (
                 "data_type",
@@ -78,7 +78,7 @@ def technical_graph_fingerprint(graph: GraphDocument) -> str:
     nodes = []
     for node in sorted(graph.nodes, key=lambda item: item.id):
         if node.type in {"table", "view"}:
-            metadata_keys = (
+            metadata_keys: tuple[str, ...] = (
                 "catalog",
                 "name",
                 "namespace",

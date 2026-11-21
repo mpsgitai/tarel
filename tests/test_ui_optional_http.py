@@ -14,7 +14,15 @@ from urllib.request import Request, urlopen
 
 from tarel.graph.contracts import GraphAnnotation
 from tarel.sdk import Tarel
-from tarel.ui.server import TarelUIBackend, UIConfig, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.contracts import Area, SchemaReference, Zone, ZoneMember
 from tarel.workspaces.core import create_workspace, define_system
 from tests.test_entity_resolution import _candidate, _graph
@@ -66,7 +74,8 @@ class OptionalMetadataHTTPTests(TestCase):
 
     def _bootstrap(self):
         address = f"http://127.0.0.1:{self.server.server_port}/api/bootstrap"
-        with urlopen(address, timeout=5) as response:
+        request = Request(address, headers={"X-Tarel-Token": "optional-test-token"})
+        with urlopen(request, timeout=5) as response:
             return json.load(response)
 
     def _request(self, *, kind="identity", focuses=None, **changes):
@@ -113,7 +122,7 @@ class OptionalMetadataHTTPTests(TestCase):
         with ExitStack() as stack:
             for name in calls:
                 stack.enter_context(patch(
-                    f"tarel.ui.server.{name}",
+                    f"tarel.ui.backend.{name}",
                     side_effect=AssertionError("Optional read at bootstrap"),
                 ))
             payload = self._bootstrap()
@@ -161,7 +170,7 @@ class OptionalMetadataHTTPTests(TestCase):
             {"workspace": "outside"}, {"query": "PRIVATE_QUERY"},
             {"mode": "include_candidates"},
         )
-        with patch("tarel.ui.server.optional_object_metadata") as read:
+        with patch("tarel.ui.backend.optional_object_metadata") as read:
             for changes in options:
                 with self.subTest(changes=changes):
                     error = self._assert_error(
@@ -173,14 +182,14 @@ class OptionalMetadataHTTPTests(TestCase):
 
     def test_optional_limits_are_bounded_and_invalid_layer_requests_are_rejected(self):
         request = self._request()
-        with patch("tarel.ui.server.optional_object_metadata") as read:
+        with patch("tarel.ui.backend.optional_object_metadata") as read:
             for value in (0, 21, True, "20"):
                 with self.subTest(limit=value):
                     self._assert_error(
                         "/api/optional/details", {**request, "limit": value}, status=400,
                     )
             read.assert_not_called()
-        with patch("tarel.ui.server.project_logical_topologies_for_graphs_use_case") as read:
+        with patch("tarel.ui.backend.project_logical_topologies_for_graphs_use_case") as read:
             for changes in ({"kind": "invented"}, {"enabled": "true"}, {"query": "PRIVATE"}):
                 with self.subTest(changes=changes):
                     self._assert_error("/api/optional/view", {
@@ -192,7 +201,7 @@ class OptionalMetadataHTTPTests(TestCase):
         outside = replace(self.graph, name="outside")
         self.sdk.runtime.graph_store().save(outside)
         request = self._request()
-        with patch("tarel.ui.server.optional_object_metadata") as read:
+        with patch("tarel.ui.backend.optional_object_metadata") as read:
             self._assert_error(
                 "/api/optional/details", {**request, "graph": "outside"}, status=400,
                 code="graph_outside_scope",
@@ -205,7 +214,7 @@ class OptionalMetadataHTTPTests(TestCase):
 
     def test_missing_or_stale_revisions_fail_before_metadata_reads(self):
         request = self._request()
-        with patch("tarel.ui.server.optional_object_metadata") as read:
+        with patch("tarel.ui.backend.optional_object_metadata") as read:
             for key in ("revision", "scope_revision"):
                 for invalid in (None, "0" * 64):
                     with self.subTest(key=key, invalid=invalid):
@@ -240,7 +249,7 @@ class OptionalMetadataHTTPTests(TestCase):
             self.sdk.runtime.graph_store().save(graph)
             return {"items": [], "edges": [], "state": "loaded"}
 
-        with patch("tarel.ui.server.optional_object_metadata", side_effect=change_graph):
+        with patch("tarel.ui.backend.optional_object_metadata", side_effect=change_graph):
             self._assert_error(
                 "/api/optional/details", request, status=409, code="stale_optional_scope",
             )

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Any, Protocol
 
+from tarel.atomic import write_atomic
 from tarel.reference_mapping.contracts import (
     ReferenceMappingCandidate,
     ReferenceMappingFailure,
@@ -39,23 +38,9 @@ class FileReferenceMappingStore:
         payload = json.dumps(
             candidate.to_dict(), ensure_ascii=False, indent=2, sort_keys=True
         )
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".reference-mapping-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            os.fchmod(descriptor, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".reference-mapping-", durable=True)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise ReferenceMappingFailure(
                 "reference_mapping_save_failed",
                 f"Could not save reference-mapping candidate: {candidate.id}",

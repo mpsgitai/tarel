@@ -215,7 +215,7 @@ def intersect_scope_objects(
         if item.object_id in allowed_by_graph.get(item.graph, frozenset())
     )
     graph_names = tuple(sorted({item.graph for item in objects}))
-    combined_warnings = tuple(sorted(set((*scope.warnings, *warnings))))
+    combined_warnings = tuple(sorted({*scope.warnings, *warnings}))
     return ResolvedScope(
         workspace=scope.workspace,
         selection=scope.selection,

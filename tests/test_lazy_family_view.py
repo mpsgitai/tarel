@@ -22,9 +22,19 @@ from tarel.object_families.contracts import (
 )
 from tarel.sdk import Tarel
 from tarel.topology.contracts import LogicalTopologyDocument, LogicalTopologyFailure
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
 from tarel.ui.lazy_family_view import try_lazy_family_graph_view_use_case
-from tarel.ui.presentation import browser_graph, family_view_scope_revision
-from tarel.ui.server import TarelUIBackend, UIConfig
+from tarel.ui.payloads.families import (
+    family_view_scope_revision,
+)
+from tarel.ui.payloads.graph import (
+    browser_graph,
+)
 
 
 class LazyFamilyViewTests(TestCase):
@@ -129,8 +139,8 @@ class LazyFamilyViewTests(TestCase):
     ) -> None:
         graph = replace(
             self.graph,
-            edges=self.graph.edges
-            + (
+            edges=(
+                *self.graph.edges,
                 GraphEdge(
                     "actual-join",
                     self.family.member_ids[0],

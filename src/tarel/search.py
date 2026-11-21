@@ -10,6 +10,7 @@ from tarel.annotations.states import (
     DEFAULT_CONTEXT_ANNOTATION_STATES,
     annotation_is_visible,
 )
+from tarel.errors import TarelError
 from tarel.graph.contracts import GraphDocument, GraphNode
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -36,10 +37,8 @@ _STOP_WORDS = {
 _MAX_FIELD_MATCHES = 8
 
 
-class SearchFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class SearchFailure(TarelError):
+    """Raised when a search operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +82,8 @@ class SearchInventory:
         return {
             "objects_after_filters": self.objects_after_filters,
             "objects_in_scope": self.objects_in_scope,
-            "roles": {key: value for key, value in self.roles},
-            "types": {key: value for key, value in self.types},
+            "roles": dict(self.roles),
+            "types": dict(self.types),
         }
 
 
@@ -236,7 +235,7 @@ def search_graph(
         node_namespace = str(node.metadata.get("namespace") or "")
         if namespace is not None and node_namespace.casefold() != namespace.casefold():
             continue
-        hit = _score_object(
+        hit = score_object(
             node,
             fields_by_object.get(node.id, []),
             terms,
@@ -363,7 +362,7 @@ def _optional_text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _score_object(
+def score_object(
     node: GraphNode,
     fields: list[GraphNode],
     terms: tuple[str, ...],

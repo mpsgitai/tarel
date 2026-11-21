@@ -5,15 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from tarel.errors import TarelError
 from tarel.graph.contracts import AnnotationEvidence
 from tarel.knowledge.contracts import KnowledgeFailure, KnowledgeReference
 from tarel.providers.contracts import StructuredRequest
 
 
-class AnnotationFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class AnnotationFailure(TarelError):
+    """Raised when an annotation operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

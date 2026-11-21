@@ -50,7 +50,7 @@ class SDKOperationalFacadeTests(TestCase):
     def test_provider_test_is_explicit_and_uses_the_cli_application_path(self) -> None:
         sdk = Tarel("unused-state")
         provider = _Provider()
-        with patch("tarel.application.load_provider", return_value=provider):
+        with patch("tarel.providers.application.load_provider", return_value=provider):
             sdk_result = sdk.provider.test("fixture", timeout=3.5)
             cli_result = _cli_json(
                 ["provider", "test", "fixture", "--timeout", "3.5", "--format", "json"]

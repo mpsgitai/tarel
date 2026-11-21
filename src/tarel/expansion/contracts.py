@@ -6,7 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from tarel.context_output import canonical_hash
+from tarel.context.output import canonical_hash
+from tarel.errors import TarelError
 
 EXPANSION_KINDS = frozenset(
     {
@@ -22,10 +23,8 @@ EXPANSION_KINDS = frozenset(
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-class ContextExpansionFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class ContextExpansionFailure(TarelError):
+    """Raised when a context expansion operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +135,9 @@ class ExpansionItem:
     input_manifest_hash: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        result = {"target": self.target.reference(), "usage": self.usage, "metadata": self.metadata}
+        result: dict[str, object] = {
+            "target": self.target.reference(), "usage": self.usage, "metadata": self.metadata
+        }
         if self.input_manifest_hash is not None:
             result["input_manifest_hash"] = self.input_manifest_hash
         return result

@@ -162,6 +162,6 @@ def rerank_results(
         hits[target] = replace(
             hit,
             score=round(score * 1_000_000),
-            reasons=hit.reasons + (f"reranker:{choice.provider}:{choice.model}",),
+            reasons=(*hit.reasons, f"reranker:{choice.provider}:{choice.model}"),
         )
     return replace(results, hits=tuple(hits[:limit]))

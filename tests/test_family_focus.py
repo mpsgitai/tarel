@@ -17,8 +17,23 @@ from tarel.focus.contracts import FocusDocument, FocusFailure, FocusHop, FocusMe
 from tarel.focus.core import focus_graph_revision
 from tarel.graph.store import FileGraphStore
 from tarel.object_families.store import FileObjectFamilyStore
-from tarel.ui.presentation import browser_graph, browser_workspace, family_view_scope_revision
-from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+    UIFailure,
+)
+from tarel.ui.payloads.families import (
+    family_view_scope_revision,
+)
+from tarel.ui.payloads.graph import (
+    browser_graph,
+    browser_workspace,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tests.test_object_families_ui import _family, _graph, _workspace
 
 
@@ -143,16 +158,18 @@ class FamilyFocusBackendTests(TestCase):
         self.graph_store.save(self.graph)
         family_store.save(self.family)
         for target, value in (
-            ("tarel.object_families.application.FileObjectFamilyStore", family_store),
-            ("tarel.object_families.application.FileGraphStore", self.graph_store),
-            ("tarel.application.FileGraphStore", self.graph_store),
+            ("tarel.object_families.store.FileObjectFamilyStore", family_store),
+            ("tarel.runtime.FileGraphStore", self.graph_store),
+            ("tarel.runtime.FileGraphStore", self.graph_store),
         ):
             self.stack.enter_context(patch(target, return_value=value))
         self.stack.enter_context(patch(
-            "tarel.ui.server.list_focuses_use_case", side_effect=lambda: tuple(self.focuses),
+            "tarel.ui.backend.list_focuses_use_case",
+            side_effect=lambda runtime=None: tuple(self.focuses),
         ))
         self.stack.enter_context(patch(
-            "tarel.ui.server.load_focus_use_case", side_effect=self.focuses.__getitem__,
+            "tarel.ui.backend.load_focus_use_case",
+            side_effect=lambda name, runtime=None: self.focuses[name],
         ))
         self.backend = TarelUIBackend(UIConfig(graph=self.graph.name))
 
@@ -190,7 +207,7 @@ class FamilyFocusBackendTests(TestCase):
         self.backend = TarelUIBackend(UIConfig(workspace="estate"))
         with (
             patch.object(self.backend, "_scope", return_value=scope),
-            patch("tarel.ui.server.load_workspace_scope_use_case", return_value=(
+            patch("tarel.ui.backend.load_workspace_scope_use_case", return_value=(
                 workspace, {self.graph.name: self.graph}, scope,
             )),
         ):
@@ -199,8 +216,8 @@ class FamilyFocusBackendTests(TestCase):
                 view, allowed_object_ids=list(self.family.member_ids),
             ))
         self.assertEqual(page["total_members"], 4)
-        self.assertEqual({item["object_id"] for item in page["members"]}, set(scope_id.object_id
-                         for scope_id in scope.objects))
+        self.assertEqual({item["object_id"] for item in page["members"]}, {scope_id.object_id
+                         for scope_id in scope.objects})
 
     def test_pending_page_fails_when_focus_changed_or_revision_missing(self):
         view = self._view()

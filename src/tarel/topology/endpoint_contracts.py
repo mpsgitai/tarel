@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from tarel.errors import TarelError
+
 LOGICAL_ENDPOINT_KINDS = frozenset(
     {
         "graph_field",
@@ -25,10 +27,8 @@ LOGICAL_ENDPOINT_MODES = frozenset(
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-class LogicalEndpointFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class LogicalEndpointFailure(TarelError):
+    """Raised when a logical endpoint operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

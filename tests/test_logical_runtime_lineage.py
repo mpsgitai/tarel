@@ -15,8 +15,11 @@ from tarel.cli import main
 from tarel.graph.contracts import GraphDocument, GraphNode
 from tarel.graph.revision import graph_revision
 from tarel.lineage.contracts import LineageFailure
-from tarel.lineage.runtime import RuntimeLineageDocument, RuntimeLineageInput
 from tarel.lineage.runtime_projection import browser_runtime_lineage
+from tarel.lineage.runtime_records import (
+    RuntimeLineageDocument,
+    RuntimeLineageInput,
+)
 from tarel.sdk import Tarel
 
 

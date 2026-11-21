@@ -22,11 +22,21 @@ from tarel.retrieval.remote import HTTPEmbedding, HTTPRetrievalClient, indexed_r
 from tarel.retrieval.rerank import LocalQwenReranker, rerank_results
 from tarel.retrieval.settings import index_namespace, load_settings, snapshot_runtime
 from tarel.sdk import ModelChoice, RetrievalSettings, Tarel
-from tarel.ui.server import TarelUIBackend, UIConfig
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
 from tarel.workspaces.contracts import SchemaReference
 from tarel.workspaces.core import create_workspace, define_area, define_system, define_zone
 from tests.test_retrieval import _FakeEmbedding, _retrieval_graph
 from tests.test_retrieval_workflow import _focus
+
+# Patch targets: where the use cases look these names up.
+LOCAL_EMBEDDING = "tarel.retrieval.application.LlamaCppEmbedding"
+HTTP_EMBEDDING = "tarel.retrieval.application.HTTPEmbedding"
+RESOLVE_MODEL_PATH = "tarel.retrieval.application.resolve_model_path"
 
 
 def _profile():
@@ -57,7 +67,7 @@ class RetrievalSelectionTests(TestCase):
         for saved in (True, False):
             with (
                 self.subTest(saved=saved), TemporaryDirectory() as temporary,
-                patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
+                patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()),
             ):
                 root = Path(temporary)
                 original_model, override = root / "original.gguf", root / "override.gguf"
@@ -159,8 +169,8 @@ class RetrievalSelectionTests(TestCase):
     def test_search_cannot_call_cloud_after_concurrent_first_configuration(self):
         with (
             TemporaryDirectory() as temporary,
-            patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
-            patch("tarel.application.HTTPEmbedding") as cloud_embedding,
+            patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()),
+            patch(HTTP_EMBEDDING) as cloud_embedding,
             patch("tarel.retrieval.rerank.rerank_remote") as cloud_reranker,
         ):
             sdk = Tarel(temporary)
@@ -177,7 +187,7 @@ class RetrievalSelectionTests(TestCase):
                 ))
                 return graph
 
-            with patch("tarel.application._graph_store") as store:
+            with patch("tarel.runtime.TarelRuntime.graph_store") as store:
                 store.return_value.load.side_effect = configure_and_load
                 hits = sdk.search.graph(graph.name, "internet revenue", mode="hybrid",
                                         model_path=model)
@@ -190,8 +200,8 @@ class RetrievalSelectionTests(TestCase):
     def test_workspace_build_keeps_one_selection_during_first_configuration(self):
         with (
             TemporaryDirectory() as temporary,
-            patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
-            patch("tarel.application.HTTPEmbedding") as cloud,
+            patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()),
+            patch(HTTP_EMBEDDING) as cloud,
         ):
             sdk = Tarel(temporary)
             model = Path(temporary) / "local.gguf"
@@ -231,9 +241,9 @@ class RetrievalSelectionTests(TestCase):
                         with redirect_stdout(text):
                             self.assertEqual(main(arguments), 0)
                         with redirect_stdout(explicit_text):
-                            self.assertEqual(main(arguments + ["--format", "text"]), 0)
+                            self.assertEqual(main([*arguments, "--format", "text"]), 0)
                         with redirect_stdout(machine):
-                            self.assertEqual(main(arguments + ["--format", "json"]), 0)
+                            self.assertEqual(main([*arguments, "--format", "json"]), 0)
                         self.assertEqual(text.getvalue(), explicit_text.getvalue())
                         self.assertFalse(text.getvalue().startswith("{"))
                         payload = json.loads(machine.getvalue())
@@ -257,7 +267,7 @@ class RetrievalSelectionTests(TestCase):
                 self.subTest(failure=failure),
                 TemporaryDirectory() as temporary,
                 patch("tarel.retrieval.remote.load_http_provider_config", return_value=_profile()),
-                patch("tarel.application.HTTPEmbedding", return_value=_FakeEmbedding()),
+                patch(HTTP_EMBEDDING, return_value=_FakeEmbedding()),
             ):
                 sdk = Tarel(temporary, retrieval=RetrievalSettings(
                     ModelChoice("openrouter", "embedding"),
@@ -271,54 +281,80 @@ class RetrievalSelectionTests(TestCase):
                 sdk.index.build(selected.name)
                 if failure == "stale_index":
                     sdk.index.build(excluded.name)
-                    changed = replace(excluded, nodes=excluded.nodes[:-1] + (
-                        replace(excluded.nodes[-1], annotation=GraphAnnotation(
-                            description="Changed excluded metadata.")),
-                    ))
+                    annotation = GraphAnnotation(description="Changed excluded metadata.")
+                    last = replace(excluded.nodes[-1], annotation=annotation)
+                    changed = replace(excluded, nodes=(*excluded.nodes[:-1], last))
                     sdk.runtime.graph_store().save(changed)
                 elif failure == "model_index_mismatch":
                     sdk.runtime.retrieval_index().build(
-                        excluded, embedder=_FakeEmbedding(), model_path=None,
-                        model_sha256="f" * 64, model_id="unrelated-model",
+                        excluded,
+                        embedder=_FakeEmbedding(),
+                        model_path=None,
+                        model_sha256="f" * 64,
+                        model_id="unrelated-model",
                     )
-                fact_id = next(node.id for node in selected.nodes
-                               if node.label == "dbo.FactInternetSales")
+                fact_id = next(
+                    node.id for node in selected.nodes if node.label == "dbo.FactInternetSales"
+                )
                 reference = f"{selected.name}:{fact_id}"
-                workspace = define_system(create_workspace("estate"), "analytics",
-                    graph_names=tuple(graph_map), graphs=graph_map)
-                workspace = define_area(workspace, "analytics", "sales",
-                    schemas=(SchemaReference(selected.name, "dbo"),), graphs=graph_map)
-                workspace = define_zone(workspace, "analytics", "sales-slice",
-                    object_references=(f"{selected.name}:dbo.FactInternetSales",), graphs=graph_map)
+                workspace = define_system(
+                    create_workspace("estate"),
+                    "analytics",
+                    graph_names=tuple(graph_map),
+                    graphs=graph_map,
+                )
+                workspace = define_area(
+                    workspace,
+                    "analytics",
+                    "sales",
+                    schemas=(SchemaReference(selected.name, "dbo"),),
+                    graphs=graph_map,
+                )
+                workspace = define_zone(
+                    workspace,
+                    "analytics",
+                    "sales-slice",
+                    object_references=(f"{selected.name}:dbo.FactInternetSales",),
+                    graphs=graph_map,
+                )
                 sdk.runtime.workspace_store().save(workspace)
                 sdk.runtime.focus_store().save(_focus("sales-focus", selected, fact_id))
                 backend = _FakeEmbedding()
                 with (
-                    patch("tarel.application.HTTPEmbedding", return_value=backend),
+                    patch(HTTP_EMBEDDING, return_value=backend),
                     patch.object(backend, "embed_query", wraps=backend.embed_query) as embedding,
-                    patch("tarel.retrieval.rerank.rerank_remote",
-                          side_effect=lambda choice, query, texts: (0.9,) * len(texts)) as reranker,
+                    patch(
+                        "tarel.retrieval.rerank.rerank_remote",
+                        side_effect=lambda choice, query, texts: (0.9,) * len(texts),
+                    ) as reranker,
                 ):
                     scopes = (
-                        {"graphs": (selected.name,)}, {"areas": ("sales",)},
+                        {"graphs": (selected.name,)},
+                        {"areas": ("sales",)},
                         {"schemas": (f"{selected.name}:dbo",)},
                         {"zones": ("sales-slice",)},
-                        {"focuses": ("sales-focus",)}, {"scope_objects": (reference,)},
+                        {"focuses": ("sales-focus",)},
+                        {"scope_objects": (reference,)},
                     )
                     for mode in ("vector", "hybrid"):
                         for scope in scopes:
                             with self.subTest(mode=mode, scope=scope):
                                 embedding.reset_mock()
-                                hits = sdk.search.workspace("estate", "internet revenue",
-                                                            mode=mode, **scope)
+                                hits = sdk.search.workspace(
+                                    "estate", "internet revenue", mode=mode, **scope
+                                )
                                 self.assertTrue(hits.hits)
                                 self.assertEqual(hits.graphs, (selected.name,))
-                                self.assertTrue(all(hit.source_graph == selected.name
-                                                    for hit in hits.hits))
+                                self.assertTrue(
+                                    all(hit.source_graph == selected.name for hit in hits.hits)
+                                )
                                 embedding.assert_called_once()
-                                self.assertTrue(all(text.startswith(
-                                    f"System/graph: {selected.name}\n")
-                                    for text in reranker.call_args.args[2]))
+                                self.assertTrue(
+                                    all(
+                                        text.startswith(f"System/graph: {selected.name}\n")
+                                        for text in reranker.call_args.args[2]
+                                    )
+                                )
                     embedding.reset_mock()
                     with self.assertRaises(RetrievalFailure) as error:
                         sdk.search.workspace("estate", "internet revenue", mode="hybrid")
@@ -329,10 +365,13 @@ class RetrievalSelectionTests(TestCase):
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "ranker.gguf"
             path.write_bytes(b"original model")
-            sdk = Tarel(temporary, retrieval=RetrievalSettings(
-                reranker=ModelChoice("local", "qwen3-reranker-0.6b-q4-k-m", str(path)),
-                rerank_depth=2,
-            ))
+            sdk = Tarel(
+                temporary,
+                retrieval=RetrievalSettings(
+                    reranker=ModelChoice("local", "qwen3-reranker-0.6b-q4-k-m", str(path)),
+                    rerank_depth=2,
+                ),
+            )
             graph = _retrieval_graph()
             sdk.runtime.graph_store().save(graph)
             with (
@@ -360,10 +399,10 @@ class RetrievalSelectionTests(TestCase):
             selected_model.write_bytes(b"selected Qwen model")
             graph = _retrieval_graph()
             sdk.runtime.graph_store().save(graph)
-            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+            with patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()):
                 sdk.index.build(graph.name, model_path=old_model)
                 sdk.retrieval.configure(RetrievalSettings())
-                with patch("tarel.application.resolve_model_path", return_value=selected_model):
+                with patch(RESOLVE_MODEL_PATH, return_value=selected_model):
                     self.assertFalse(sdk.index.status(graph.name)["ready"])
                     rebuilt = sdk.index.build(graph.name)
                     self.assertEqual(rebuilt.metadata.model_path, str(selected_model))
@@ -382,7 +421,7 @@ class RetrievalSelectionTests(TestCase):
         with (
             TemporaryDirectory() as temporary,
             patch("tarel.retrieval.remote.load_http_provider_config", return_value=_profile()),
-            patch("tarel.application.HTTPEmbedding") as factory,
+            patch(HTTP_EMBEDDING) as factory,
         ):
             sdk = Tarel(temporary, retrieval=RetrievalSettings(ModelChoice("openrouter", "model")))
             graph = _retrieval_graph()
@@ -464,18 +503,20 @@ class RetrievalSelectionTests(TestCase):
                 "tarel.retrieval.remote.load_http_provider_config",
                 return_value=_profile(),
             ),
-            patch("tarel.application.HTTPEmbedding", return_value=_FakeEmbedding()),
+            patch(HTTP_EMBEDDING, return_value=_FakeEmbedding()),
         ):
             root = Path(temporary)
             model = root / "model.gguf"
             model.write_bytes(b"test model")
             local = Tarel(root / "state")
-            local.retrieval.configure(RetrievalSettings(
-                embedding=ModelChoice(model_path=str(model)),
-            ))
+            local.retrieval.configure(
+                RetrievalSettings(
+                    embedding=ModelChoice(model_path=str(model)),
+                )
+            )
             graph = _retrieval_graph()
             local.runtime.graph_store().save(graph)
-            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+            with patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()):
                 original = local.index.build(graph.name, model_path=model)
             before = original.path.read_bytes()
             paths = []
@@ -491,11 +532,13 @@ class RetrievalSelectionTests(TestCase):
                 self.assertEqual(again.reused_documents, indexed.metadata.document_count)
                 hits = remote.search.graph(graph.name, "internet revenue", mode="hybrid")
                 self.assertTrue(hits.hits)
-            self.assertEqual(len(set(paths + [original.path])), 3)
+            self.assertEqual(len({*paths, original.path}), 3)
             self.assertEqual(original.path.read_bytes(), before)
             local.retrieval.configure(
-                replace(local.retrieval.settings(),
-                        reranker=ModelChoice("openrouter", "typesafe/jev-1.13"))
+                replace(
+                    local.retrieval.settings(),
+                    reranker=ModelChoice("openrouter", "typesafe/jev-1.13"),
+                )
             )
             self.assertEqual(local.runtime.retrieval_index().path(graph.name), original.path)
             self.assertTrue(local.index.status(graph.name, model_path=model)["ready"])
@@ -507,7 +550,7 @@ class RetrievalSelectionTests(TestCase):
                 "tarel.retrieval.remote.load_http_provider_config",
                 return_value=_profile(),
             ),
-            patch("tarel.application.HTTPEmbedding", return_value=_FakeEmbedding()),
+            patch(HTTP_EMBEDDING, return_value=_FakeEmbedding()),
         ):
             sdk = Tarel(
                 temporary,
@@ -520,8 +563,8 @@ class RetrievalSelectionTests(TestCase):
             sdk.index.build(graph.name)
             changed = replace(
                 graph,
-                nodes=graph.nodes[:-1]
-                + (
+                nodes=(
+                    *graph.nodes[:-1],
                     replace(
                         graph.nodes[-1],
                         annotation=GraphAnnotation(description="Updated helper field."),
@@ -567,7 +610,7 @@ class RetrievalSelectionTests(TestCase):
                 "tarel.retrieval.remote.load_http_provider_config",
                 return_value=_profile(),
             ),
-            patch("tarel.application.HTTPEmbedding", return_value=_FakeEmbedding()) as factory,
+            patch(HTTP_EMBEDDING, return_value=_FakeEmbedding()) as factory,
         ):
             sdk = Tarel(
                 temporary,
@@ -592,7 +635,7 @@ class RetrievalSelectionTests(TestCase):
             )
             backend = _FakeEmbedding()
             with (
-                patch("tarel.application.HTTPEmbedding", return_value=backend) as search_factory,
+                patch(HTTP_EMBEDDING, return_value=backend) as search_factory,
                 patch.object(backend, "embed_query", wraps=backend.embed_query) as query_embedding,
                 patch("tarel.retrieval.rerank.rerank_remote", return_value=(0.1, 0.9)) as reranker,
             ):
@@ -610,7 +653,7 @@ class RetrievalSelectionTests(TestCase):
                 "tarel.retrieval.remote.load_http_provider_config",
                 return_value=_profile(),
             ),
-            patch("tarel.application.HTTPEmbedding", return_value=_FakeEmbedding()),
+            patch(HTTP_EMBEDDING, return_value=_FakeEmbedding()),
         ):
             sdk = Tarel(temporary)
             graph = _retrieval_graph()
@@ -643,9 +686,9 @@ class HTTPRetrievalTests(TestCase):
     def test_qwen_cloud_queries_share_the_local_retrieval_instruction(self):
         with patch("tarel.retrieval.remote.load_http_provider_config", return_value=_profile()):
             embedding = HTTPEmbedding(ModelChoice("openrouter", "qwen/qwen3-embedding-8b"))
-        with patch.object(embedding.client, "request", return_value={
-            "data": [{"index": 0, "embedding": [1, 0]}]
-        }) as request:
+        with patch.object(
+            embedding.client, "request", return_value={"data": [{"index": 0, "embedding": [1, 0]}]}
+        ) as request:
             embedding.embed_query(" revenue ")
             self.assertTrue(request.call_args.args[1]["input"][0].startswith("Instruct:"))
             self.assertTrue(request.call_args.args[1]["input"][0].endswith("Query: revenue"))
@@ -673,14 +716,24 @@ class HTTPRetrievalTests(TestCase):
     def test_native_rerank_restores_provider_indexes(self):
         with (
             patch("tarel.retrieval.remote.load_http_provider_config", return_value=_profile()),
-            patch("tarel.retrieval.remote.HTTPRetrievalClient.request", return_value={
-                "results": [{"index": 1, "relevance_score": 0.9},
-                            {"index": 0, "relevance_score": 0.1}]
-            }) as request,
+            patch(
+                "tarel.retrieval.remote.HTTPRetrievalClient.request",
+                return_value={
+                    "results": [
+                        {"index": 1, "relevance_score": 0.9},
+                        {"index": 0, "relevance_score": 0.1},
+                    ]
+                },
+            ) as request,
         ):
-            self.assertEqual(rerank_remote(ModelChoice("openrouter", "native-ranker"),
-                                          "revenue", ("cpu", "sales")), (0.1, 0.9))
+            self.assertEqual(
+                rerank_remote(
+                    ModelChoice("openrouter", "native-ranker"), "revenue", ("cpu", "sales")
+                ),
+                (0.1, 0.9),
+            )
             self.assertEqual(request.call_args.args[0], "/rerank")
+
     def test_embedding_restores_row_order_normalizes_and_checks_dimension(self):
         with patch("tarel.retrieval.remote.load_http_provider_config", return_value=_profile()):
             embedding = HTTPEmbedding(ModelChoice("openrouter", "perplexity/pplx-embed-v1-4b"))
@@ -696,11 +749,14 @@ class HTTPRetrievalTests(TestCase):
                 ((1.0, 0.0), (0.0, 1.0)),
             )
             self.assertEqual(request.call_args.args[1]["input"], ["first", "second"])
-        with patch.object(
-            embedding.client,
-            "request",
-            return_value={"data": [{"index": 0, "embedding": [1, 0, 0]}]},
-        ), self.assertRaises(RetrievalFailure):
+        with (
+            patch.object(
+                embedding.client,
+                "request",
+                return_value={"data": [{"index": 0, "embedding": [1, 0, 0]}]},
+            ),
+            self.assertRaises(RetrievalFailure),
+        ):
             embedding.embed_query("query")
 
     def test_duplicate_indexes_and_invalid_vectors_fail(self):

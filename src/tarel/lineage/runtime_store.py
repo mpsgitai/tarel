@@ -10,8 +10,10 @@ from pathlib import Path
 
 from tarel.lineage.contracts import LineageFailure
 from tarel.lineage.runtime import (
-    RuntimeLineageDocument,
     validate_runtime_lineage_document,
+)
+from tarel.lineage.runtime_records import (
+    RuntimeLineageDocument,
 )
 
 _RUNTIME_LINEAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")

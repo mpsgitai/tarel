@@ -14,9 +14,9 @@ from tarel.connectors.contracts import (
     CatalogRelationship,
     CatalogResult,
 )
-from tarel.context import ContextFailure, compile_context, compile_context_prefix
-from tarel.context_caching import split_context_packet
-from tarel.context_output import canonical_hash
+from tarel.context.caching import split_context_packet
+from tarel.context.compiler import ContextFailure, compile_context, compile_context_prefix
+from tarel.context.output import canonical_hash
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.store import FileGraphStore
@@ -134,7 +134,7 @@ class ContextTests(TestCase):
             store.save(graph)
             output = StringIO()
             with (
-                patch("tarel.application.FileGraphStore", return_value=store),
+                patch("tarel.runtime.FileGraphStore", return_value=store),
                 redirect_stdout(output),
             ):
                 exit_code = main(
@@ -251,7 +251,7 @@ class ContextTests(TestCase):
             store.save(graph)
             output = StringIO()
             with (
-                patch("tarel.application.FileGraphStore", return_value=store),
+                patch("tarel.runtime.FileGraphStore", return_value=store),
                 redirect_stdout(output),
             ):
                 exit_code = main(
@@ -316,7 +316,7 @@ class ContextTests(TestCase):
             store.save(graph)
             output = StringIO()
             with (
-                patch("tarel.application.FileGraphStore", return_value=store),
+                patch("tarel.runtime.FileGraphStore", return_value=store),
                 redirect_stdout(output),
             ):
                 exit_code = main(

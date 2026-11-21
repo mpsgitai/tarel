@@ -12,8 +12,8 @@ from tarel.graph.contracts import GraphDocument
 from tarel.graph.revision import physical_graph_revision
 from tarel.object_families import FamilyField, ObjectFamily, ObjectFamilyFailure, review_family
 from tarel.object_families.application import (
-    _physical_schemas,
     list_object_families_use_case,
+    physical_schemas,
     project_families_for_graphs_use_case,
     validate_object_families_against_graph,
     validate_object_family_against_graph,
@@ -66,7 +66,7 @@ class FamilyValidationScaleTests(TestCase):
                 wraps=physical_graph_revision,
             ) as hashes,
             patch(
-                "tarel.object_families.application._physical_schemas", wraps=_physical_schemas
+                "tarel.object_families.application.physical_schemas", wraps=physical_schemas
             ) as schemas,
         ):
             validate_object_families_against_graph(families, graph)
@@ -94,8 +94,8 @@ class FamilyValidationScaleTests(TestCase):
                         wraps=physical_graph_revision,
                     ) as hashes,
                     patch(
-                        "tarel.object_families.application._physical_schemas",
-                        wraps=_physical_schemas,
+                        "tarel.object_families.application.physical_schemas",
+                        wraps=physical_schemas,
                     ) as schemas,
                 ):
                     result = operation()

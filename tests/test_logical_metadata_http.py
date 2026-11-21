@@ -16,7 +16,15 @@ from tarel.semantic_concepts import ConceptBinding, SemanticConcept, SemanticCon
 from tarel.semantic_concepts.application import save_semantic_concepts_use_case
 from tarel.semantic_concepts.store import FileSemanticConceptStore
 from tarel.topology.endpoint_contracts import LogicalEndpoint
-from tarel.ui.server import TarelUIBackend, UIConfig, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.contracts import Area, SchemaReference, Zone, ZoneMember
 from tests.test_family_focus import _focus
 from tests.test_object_families_ui import _family, _graph, _workspace
@@ -162,6 +170,14 @@ class LogicalMetadataHTTPTests(TestCase):
         self.assertEqual((status, payload["error"]["code"]), (400, "invalid_content_type"))
         with self.assertRaises(HTTPError) as raised:
             urlopen(self.base_url + "/api/logical/metadata", timeout=5)
+        self.assertEqual(raised.exception.code, 403)
+        raised.exception.close()
+        read = Request(
+            self.base_url + "/api/logical/metadata",
+            headers={"X-Tarel-Token": "metadata-test-token"},
+        )
+        with self.assertRaises(HTTPError) as raised:
+            urlopen(read, timeout=5)
         self.assertEqual(raised.exception.code, 404)
         raised.exception.close()
 
@@ -220,7 +236,7 @@ class LogicalMetadataHTTPTests(TestCase):
 
     def test_configured_focus_is_used_without_request_override(self) -> None:
         self._configure(UIConfig(graph=self.graph.name, focuses=(self.focus.name,)))
-        status, payload, _ = self._post(self._request())
+        status, _payload, _ = self._post(self._request())
         self.assertEqual(status, 200)
         status, denied, _ = self._post(self._request(object_ids=[self.ids[4]]))
         self.assertEqual(
@@ -234,7 +250,7 @@ class LogicalMetadataHTTPTests(TestCase):
         )
         self.assertEqual(status, 200)
         revision = view["object_families"]["scope_revision"]
-        status, payload, _ = self._post(
+        status, _payload, _ = self._post(
             self._request(focuses=[self.focus.name], scope_revision=revision)
         )
         self.assertEqual(status, 200)

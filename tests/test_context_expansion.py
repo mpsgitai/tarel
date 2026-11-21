@@ -17,8 +17,8 @@ from test_reference_mapping import _candidate_contract as mapping_candidate
 from test_reference_mapping import _graph as mapping_graph
 
 from tarel.cli import main
-from tarel.context import ContextFailure
-from tarel.context_output import canonical_json
+from tarel.context.compiler import ContextFailure
+from tarel.context.output import canonical_json
 from tarel.expansion import ContextExpansionFailure, ExpansionInput, ExpansionTarget
 from tarel.graph.revision import physical_graph_revision
 from tarel.graph.store import FileGraphStore
@@ -250,6 +250,88 @@ class ContextExpansionTests(TestCase):
         result = json.loads(out.getvalue())
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["base_packet_hash"], self.base.packet_hash)
+
+    def _expand_cli(self, requests: str, *, stdin: str = "") -> tuple[int, str, str]:
+        packet_path = self.project / "packet.json"
+        packet_path.write_text(self.base.canonical_json())
+        previous = Path.cwd()
+        out, err = StringIO(), StringIO()
+        try:
+            os.chdir(self.project)
+            with redirect_stdout(out), redirect_stderr(err), patch("sys.stdin", StringIO(stdin)):
+                # The budget is roomy so that only the target count is under test here.
+                code = main([
+                    "context", "expand", "--packet", str(packet_path), "--requests", requests,
+                    "--max-characters", "200000",
+                ])
+        finally:
+            os.chdir(previous)
+        return code, out.getvalue(), err.getvalue()
+
+    def _object_targets(self, count: int) -> str:
+        header = self.sdk.graph.header("commerce")
+        target = ExpansionTarget("object", "commerce", self.family.member_ids[0], header.revision)
+        return json.dumps([target.reference()] * count)
+
+    def test_cli_reads_requests_from_a_file_or_stdin_with_the_same_result(self) -> None:
+        body = self._object_targets(1)
+        request_file = self.project / "targets.json"
+        request_file.write_text(body)
+
+        from_file = self._expand_cli(str(request_file))
+        from_stdin = self._expand_cli("-", stdin=body)
+
+        self.assertEqual(from_file, from_stdin)
+        self.assertEqual(from_file[0], 0)
+        self.assertEqual(json.loads(from_file[1])["status"], "completed")
+
+    def test_cli_target_count_bounds_apply_to_files_and_stdin(self) -> None:
+        request_file = self.project / "targets.json"
+        for count, expected in ((1, 0), (32, 0), (0, 2), (33, 2)):
+            body = self._object_targets(count)
+            request_file.write_text(body)
+            for name, arguments in (
+                ("file", {"requests": str(request_file)}),
+                ("stdin", {"requests": "-", "stdin": body}),
+            ):
+                with self.subTest(count=count, source=name):
+                    code, out, err = self._expand_cli(**arguments)
+                    self.assertEqual(code, expected)
+                    if expected == 0:
+                        self.assertEqual(len(json.loads(out)["items"]), count)
+                    else:
+                        self.assertIn("Supply 1–32 typed expansion targets.", err)
+
+    def test_cli_rejects_malformed_request_documents(self) -> None:
+        request_file = self.project / "targets.json"
+        for name, body, code_name in (
+            ("invalid json", "[{", "invalid_expansion_input"),
+            ("duplicate key", '[{"kind":"a","kind":"b"}]', "invalid_expansion_input"),
+            ("null document", "null", "invalid_context_expansion"),
+            ("object document", '{"kind":"object"}', "invalid_context_expansion"),
+            ("null target", "[null]", "invalid_context_expansion"),
+            ("number target", "[1]", "invalid_context_expansion"),
+            ("incomplete target", '[{"kind":"object"}]', "invalid_context_expansion"),
+        ):
+            request_file.write_text(body)
+            with self.subTest(body=name):
+                code, out, err = self._expand_cli(str(request_file))
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(code_name, err)
+
+    def test_cli_help_and_errors_do_not_promise_inline_json(self) -> None:
+        out = StringIO()
+        with redirect_stdout(out), self.assertRaises(SystemExit):
+            main(["context", "expand", "--help"])
+        self.assertIn("JSON file", out.getvalue())
+        self.assertNotIn("array, file", out.getvalue())
+
+        inline = self._object_targets(1)
+        code, stdout, err = self._expand_cli(inline)
+
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertIn("invalid_expansion_input", err)
+        self.assertIn("Pass a JSON file or '-' for stdin.", err)
 
     def test_request_contract_rejects_raw_rows_code_and_bad_handles(self) -> None:
         for change in (

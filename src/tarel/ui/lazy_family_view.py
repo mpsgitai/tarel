@@ -3,37 +3,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
 
-from tarel.discovery.application import list_query_linked_coverages_use_case
+from tarel.discovery.coverage_application import (
+    list_query_linked_coverages_use_case,
+)
 from tarel.entity_resolution.application import list_entity_resolution_candidates_use_case
 from tarel.graph.contracts import GraphFailure
 from tarel.lineage.contracts import LineageDocument
 from tarel.object_families.application import (
-    _attribute_values,
-    _families,
-    _graphs,
-    _require_mode,
+    family_attribute_values,
     family_summary,
+    require_family_mode,
     validate_family_selectively,
 )
 from tarel.object_families.contracts import ObjectFamily, ObjectFamilyFailure
 from tarel.reference_mapping.application import list_reference_mapping_candidates_use_case
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.semantics.application import list_semantic_imports_use_case
-from tarel.topology.store import FileLogicalTopologyStore
-from tarel.ui.presentation import (
-    _compact_family_workspace_members,
-    _family_object_payload,
-    browser_graph,
+from tarel.ui.payloads.families import (
+    compact_family_workspace_members,
+    family_object_payload,
     family_view_scope_revision_from_revisions,
+)
+from tarel.ui.payloads.graph import (
+    browser_graph,
 )
 from tarel.workspaces.contracts import WorkspaceDocument
 
 
 @dataclass(frozen=True, slots=True)
 class LazyFamilyGraphView:
-    payload: dict[str, object] | None
+    payload: dict[str, Any] | None
     fallback_reason: str | None = None
 
 
@@ -47,13 +48,13 @@ def try_lazy_family_graph_view_use_case(
     has_focus: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> LazyFamilyGraphView:
-    _require_mode(family_mode)
+    require_family_mode(family_mode)
     if has_focus:
         return LazyFamilyGraphView(None, "focus_requires_full_projection")
     reason = _rich_sidecar_reason(graph_name, runtime)
     if reason is not None:
         return LazyFamilyGraphView(None, reason)
-    store = _graphs(runtime)
+    store = resolve_runtime(runtime).graph_store()
     header = store.header(graph_name)
     current_families, stale = _current_families(graph_name, header.physical_revision, runtime)
     families = tuple(
@@ -82,10 +83,10 @@ def try_lazy_family_graph_view_use_case(
     nodes = metadata.graph.node_by_id()
     for family in current_families:
         for member in family.member_ids:
-            _attribute_values(family.attributes, nodes[member])
+            family_attribute_values(family.attributes, nodes[member])
     all_objects = set(object_ids)
     hidden: set[str] = set()
-    rendered: list[dict[str, object]] = []
+    rendered: list[dict[str, Any]] = []
     for family in families:
         current = validate_family_selectively(family, runtime=runtime)
         if current.revision != header.revision:
@@ -112,7 +113,7 @@ def try_lazy_family_graph_view_use_case(
         summary["namespace_count"] = len(
             {str(nodes[item].metadata.get("namespace") or "") for item in members}
         )
-        rendered.append(_family_object_payload(graph_name, header.catalog, family, summary))
+        rendered.append(family_object_payload(graph_name, header.catalog, family, summary))
     visible = store.read_slice(
         graph_name, tuple(sorted(all_objects - hidden)), expected_revision=header.revision
     )
@@ -147,7 +148,7 @@ def try_lazy_family_graph_view_use_case(
         "relationships, derivations, zones and lineage. "
         "Annotation review loads the physical scope separately.",
     }
-    _compact_family_workspace_members(payload, {(graph_name, item) for item in hidden})
+    compact_family_workspace_members(payload, {(graph_name, item) for item in hidden})
     payload["storage"] = {
         "mode": "selective_family_projection",
         "full_document_read": any(item.full_document_read for item in stats),
@@ -163,7 +164,7 @@ def try_lazy_family_graph_view_use_case(
     return LazyFamilyGraphView(payload)
 
 
-def full_family_projection_storage(reason: str) -> dict[str, object]:
+def full_family_projection_storage(reason: str) -> dict[str, Any]:
     return {
         "mode": "full_projection",
         "full_document_read": True,
@@ -178,7 +179,7 @@ def _current_families(
     revision: str,
     runtime: TarelRuntime | None,
 ) -> tuple[tuple[ObjectFamily, ...], bool]:
-    store = _families(runtime)
+    store = resolve_runtime(runtime).object_family_store()
     families: list[ObjectFamily] = []
     stale = False
     owned: set[str] = set()
@@ -202,9 +203,9 @@ def _current_families(
 
 
 def _rich_sidecar_reason(graph_name: str, runtime: TarelRuntime | None) -> str | None:
-    from tarel.application import list_knowledge_documents_use_case
+    from tarel.knowledge.application import list_knowledge_documents_use_case
 
-    topology = runtime.logical_topology_store() if runtime else FileLogicalTopologyStore()
+    topology = resolve_runtime(runtime).logical_topology_store()
     if topology.exists(graph_name):
         return "logical_topology_requires_full_projection"
     if list_entity_resolution_candidates_use_case(graph_name=graph_name, runtime=runtime):
@@ -217,7 +218,7 @@ def _rich_sidecar_reason(graph_name: str, runtime: TarelRuntime | None) -> str |
         return "query_coverage_requires_full_projection"
     if list_knowledge_documents_use_case(runtime=runtime):
         return "knowledge_requires_full_projection"
-    root = runtime.root if runtime else Path.cwd() / ".tarel"
+    root = resolve_runtime(runtime).root
     # These opt-in sidecars are projected separately by the full browser path.
     # Presence is enough to choose that validated path; do not inspect private payloads here.
     for name in ("object-bindings", "semantic-concepts", "logical-discovery"):

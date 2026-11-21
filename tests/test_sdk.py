@@ -22,6 +22,7 @@ from tarel.lineage.source import (
     SourceMaterialization,
     SourceStep,
 )
+from tarel.retrieval.local import LOCAL_EMBEDDING_INPUT
 from tarel.sdk import Tarel, WorkspaceScope
 from tarel.workspaces.contracts import WorkspaceFailure
 from tarel.workspaces.core import create_workspace, define_system
@@ -379,7 +380,7 @@ class SDKTests(TestCase):
             sdk.runtime.graph_store().save(graph)
             embedding = _Embedding()
             progress: list[tuple[int, int, str]] = []
-            with patch("tarel.application.LlamaCppEmbedding", return_value=embedding):
+            with patch("tarel.retrieval.application.LlamaCppEmbedding", return_value=embedding):
                 built = sdk.index.build(
                     "demo",
                     model_path=model,
@@ -654,6 +655,13 @@ def _crm_fixture():
 
 
 class _Embedding:
+    input_strategy = LOCAL_EMBEDDING_INPUT
+    max_input_tokens = None
+    runtime_version = ""
+
+    def token_count(self, text):
+        del text
+
     model_id = "test-embedding"
 
     def embed_documents(

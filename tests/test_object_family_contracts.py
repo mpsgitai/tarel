@@ -106,7 +106,7 @@ class ObjectFamilyContractTests(TestCase):
     def test_schema_attribute_and_grain_names_are_explicit_and_disjoint(self) -> None:
         family = _family()
         for document in (
-            replace(family, schema=family.schema + (family.schema[0],)),
+            replace(family, schema=(*family.schema, family.schema[0])),
             replace(family, attributes=family.attributes + family.attributes),
             replace(family, attributes=(FamilyAttribute("order_id", "namespace"),)),
             replace(family, grain=()),
@@ -226,7 +226,7 @@ class ObjectFamilyStoreTests(TestCase):
             path = store.save(family)
             previous = path.read_bytes()
             with (
-                patch("tarel.object_families.store.os.replace", side_effect=OSError("failure")),
+                patch("pathlib.Path.replace", side_effect=OSError("failure")),
                 self.assertRaises(ObjectFamilyFailure) as failure,
             ):
                 store.save(replace(family, name="changed"))

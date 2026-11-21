@@ -23,6 +23,11 @@ from tarel.workspaces.core import create_workspace, define_system
 from tests.test_object_families import _graph as _family_graph
 from tests.test_ui import _graph
 
+# Patch targets: where the use cases look these names up.
+LOCAL_EMBEDDING = "tarel.retrieval.application.LlamaCppEmbedding"
+LOAD_PROVIDER = "tarel.annotations.application.load_provider"
+LOAD_CONNECTOR = "tarel.connectors.application.load_connector"
+
 
 class UIQueryToolsTests(TestCase):
     def setUp(self) -> None:
@@ -78,7 +83,7 @@ class UIQueryToolsTests(TestCase):
         )
         output = StringIO()
         with (
-            patch("tarel.application.FileGraphStore", return_value=self.sdk.runtime.graph_store()),
+            patch("tarel.runtime.FileGraphStore", return_value=self.sdk.runtime.graph_store()),
             redirect_stdout(output),
         ):
             status = main(["context", "sales", "DateKey", "--validated-only", "--format", "json"])
@@ -197,9 +202,9 @@ class UIQueryToolsTests(TestCase):
 
     def test_provider_connector_and_embedding_are_never_called(self):
         with (
-            patch("tarel.application.load_provider", side_effect=AssertionError("provider")),
-            patch("tarel.application.load_connector", side_effect=AssertionError("connector")),
-            patch("tarel.application.LlamaCppEmbedding", side_effect=AssertionError("embedding")),
+            patch(LOAD_PROVIDER, side_effect=AssertionError("provider")),
+            patch(LOAD_CONNECTOR, side_effect=AssertionError("connector")),
+            patch(LOCAL_EMBEDDING, side_effect=AssertionError("embedding")),
             patch("socket.create_connection", side_effect=AssertionError("network")),
         ):
             self.assertTrue(search_metadata(

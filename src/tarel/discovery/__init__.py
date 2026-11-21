@@ -1,12 +1,16 @@
 """Optional, resumable discovery runs for coding agents."""
 
 from tarel.discovery.contracts import (
-    DiscoveryCandidate,
     DiscoveryFailure,
-    DiscoveryObservation,
+)
+from tarel.discovery.programs import (
     DiscoveryProgram,
-    DiscoveryRun,
     DiscoveryTransform,
+)
+from tarel.discovery.runs import (
+    DiscoveryCandidate,
+    DiscoveryObservation,
+    DiscoveryRun,
 )
 
 __all__ = [

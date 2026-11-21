@@ -13,7 +13,10 @@ from unittest.mock import patch
 from test_object_families import _graph
 
 from tarel.cli import main
-from tarel.discovery.contracts import DiscoveryExecution, DiscoveryMetrics
+from tarel.discovery.runs import (
+    DiscoveryExecution,
+    DiscoveryMetrics,
+)
 from tarel.graph.revision import physical_graph_revision
 from tarel.object_bindings import ObjectBindingFailure, ObjectValueBinding
 from tarel.object_families import FamilyAttribute
@@ -240,6 +243,8 @@ class ObjectBindingTests(TestCase):
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def _cli(self, argv: list[str], payload: object) -> tuple[int, str, str]:
+        """Run a binding command with JSON output, which these tests parse."""
+        argv = [*argv, "--format", "json"]
         previous = Path.cwd()
         out, err = StringIO(), StringIO()
         try:

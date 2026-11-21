@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
+from tarel.errors import TarelError
+
 IDENTITY_ACTIONS = frozenset(
     {
         "record_entity_group",
@@ -35,10 +37,8 @@ _MAX_GROUP_MEMBERS = 1_000
 _MAX_REFLECTIONS = 4_000
 
 
-class IdentityFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class IdentityFailure(TarelError):
+    """Raised when an identity operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,7 +519,7 @@ def _fields(
     required: set[str],
     label: str,
     *,
-    optional: set[str] = frozenset(),
+    optional: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     if set(data) - optional != required or not set(data).issubset(required | optional):
         raise IdentityFailure(

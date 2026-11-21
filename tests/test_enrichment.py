@@ -8,10 +8,12 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from tarel.application import sample_connector_use_case
 from tarel.cli import main
+from tarel.connectors.application import (
+    sample_connector_use_case,
+)
 from tarel.connectors.contracts import ConnectorFailure
-from tarel.context import compile_context
+from tarel.context.compiler import compile_context
 from tarel.demo import create_retail_demo
 from tarel.relationships.core import decide_relationship
 from tarel.sdk import Tarel
@@ -309,11 +311,11 @@ def _create_pattern_source(root: Path) -> None:
             INSERT INTO D_KTO VALUES (102000), (102001), (102002), (102003);
             INSERT INTO D_ACCT VALUES (102020), (102021), (102022), (102023);
             INSERT INTO F_KEYS VALUES
-                ('KST102020KTO102000', '2026-08-18T10:00:00', 'Bac + 5'),
-                ('KST102021KTO102001', '2026-08-19T11:00:00', 'Bac + 4'),
-                ('KST102022KTO102002', '2026-08-20T12:00:00', 'Bac + 3'),
-                ('KST102023KTO102003', '2026-08-21T13:00:00', 'Bac + 2'),
-                ('legacy-key', '2026-08-22T14:00:00', 'Bac + 1');
+                ('KST102020KTO102000', '2030-01-01T10:00:00', 'Bac + 5'),
+                ('KST102021KTO102001', '2030-01-02T11:00:00', 'Bac + 4'),
+                ('KST102022KTO102002', '2030-01-03T12:00:00', 'Bac + 3'),
+                ('KST102023KTO102003', '2030-01-04T13:00:00', 'Bac + 2'),
+                ('legacy-key', '2030-01-05T14:00:00', 'Bac + 1');
             """
         )
     config_path = demos / "keys.toml"

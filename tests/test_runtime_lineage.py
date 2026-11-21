@@ -12,7 +12,9 @@ from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResul
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.revision import graph_revision
 from tarel.lineage.contracts import LineageFailure
-from tarel.lineage.runtime import RuntimeLineageInput
+from tarel.lineage.runtime_records import (
+    RuntimeLineageInput,
+)
 from tarel.sdk import Tarel
 
 

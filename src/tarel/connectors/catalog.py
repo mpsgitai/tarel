@@ -99,8 +99,8 @@ def validate_catalog_result(catalog: CatalogResult) -> None:
                 f"Unsupported catalog object kind: {item.kind}",
             )
         _optional_text(item.description, "object description")
-        key = (item.namespace, item.name)
-        if key in object_fields:
+        object_key = (item.namespace, item.name)
+        if object_key in object_fields:
             raise ConnectorFailure(
                 "invalid_catalog",
                 f"Duplicate catalog object: {item.namespace}.{item.name}",
@@ -131,21 +131,21 @@ def validate_catalog_result(catalog: CatalogResult) -> None:
         if len(item.primary_key) != len(set(item.primary_key)):
             raise ConnectorFailure(
                 "invalid_catalog",
-                f"Duplicate primary-key field in {item.namespace}.{item.name}.",
+                f"Duplicate primary-object_key field in {item.namespace}.{item.name}.",
             )
         unknown_primary_keys = set(item.primary_key) - names
         if unknown_primary_keys:
             raise ConnectorFailure(
                 "invalid_catalog",
-                f"Unknown primary-key field in {item.namespace}.{item.name}: "
+                f"Unknown primary-object_key field in {item.namespace}.{item.name}: "
                 f"{sorted(unknown_primary_keys)[0]}",
             )
         if set(item.primary_key) != flagged_primary_keys:
             raise ConnectorFailure(
                 "invalid_catalog",
-                f"Primary-key metadata is inconsistent in {item.namespace}.{item.name}.",
+                f"Primary-object_key metadata is inconsistent in {item.namespace}.{item.name}.",
             )
-        object_fields[key] = names
+        object_fields[object_key] = names
 
     relationship_keys: set[tuple[str, str, str]] = set()
     for relationship in catalog.relationships:

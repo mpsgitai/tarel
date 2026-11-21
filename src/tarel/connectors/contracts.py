@@ -5,13 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from tarel.errors import TarelError
 
-class ConnectorFailure(RuntimeError):
+
+class ConnectorFailure(TarelError):
     """A connector failure safe to present at the CLI boundary."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 @dataclass(frozen=True, slots=True)

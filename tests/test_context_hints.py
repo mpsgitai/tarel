@@ -15,9 +15,9 @@ from test_reference_mapping import _candidate_contract
 
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
-from tarel.context import ContextFailure
-from tarel.context_output import ContextPacket, canonical_json
-from tarel.context_packets import context_packet_from_dict, diff_context_packets
+from tarel.context.compiler import ContextFailure
+from tarel.context.output import ContextPacket, canonical_json
+from tarel.context.packets import context_packet_from_dict, diff_context_packets
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphDocument
 from tarel.graph.revision import physical_graph_revision
@@ -419,9 +419,8 @@ class LogicalContextHintTests(TestCase):
                 self.assertEqual(packet.retrieval_mode, "bm25")
                 self.assertEqual(len(packet.stable_dict()["logical_hints"]["items"]), 1)
                 status, output, errors = self._cli(
-                    ["context", name, "orders", "--mode", "bm25",
-                     "--logical-hints", "include_candidates", "--format", "json"]
-                    + (["--workspace"] if scoped else [])
+                    ["context", *(["--workspace", name] if scoped else [name]), "orders",
+                     "--mode", "bm25", "--logical-hints", "include_candidates", "--format", "json"]
                 )
                 self.assertEqual((status, errors), (0, ""))
                 self.assertEqual(json.loads(output), packet.to_dict())
@@ -543,9 +542,9 @@ class LogicalContextHintTests(TestCase):
                 logical_hints="include_candidates")),
             (["context", "prefix", "commerce"], self.sdk.context.prefix_graph("commerce",
                 logical_hints="include_candidates")),
-            (["context", "estate", "orders", "--workspace"], self.sdk.context.workspace(
+            (["context", "--workspace", "estate", "orders"], self.sdk.context.workspace(
                 "estate", "orders", logical_hints="include_candidates")),
-            (["context", "prefix", "estate", "--workspace"], self.sdk.context.prefix_workspace(
+            (["context", "prefix", "--workspace", "estate"], self.sdk.context.prefix_workspace(
                 "estate", logical_hints="include_candidates")),
             (["grounding", "commerce", "orders"], self.sdk.grounding.context(
                 "orders", graph="commerce", logical_hints="include_candidates")),
@@ -553,7 +552,7 @@ class LogicalContextHintTests(TestCase):
         for args, expected in calls:
             with self.subTest(args=args):
                 status, output, errors = self._cli(
-                    args + ["--logical-hints", "include_candidates", "--format", "json"]
+                    [*args, "--logical-hints", "include_candidates", "--format", "json"]
                 )
                 self.assertEqual((status, errors), (0, ""))
                 self.assertEqual(json.loads(output), expected.to_dict())

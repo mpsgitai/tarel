@@ -7,15 +7,13 @@ from dataclasses import dataclass, replace
 
 from tarel.graph.contracts import GraphDocument
 from tarel.graph.revision import physical_graph_revision
-from tarel.graph.store import FileGraphStore
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.semantic_concepts.contracts import (
     ConceptReview,
     SemanticConcept,
     SemanticConceptDocument,
     SemanticConceptFailure,
 )
-from tarel.semantic_concepts.store import FileSemanticConceptStore
 from tarel.topology.endpoint_contracts import (
     LOGICAL_ENDPOINT_MODES,
     LogicalEndpoint,
@@ -71,7 +69,7 @@ def save_semantic_concepts_use_case(
     document = SemanticConceptDocument.from_dict(document.to_dict())
     graph = _graph(document.graph_name, runtime)
     _require_graph(document, graph)
-    store = _store(runtime)
+    store = resolve_runtime(runtime).semantic_concept_store()
     previous = store.load(document.graph_name) if store.exists(document.graph_name) else None
     if (previous is not None and expected_revision != previous.revision) or (
         previous is None and expected_revision is not None
@@ -126,7 +124,7 @@ def load_semantic_concepts_use_case(
     runtime: TarelRuntime | None = None,
 ) -> SemanticConceptDocument:
     """Load the audit artifact; use find for current, policy-filtered context."""
-    return _store(runtime).load(graph_name)
+    return resolve_runtime(runtime).semantic_concept_store().load(graph_name)
 
 
 def review_semantic_concept_use_case(
@@ -170,7 +168,7 @@ def review_semantic_concept_use_case(
         review=review,
     )
     changed = replace(document, concepts=tuple(by_id.values()))
-    _store(runtime).save(changed)
+    resolve_runtime(runtime).semantic_concept_store().save(changed)
     return changed
 
 
@@ -216,7 +214,7 @@ def find_semantic_concepts_use_case(
         raise SemanticConceptFailure(
             "invalid_semantic_concept_query", "Invalid bounded concept query."
         )
-    store = _store(runtime)
+    store = resolve_runtime(runtime).semantic_concept_store()
     if not store.exists(graph_name):
         return ()
     document = store.load(graph_name)
@@ -344,8 +342,5 @@ def _require_graph(document: SemanticConceptDocument, graph: GraphDocument) -> N
 
 
 def _graph(graph_name: str, runtime: TarelRuntime | None) -> GraphDocument:
-    return (runtime.graph_store() if runtime else FileGraphStore()).load(graph_name)
+    return resolve_runtime(runtime).graph_store().load(graph_name)
 
-
-def _store(runtime: TarelRuntime | None) -> FileSemanticConceptStore:
-    return FileSemanticConceptStore(runtime.root / "semantic-concepts" if runtime else None)

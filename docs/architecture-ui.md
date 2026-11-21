@@ -23,6 +23,56 @@ object; double-click opens its neighbourhood or the objects in an architecture c
 Ctrl/Cmd+mouse wheel zooms faster. Structure, lineage, the inspector and review evidence
 remain views over the same metadata and review states.
 
+### Lineage view
+
+The Lineage canvas connects data objects directly. Each edge joins every process that links two
+objects, so a table points to a table instead of to a job. Line style shows the weakest state of
+those processes: solid green is confirmed, dashed is draft, solid amber needs review, and dotted
+means the process reads the source but its write statement does not name it as an input. A dotted
+edge is not proof that data flows into the target. **Processes as nodes** redraws the same data
+with each process as its own node, for looking at orchestration.
+
+Clicking an edge opens its processes in the inspector: type, operation, role, state, how the flow
+was derived (SQLGlot, provider, manual or dbt declared), the source lines around the evidence,
+reviews and, for an analysis that failed, the reason in plain words. With `--edit` a draft item
+can be confirmed or rejected there, guarded by its lineage revision. **Trace upstream** and
+**Trace downstream** load more of the graph and highlight the path on the canvas, which **Isolate
+path** fades the surroundings around instead of removing them.
+
+Lineage documents store a hash of each definition, never its code. The panel therefore rereads
+the file named by the definition or by its input document, and shows it only while the hash still
+matches. Otherwise it says that the source moved or changed, and only the evidence text remains.
+
+References resolve with the same rules as `lineage upstream`, so a script's `F_SLS_01` connects to
+the graph table and a truly ambiguous name stays a flagged asset. A process that only reads, such
+as a report, draws no edge and is listed in the payload's `reads_only`. There is no column lineage:
+the panel shows `via` values only when the analysis recorded them.
+
+A name no object answers to becomes an asset that is shared only as far as the name can reach, and
+its label names that scope (`#tmp · etl`). Equal spelling alone never joins two scopes:
+
+| Reference | Scope |
+| --- | --- |
+| `@variable` | its definition |
+| `#table` | its session: definitions of one document joined by a step dependency or a call |
+| `##table`, a bare name, a name several objects carry | its document |
+| any other qualified name | shared across documents |
+
+Each contribution in the edge detail lists how its names were settled in `resolutions`, with
+`side`, `reference`, `basis`, `resolved_to`, `candidates`, `note` and `warning`. The panel shows them
+on that contribution's process. `name_only` (no declared catalog confirms the match) and `ambiguous`
+(no candidate was chosen) are warnings; a name settled by a catalog is a plain note; a confirmed
+match has no entry.
+
+A lineage decision may name the `edge` on screen, and its answer then says in `edge_exists` whether
+that edge survived. A rejection that removes the edge ends in a confirmation instead of a request for
+an edge that is gone. Only an inspector heading that names an object receives that object's summary.
+
+The first page carries flows touching the current scope, at most 1500; the subtitle shows how many
+exist in total, and tracing loads up to 400 more around one object. Known objects keep their
+positions when flows are added or filters change. `tools/measure_lineage_ui.py` measures this on
+synthetic data.
+
 Search models are selected centrally in the existing model panel. Semantic and hybrid
 options require a complete index for the applied embedding model. Similarity-only hits
 are labelled separately from keyword-backed hits; neither similarity nor a generated

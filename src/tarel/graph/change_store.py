@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 
+from tarel.atomic import write_atomic
 from tarel.graph.contracts import GraphFailure
 from tarel.graph.refresh import GraphRefreshReport
 
@@ -31,20 +30,9 @@ class FileGraphChangeStore:
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(report.to_dict(), indent=2, ensure_ascii=False, sort_keys=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".change-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary_path = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            os.replace(temporary_path, path)
+            write_atomic(path, payload + "\n", prefix=".change-")
         except OSError as exc:
-            temporary_path.unlink(missing_ok=True)
             raise GraphFailure(
                 "change_report_save_failed",
                 f"Could not save change report for graph: {graph_name}",

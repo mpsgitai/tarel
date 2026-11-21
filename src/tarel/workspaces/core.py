@@ -24,7 +24,8 @@ from tarel.workspaces.contracts import (
 
 
 class _Named(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
 
 _NamedType = TypeVar("_NamedType", bound=_Named)
@@ -49,6 +50,28 @@ class ResolvedZoneObject:
             "namespace": self.namespace,
             "object_id": self.object_id,
             "type": self.type,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DanglingReference:
+    """A central reference whose target a published graph no longer contains."""
+
+    kind: str
+    workspace: str
+    owner: str
+    graph: str
+    object_id: str
+    detail: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "detail": self.detail,
+            "graph": self.graph,
+            "kind": self.kind,
+            "object_id": self.object_id,
+            "owner": self.owner,
+            "workspace": self.workspace,
         }
 
 
@@ -277,7 +300,9 @@ def resolve_zone(
     schema_areas = _schema_areas(system)
     objects: list[ResolvedZoneObject] = []
     for member in sorted(zone.members, key=lambda item: (item.graph, item.object_id)):
-        node = graphs[member.graph].node_by_id()[member.object_id]
+        node = graphs[member.graph].node_by_id().get(member.object_id)
+        if node is None:
+            continue
         namespace = str(node.metadata["namespace"])
         objects.append(
             ResolvedZoneObject(
@@ -320,6 +345,8 @@ def validate_system_references(
         if graph_name not in namespaces_by_graph:
             namespaces_by_graph[graph_name] = _graph_namespaces(graph)
         if namespace not in namespaces_by_graph[graph_name]:
+            if graph.sync_origin() is not None:
+                continue
             raise WorkspaceFailure(
                 "schema_not_found",
                 f"Schema not found in graph {graph_name}: {namespace}",
@@ -334,6 +361,8 @@ def validate_system_references(
             if member.graph not in nodes_by_graph:
                 nodes_by_graph[member.graph] = graph.node_by_id()
             node = nodes_by_graph[member.graph].get(member.object_id)
+            if node is None and graph.sync_origin() is not None:
+                continue
             if node is None or node.type not in {"table", "view"}:
                 raise WorkspaceFailure(
                     "zone_member_not_found",
@@ -364,6 +393,10 @@ def validate_workspace_references(
                     f"Graph not found: {endpoint.graph}",
                 )
             node = graph.node_by_id().get(endpoint.object_id)
+            if graph.sync_origin() is not None and (
+                node is None or missing_fields(graph, endpoint)
+            ):
+                continue
             if node is None or node.type not in {"table", "view"}:
                 raise WorkspaceFailure(
                     "relationship_object_not_found",
@@ -382,6 +415,75 @@ def validate_workspace_references(
                         f"Workspace relationship {relationship.id} references an unknown field "
                         f"on {endpoint.graph}:{node.label}: {field_name}",
                     )
+
+
+def dangling_references(
+    workspace: WorkspaceDocument,
+    graphs: Mapping[str, GraphDocument],
+) -> tuple[DanglingReference, ...]:
+    """Everything central in ``workspace`` that points into a published graph at nothing.
+
+    The statements stay as they are, including a human ``validated``: only the people who made them
+    may change them, and the object can come back.
+    """
+    found: list[DanglingReference] = []
+
+    def note(kind: str, owner: str, graph: str, object_id: str, detail: str) -> None:
+        found.append(DanglingReference(kind, workspace.name, owner, graph, object_id, detail))
+
+    published = {name: item for name, item in graphs.items() if item.sync_origin() is not None}
+    known_ids = {name: {node.id for node in item.nodes} for name, item in published.items()}
+    for system in workspace.systems:
+        for area in system.areas:
+            for schema in area.schemas:
+                graph = published.get(schema.graph)
+                if graph is not None and schema.namespace not in _graph_namespaces(graph):
+                    note("area_schema", area.name, schema.graph, "", schema.namespace)
+        for zone in system.zones:
+            for member in zone.members:
+                graph = published.get(member.graph)
+                if graph is not None and member.object_id not in known_ids[member.graph]:
+                    note("zone_member", zone.name, member.graph, member.object_id, "")
+    for relationship in workspace.relationships:
+        for endpoint in (relationship.source, relationship.target):
+            graph = published.get(endpoint.graph)
+            if graph is None:
+                continue
+            if endpoint.object_id not in known_ids[endpoint.graph]:
+                note("relationship_object", relationship.id, endpoint.graph, endpoint.object_id, "")
+                continue
+            for field_name in missing_fields(graph, endpoint):
+                note(
+                    "relationship_field",
+                    relationship.id,
+                    endpoint.graph,
+                    endpoint.object_id,
+                    field_name,
+                )
+    return tuple(found)
+
+
+def referenced_graphs(workspace: WorkspaceDocument) -> frozenset[str]:
+    """The graphs of this workspace something central points into, without reading any of them."""
+    members = {name for system in workspace.systems for name in system.graphs}
+    pointed_at: set[str] = set()
+    for system in workspace.systems:
+        pointed_at.update(schema.graph for area in system.areas for schema in area.schemas)
+        pointed_at.update(member.graph for zone in system.zones for member in zone.members)
+    for relationship in workspace.relationships:
+        pointed_at.update((relationship.source.graph, relationship.target.graph))
+    return frozenset(pointed_at & members)
+
+
+def missing_fields(
+    graph: GraphDocument, endpoint: WorkspaceRelationshipEndpoint,
+) -> tuple[str, ...]:
+    available = {
+        node.label.casefold()
+        for node in graph.nodes
+        if node.type == "field" and node.metadata.get("object_id") == endpoint.object_id
+    }
+    return tuple(item for item in endpoint.fields if item.casefold() not in available)
 
 
 def _resolve_object_reference(

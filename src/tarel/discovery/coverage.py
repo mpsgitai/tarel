@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
+
 QUERY_LINKED_COVERAGE_VERSION = "tarel.query-linked-entity-coverage.v0.1.experimental"
 DISCOVERY_SCOPE_MODES = frozenset({"global_population", "query_linked_slice"})
 QUERY_COMPONENT_STATUSES = frozenset(
@@ -28,10 +30,8 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_COMPONENTS = 100_000
 
 
-class QueryLinkedCoverageFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class QueryLinkedCoverageFailure(TarelError):
+    """Raised when a query-linked coverage operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,7 +242,7 @@ class QueryLinkedEntityCoverage:
 
     def to_summary_dict(self) -> dict[str, object]:
         """Return the bounded, reference-free browser/retrieval summary."""
-        statuses = {status: 0 for status in sorted(QUERY_COMPONENT_STATUSES)}
+        statuses = dict.fromkeys(sorted(QUERY_COMPONENT_STATUSES), 0)
         for component in self.components:
             statuses[component.status] += 1
         promoted_statuses = {
@@ -479,7 +479,7 @@ def _fields(
     required: set[str],
     label: str,
     *,
-    optional: set[str] = frozenset(),
+    optional: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     if set(data) - optional != required or not set(data).issubset(required | optional):
         raise QueryLinkedCoverageFailure(

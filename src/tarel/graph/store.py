@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from tarel.file_lock import file_lock, state_write_lock
+from tarel.atomic import write_atomic
+from tarel.file_lock import file_lock
 from tarel.graph.contracts import GraphDocument, GraphFailure
+from tarel.graph.observation import OBSERVATION_FILE, GraphObservation, utc_now
 from tarel.graph.revision import graph_revision
 
 if TYPE_CHECKING:
@@ -50,23 +50,33 @@ class FileGraphStore:
         except OSError as exc:
             raise GraphFailure("graph_save_failed", f"Could not write graph: {name}") from exc
 
-    def save(self, graph: GraphDocument, *, expected_revision: str | None = None) -> Path:
+    def save(
+        self,
+        graph: GraphDocument,
+        *,
+        expected_revision: str | None = None,
+        durable: bool = False,
+    ) -> Path:
         with self._write_lock(graph.name):
             if (
                 expected_revision is not None
                 and graph_revision(self.load(graph.name)) != expected_revision
             ):
                 raise GraphFailure("graph_conflict", "Graph changed; reload before saving.")
-            return self._save(graph)
+            return self._save(graph, durable=durable)
 
-    def create(self, graph: GraphDocument) -> Path:
+    def create(self, graph: GraphDocument, *, durable: bool = False) -> Path:
         with self._write_lock(graph.name):
             if self.path(graph.name).exists():
                 raise GraphFailure("graph_exists", f"Graph already exists: {graph.name}")
-            return self._save(graph)
+            return self._save(graph, durable=durable)
 
     def update(
-        self, name: str, change: Callable[[GraphDocument], GraphDocument]
+        self,
+        name: str,
+        change: Callable[[GraphDocument], GraphDocument],
+        *,
+        durable: bool = False,
     ) -> tuple[GraphDocument, Path]:
         """Apply a short local transformation to the latest graph under its lock."""
         with self._write_lock(name):
@@ -74,28 +84,18 @@ class FileGraphStore:
             updated = change(current)
             if updated.name != name:
                 raise GraphFailure("invalid_graph_name", "An update cannot rename a graph.")
-            path = self.path(name) if updated == current else self._save(updated)
+            path = self.path(name) if updated == current else self._save(updated, durable=durable)
             return updated, path
 
-    def _save(self, graph: GraphDocument) -> Path:
+    def _save(self, graph: GraphDocument, *, durable: bool = False) -> Path:
         path = self.path(graph.name)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(graph.to_dict(), indent=2, ensure_ascii=False, sort_keys=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".graph-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary_path = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            with state_write_lock(self.root.parent):
-                os.replace(temporary_path, path)
+            write_atomic(
+                path, payload + "\n", prefix=".graph-", durable=durable, lock_root=self.root.parent,
+            )
         except OSError as exc:
-            temporary_path.unlink(missing_ok=True)
             raise GraphFailure("graph_save_failed", f"Could not save graph: {graph.name}") from exc
         return path
 
@@ -117,6 +117,43 @@ class FileGraphStore:
         return tuple(
             sorted(path.parent.name for path in self.root.glob("*/graph.json") if path.is_file())
         )
+
+    def observation(self, name: str) -> GraphObservation | None:
+        """The record of the last read from the source, if this state made one."""
+        try:
+            data = json.loads(self.path(name).with_name(OBSERVATION_FILE).read_text("utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError) as exc:
+            raise GraphFailure("invalid_observation", f"Could not read: {name}") from exc
+        return GraphObservation.from_dict(data)
+
+    def record_observation(self, name: str, *, namespace: str | None) -> None:
+        self._save_observation(name, GraphObservation(utc_now(), namespace))
+
+    def record_failed_observation(self, name: str, code: str, message: str) -> None:
+        """Keep the last good read: a failure proves nothing about what the source holds now."""
+        previous = self.observation(name) or GraphObservation()
+        self._save_observation(
+            name,
+            GraphObservation(
+                previous.observed_at,
+                previous.namespace,
+                {"at": utc_now(), "code": code, "message": message},
+            ),
+        )
+
+    def _save_observation(self, name: str, observation: GraphObservation) -> None:
+        text = json.dumps(observation.to_dict(), indent=2, sort_keys=True, ensure_ascii=False)
+        try:
+            write_atomic(
+                self.path(name).with_name(OBSERVATION_FILE),
+                text + "\n",
+                prefix=".observation-",
+                lock_root=self.root.parent,
+            )
+        except OSError as exc:
+            raise GraphFailure("graph_save_failed", f"Could not record: {name}") from exc
 
     def header(self, name: str) -> GraphHeader:
         """Read graph identity without materializing nodes after a visible cold bootstrap."""

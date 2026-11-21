@@ -7,13 +7,12 @@ import re
 from dataclasses import dataclass, replace
 
 from tarel.connectors.contracts import RelationshipPair, RelationshipPairProfile
+from tarel.errors import TarelError
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphNode
 
 
-class RelationshipFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class RelationshipFailure(TarelError):
+    """Raised when a relationship operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

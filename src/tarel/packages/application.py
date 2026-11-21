@@ -120,7 +120,7 @@ def pack_workspace(
                 write_manifest(archive, manifest)
         verify_package(temporary)
         if replace:
-            os.replace(temporary, output)
+            temporary.replace(output)
         else:
             try:
                 os.link(temporary, output)
@@ -248,7 +248,7 @@ def unpack_package(path: Path, destination: Path) -> PackageReport:
                 raise PackageFailure(
                     "package_destination_exists", "Package destination appeared during unpacking."
                 )
-            os.replace(staging, destination)
+            staging.replace(destination)
     except OSError as exc:
         raise PackageFailure(
             "package_extract_failed",
@@ -433,7 +433,7 @@ def _validate_document(data: bytes, kind: str, name: str) -> str:
     return document.contract_version
 
 
-def _parse_document(data: bytes, kind: str) -> object:
+def _parse_document(data: bytes, kind: str) -> Any:
     payload = parse_json_object(data, f"{kind} document")
     try:
         return _DOCUMENT_READERS[kind](payload)

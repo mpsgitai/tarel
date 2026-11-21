@@ -18,15 +18,20 @@ from tarel.lineage.analysis_cache import FileLineageAnalysisCache
 from tarel.lineage.change_store import FileLineageChangeStore
 from tarel.lineage.runtime_store import FileRuntimeLineageStore
 from tarel.lineage.store import FileLineageStore
-from tarel.retrieval.index import FileRetrievalIndex
+from tarel.retrieval.index import (
+    FileRetrievalIndex,
+)
 from tarel.semantics.store import FileSemanticImportStore
 from tarel.sources.store import FileSourceStore
 from tarel.workspaces.store import FileWorkspaceStore
 
 if TYPE_CHECKING:
+    from tarel.logical_joins.store import FileLogicalJoinStore
     from tarel.object_families.store import FileObjectFamilyStore
     from tarel.reference_mapping.store import FileReferenceMappingStore
     from tarel.retrieval.settings import RetrievalSettings
+    from tarel.semantic_concepts.store import FileSemanticConceptStore
+    from tarel.sync.store import FileSyncStore
     from tarel.topology.store import FileLogicalTopologyStore
 
 
@@ -164,10 +169,34 @@ class TarelRuntime:
 
         return FileReferenceMappingStore(self.root / "reference-mappings")
 
+    def logical_join_store(self) -> FileLogicalJoinStore:
+        from tarel.logical_joins.store import FileLogicalJoinStore
+
+        return FileLogicalJoinStore(self.root / "logical-joins")
+
+    def semantic_concept_store(self) -> FileSemanticConceptStore:
+        from tarel.semantic_concepts.store import FileSemanticConceptStore
+
+        return FileSemanticConceptStore(self.root / "semantic-concepts")
+
+    def sync_store(self) -> FileSyncStore:
+        from tarel.sync.store import FileSyncStore
+
+        return FileSyncStore(self.root)
+
     def object_family_store(self) -> FileObjectFamilyStore:
         from tarel.object_families.store import FileObjectFamilyStore
 
         return FileObjectFamilyStore(self.root / "object-families")
+
+
+def resolve_runtime(runtime: TarelRuntime | None) -> TarelRuntime:
+    """The runtime a use case reads and writes with.
+
+    Use cases accept ``runtime=None`` so that the CLI and quick scripts work on ``./.tarel`` in
+    the current directory; this is the only place that decides that default.
+    """
+    return runtime if runtime is not None else TarelRuntime(root=Path.cwd() / ".tarel")
 
 
 def _model_file_key(path: Path) -> tuple[str, int, int, int, int, int]:

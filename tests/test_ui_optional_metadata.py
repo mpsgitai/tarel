@@ -7,7 +7,9 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from tarel.discovery.coverage import QueryLinkedEntityCoverage
-from tarel.entity_resolution.contracts import EntityResolutionFailure
+from tarel.entity_resolution.contracts import (
+    EntityResolutionFailure,
+)
 from tarel.graph.revision import physical_graph_revision
 from tarel.sdk import Tarel
 from tarel.semantics.contracts import SemanticExpression, SourceSnapshot
@@ -273,9 +275,9 @@ class OptionalObjectMetadataTests(TestCase):
             run.id, _query_linked_coverage(run, candidate.id),
         ).coverage
         selected = graph.node_by_id()[candidate.source_field_id].metadata["object_id"]
-        options = dict(kind="coverage", runtime=self.sdk.runtime,
-                       allowed_object_ids=frozenset(node.id for node in graph.nodes
-                                                   if node.type == "table"))
+        options = {"kind": "coverage", "runtime": self.sdk.runtime,
+                       "allowed_object_ids": frozenset(node.id for node in graph.nodes
+                                                   if node.type == "table")}
         result = optional_object_metadata(graph, selected, **options)
         self.assertEqual(result["items"], [])
         self.assertIn({"code": "coverage_object_scope_unverified", "count": 1}, result["omissions"])

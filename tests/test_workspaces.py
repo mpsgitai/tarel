@@ -58,8 +58,8 @@ class WorkspaceTests(TestCase):
             graph_store.save(_graph("erp", "public", "Orders"))
 
             with (
-                patch("tarel.application.FileGraphStore", return_value=graph_store),
-                patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
                 patch("tarel.runtime.FileGraphStore", return_value=graph_store),
                 patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
@@ -153,8 +153,8 @@ class WorkspaceTests(TestCase):
             )
 
             with (
-                patch("tarel.application.FileGraphStore", return_value=graph_store),
-                patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
                 patch("tarel.runtime.FileGraphStore", return_value=graph_store),
                 patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
@@ -187,8 +187,8 @@ class WorkspaceTests(TestCase):
             graph_store.save(_graph("erp", "public", "Orders"))
 
             with (
-                patch("tarel.application.FileGraphStore", return_value=graph_store),
-                patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
                 patch("tarel.runtime.FileGraphStore", return_value=graph_store),
                 patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
@@ -256,9 +256,9 @@ class WorkspaceTests(TestCase):
                 search = json.loads(
                     self._run(
                         "search",
-                        "enterprise",
                         "fact sales orders",
                         "--workspace",
+                        "enterprise",
                         "--zone",
                         "revenue",
                         "--format",
@@ -269,9 +269,9 @@ class WorkspaceTests(TestCase):
                     self._run(
                         "context",
                         "build",
-                        "enterprise",
                         "fact sales orders",
                         "--workspace",
+                        "enterprise",
                         "--zone",
                         "revenue",
                         "--seed-limit",
@@ -310,8 +310,8 @@ class WorkspaceTests(TestCase):
             graph_store.save(_graph("warehouse", "sales", *outside, "ZZZScopedSales"))
 
             with (
-                patch("tarel.application.FileGraphStore", return_value=graph_store),
-                patch("tarel.application.FileWorkspaceStore", return_value=workspace_store),
+                patch("tarel.runtime.FileGraphStore", return_value=graph_store),
+                patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
                 patch("tarel.runtime.FileGraphStore", return_value=graph_store),
                 patch("tarel.runtime.FileWorkspaceStore", return_value=workspace_store),
             ):
@@ -348,9 +348,9 @@ class WorkspaceTests(TestCase):
                 search = json.loads(
                     self._run(
                         "search",
-                        "enterprise",
                         "sales",
                         "--workspace",
+                        "enterprise",
                         "--zone",
                         "focused",
                         "--format",

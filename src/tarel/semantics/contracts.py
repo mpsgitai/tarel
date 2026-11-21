@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
+
 SEMANTIC_IMPORT_CONTRACT_VERSION = "tarel.semantic_import.v0.1"
 
 _IMPORT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -15,10 +17,8 @@ _FORMAT_NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _DIAGNOSTIC_LEVELS = frozenset({"error", "info", "warning"})
 
 
-class SemanticFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class SemanticFailure(TarelError):
+    """Raised when a semantic operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -541,7 +541,8 @@ def _target_values(
             )
         targets.update(
             (item.id, (item.description, item.synonyms))
-            for item in (*model.relationships, *model.metrics)
+            for items in (model.relationships, model.metrics)
+            for item in items
         )
     return targets
 

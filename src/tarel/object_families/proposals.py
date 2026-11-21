@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from collections import Counter
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -12,9 +11,10 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
+from tarel.atomic import write_atomic
 from tarel.graph.contracts import GraphNode
 from tarel.graph.revision import physical_graph_revision
-from tarel.object_families.application import _physical_schemas, propose_object_family_use_case
+from tarel.object_families.application import physical_schemas, propose_object_family_use_case
 from tarel.object_families.contracts import FamilyAttribute, FamilyField, ObjectFamilyFailure
 from tarel.object_families.proposal_contracts import (
     FamilyProposalRun,
@@ -81,6 +81,11 @@ def plan_family_proposals_use_case(
     revision = physical_graph_revision(graph)
     provider = load_provider(provider_name)
     selected_model = model or provider.default_model
+    if selected_model is None:
+        raise ObjectFamilyFailure(
+            "family_proposal_model_required",
+            f"Provider {provider_name} has no default model; pass a model explicitly.",
+        )
     # Validate provider identity and limits before any prompt or durable artifact is created.
     empty = FamilyProposalRun(
         run_id,
@@ -106,7 +111,7 @@ def plan_family_proposals_use_case(
     omitted["existing_family"] = len(owned.intersection(objects))
     eligible = sorted(set(objects) - owned)
     # Missing physical schemas are visible failures, not silently ignored metadata.
-    schemas = _physical_schemas(graph, set(eligible)) if eligible else {}
+    schemas = physical_schemas(graph, set(eligible)) if eligible else {}
     groups: dict[tuple[FamilyField, ...], list[str]] = {}
     for object_id in eligible:
         groups.setdefault(schemas[object_id], []).append(object_id)
@@ -121,7 +126,7 @@ def plan_family_proposals_use_case(
             if remaining <= len(current):
                 omitted["object_limit"] += 1
                 continue
-            proposed = tuple((*current, object_id))
+            proposed = (*current, object_id)
             request = _request(nodes, proposed, selected_model, schemas)
             if len(canonical(_request_payload(request))) > max_input_chars:
                 remaining -= _append_batch(
@@ -224,7 +229,7 @@ def _execute_run(
         return run
     provider = load_provider(run.provider, timeout=float(timeout))
     objects = {item for batch in run.batches for item in batch.object_ids}
-    schemas = _physical_schemas(graph, objects)
+    schemas = physical_schemas(graph, objects)
     requests: dict[int, StructuredRequest] = {}
     for index in pending:
         batch = run.batches[index]
@@ -449,20 +454,9 @@ def _save(runtime: TarelRuntime, run: FamilyProposalRun) -> None:
     payload = run.to_dict()
     FamilyProposalRun.from_dict(payload)
     path = _path(runtime, run.id)
-    temporary: Path | None = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=".family-proposals-", text=True)
-        temporary = Path(name)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            os.fchmod(handle.fileno(), 0o600)
-            handle.write(canonical(payload) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        write_atomic(path, canonical(payload) + "\n", prefix=".family-proposals-", durable=True)
     except OSError as exc:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
         raise ObjectFamilyFailure(
             "family_proposals_save_failed", "Could not save proposal run."
         ) from exc

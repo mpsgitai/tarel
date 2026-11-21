@@ -10,7 +10,9 @@ from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResul
 from tarel.graph.build import build_graph_from_catalog
 from tarel.knowledge.contracts import KnowledgeFailure
 from tarel.sdk import Tarel
-from tarel.ui.presentation import browser_graph
+from tarel.ui.payloads.graph import (
+    browser_graph,
+)
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceSystem
 
 

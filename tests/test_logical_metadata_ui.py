@@ -8,8 +8,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase, skipUnless
 
-from tarel.discovery.contracts import DiscoveryObservation
 from tarel.discovery.logical_program import LogicalJoinProgram
+from tarel.discovery.runs import (
+    DiscoveryObservation,
+)
 from tarel.graph.revision import physical_graph_revision
 from tarel.logical_joins.contracts import LogicalJoin
 from tarel.logical_joins.store import FileLogicalJoinStore

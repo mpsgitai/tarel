@@ -12,7 +12,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from tarel.cli import main
-from tarel.context_output import canonical_json
+from tarel.context.output import canonical_json
 from tarel.expansion import ExpansionTarget
 from tarel.sdk import Tarel
 from tarel.workspaces.contracts import SchemaReference

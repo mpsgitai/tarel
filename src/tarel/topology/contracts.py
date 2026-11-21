@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, TypeAlias
 
+from tarel.errors import TarelError
+
 LOGICAL_TOPOLOGY_CONTRACT_VERSION = "tarel.logical-topology.v0.1.experimental"
 ENDPOINT_KINDS = frozenset({"graph_field", "graph_object", "step_output"})
 STEP_KINDS = frozenset({"explode", "extract"})
@@ -23,10 +25,8 @@ _MAX_OUTPUT_FIELDS = 256
 _MAX_EVIDENCE = 64
 
 
-class LogicalTopologyFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class LogicalTopologyFailure(TarelError):
+    """Raised when a logical topology operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

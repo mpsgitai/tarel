@@ -10,6 +10,7 @@ from tarel.workspaces.contracts import (
     WorkspaceFailure,
     WorkspaceRelationshipEndpoint,
 )
+from tarel.workspaces.core import missing_fields
 from tarel.workspaces.scope import ResolvedScope
 
 
@@ -88,6 +89,8 @@ def project_workspace_scope(
             or (relationship.target.graph, relationship.target.object_id) not in selected_objects
         ):
             continue
+        if _is_dangling(graphs, relationship.source) or _is_dangling(graphs, relationship.target):
+            continue
         _field_id(graphs, relationship.source)
         _field_id(graphs, relationship.target)
         edges.append(
@@ -123,6 +126,14 @@ def project_workspace_scope(
         nodes=tuple(sorted(nodes, key=lambda item: item.id)),
         edges=tuple(sorted(edges, key=lambda item: item.id)),
     )
+
+
+def _is_dangling(
+    graphs: Mapping[str, GraphDocument], endpoint: WorkspaceRelationshipEndpoint,
+) -> bool:
+    """A published graph may lose a field; the relationship stays stored but offers no join."""
+    graph = graphs[endpoint.graph]
+    return graph.sync_origin() is not None and bool(missing_fields(graph, endpoint))
 
 
 def _field_id(

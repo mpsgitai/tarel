@@ -132,6 +132,12 @@ Try the synthetic [Retail DWH walkthrough](docs/retail-demo.md) without credenti
 - [Python SDK](docs/cli-reference.md#python-sdk)
 - [Documentation index](docs/README.md)
 
+Moving scripts from an earlier TAREL: workspace commands now take the workspace by name, so
+`tarel search enterprise "revenue" --workspace` becomes
+`tarel search "revenue" --workspace enterprise`. The package version alone does not tell the two
+apart. Existing retrieval indexes keep working; see their
+[embedding input state](docs/contracts.md#embedding-input).
+
 TAREL is pre-alpha. SQLite and SQL Server connectors are included. TAREL does not execute
 analytical answer queries; your harness does.
 

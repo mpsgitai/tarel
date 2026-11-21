@@ -17,7 +17,15 @@ from urllib.parse import urlsplit
 from tarel.retrieval.contracts import RetrievalFailure
 
 DEFAULT_MODEL_NAME = "qwen3-embedding-0.6b-q4-k-m"
-_LLAMA_TOKEN_BATCH_SIZE = 256
+# The most tokens one text may occupy, including special tokens and the query instruction. llama.cpp
+# caps a text at n_batch and silently cuts it at truncate=True, so both follow this value.
+EMBEDDING_TOKEN_CAPACITY = 2048
+# A physical batch only splits the decode: it trades no accuracy but about 1 GB of memory at the
+# full capacity (measured with the pinned model on CPU), so it stays small.
+_LLAMA_PHYSICAL_BATCH = 256
+LOCAL_EMBEDDING_INPUT = (
+    f"llama.cpp:max_tokens={EMBEDDING_TOKEN_CAPACITY}:overflow=recorded_document_cut"
+)
 _QUERY_INSTRUCTION = (
     "Instruct: Retrieve relevant DWH, BI, ERP database tables and fields for this "
     "analytics question.\nQuery: "
@@ -156,7 +164,7 @@ def download_model(
                 "model_checksum_mismatch",
                 "Downloaded model did not match the pinned size and SHA-256 checksum.",
             )
-        os.replace(temporary_path, path)
+        temporary_path.replace(path)
     except RetrievalFailure:
         temporary_path.unlink(missing_ok=True)
         raise
@@ -200,11 +208,11 @@ class LlamaCppEmbedding:
         self,
         model_path: Path,
         *,
-        n_ctx: int = 2048,
         n_threads: int | None = None,
     ) -> None:
         resolved = resolve_model_path(model_path)
         try:
+            import llama_cpp
             from llama_cpp import Llama
         except ImportError as exc:
             raise RetrievalFailure(
@@ -213,12 +221,14 @@ class LlamaCppEmbedding:
             ) from exc
         threads = n_threads or max(1, (os.cpu_count() or 2) - 1)
         self._model_path = resolved
+        version = getattr(llama_cpp, "__version__", "")
+        self._runtime_version = f"llama-cpp-python {version}" if version else ""
         self._embedding_lock = threading.Lock()
         self._model: Any = Llama(
             model_path=str(resolved),
-            n_ctx=n_ctx,
-            n_batch=_LLAMA_TOKEN_BATCH_SIZE,
-            n_ubatch=_LLAMA_TOKEN_BATCH_SIZE,
+            n_ctx=EMBEDDING_TOKEN_CAPACITY,
+            n_batch=EMBEDDING_TOKEN_CAPACITY,
+            n_ubatch=_LLAMA_PHYSICAL_BATCH,
             n_threads=threads,
             n_gpu_layers=0,
             embedding=True,
@@ -229,6 +239,23 @@ class LlamaCppEmbedding:
     def model_id(self) -> str:
         return self._model_path.name
 
+    @property
+    def input_strategy(self) -> str:
+        return LOCAL_EMBEDDING_INPUT
+
+    @property
+    def max_input_tokens(self) -> int:
+        return EMBEDDING_TOKEN_CAPACITY
+
+    @property
+    def runtime_version(self) -> str:
+        return self._runtime_version
+
+    def token_count(self, text: str) -> int:
+        """Count tokens as ``embed`` will see them, including special tokens it adds."""
+        with self._embedding_lock:
+            return len(self._model.tokenize(text.encode("utf-8")))
+
     def embed_documents(
         self,
         texts: tuple[str, ...],
@@ -238,29 +265,44 @@ class LlamaCppEmbedding:
         if not 1 <= batch_size <= 256:
             raise RetrievalFailure("invalid_batch_size", "Batch size must be between 1 and 256.")
         vectors: list[tuple[float, ...]] = []
-        # llama.cpp's n_batch is token capacity, not a safe multi-sequence document count.
-        # Keep caller batches for scheduling, but decode one document at a time.
+        # batch_size counts documents for scheduling; token capacity applies to each document,
+        # because llama.cpp decodes them one at a time here.
         for offset in range(0, len(texts), batch_size):
             batch = texts[offset : offset + batch_size]
             for position, text in enumerate(batch, start=offset + 1):
-                try:
-                    with self._embedding_lock:
-                        embedded = self._model.embed(text, normalize=True, truncate=True)
-                except Exception as exc:
-                    raise RetrievalFailure(
-                        "embedding_failed",
-                        f"llama.cpp failed while embedding document {position} of {len(texts)}.",
-                    ) from exc
-                vectors.append(_normalized_vector(embedded))
+                vectors.append(self._embed(text, f"Document {position} of {len(texts)}"))
         return tuple(vectors)
 
     def embed_query(self, text: str) -> tuple[float, ...]:
-        with self._embedding_lock:
-            embedded = self._model.embed(
-                qwen_embedding_query(text),
-                normalize=True,
-                truncate=True,
+        return self._embed(qwen_embedding_query(text), "Query with its retrieval instruction")
+
+    def embed_cut_document(self, text: str) -> tuple[float, ...]:
+        """Embed only the first tokens of a text whose caller records that it was shortened."""
+        try:
+            with self._embedding_lock:
+                embedded = self._model.embed(text, normalize=True, truncate=True)
+        except Exception as exc:
+            raise RetrievalFailure(
+                "embedding_failed", "llama.cpp failed while embedding a shortened document.",
+            ) from exc
+        return _normalized_vector(embedded)
+
+    def _embed(self, text: str, label: str) -> tuple[float, ...]:
+        """Embed the whole text or refuse it; never let llama.cpp shorten it."""
+        tokens = self.token_count(text)
+        if tokens > EMBEDDING_TOKEN_CAPACITY:
+            raise RetrievalFailure(
+                "embedding_input_too_long",
+                f"{label} has {tokens} tokens; the embedding limit is "
+                f"{EMBEDDING_TOKEN_CAPACITY}. Nothing was shortened.",
             )
+        try:
+            with self._embedding_lock:
+                embedded = self._model.embed(text, normalize=True, truncate=False)
+        except Exception as exc:
+            raise RetrievalFailure(
+                "embedding_failed", f"llama.cpp failed while embedding: {label.lower()}.",
+            ) from exc
         return _normalized_vector(embedded)
 
 

@@ -15,6 +15,7 @@ from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResul
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphDocument
 from tarel.object_families import FamilyAttribute, ObjectFamily, ObjectFamilyFailure
+from tarel.retrieval.local import LOCAL_EMBEDDING_INPUT
 from tarel.runtime import TarelRuntime
 from tarel.sdk import Tarel
 from tarel.workspaces.core import create_workspace, define_system
@@ -58,7 +59,7 @@ class ObjectFamilyApplicationTests(TestCase):
         graph_before = self.sdk.graph.load("commerce").to_dict()
         model = self.project / "test-embedding.gguf"
         model.write_bytes(b"deterministic test model")
-        with patch("tarel.application.LlamaCppEmbedding", return_value=_Embedding()):
+        with patch("tarel.retrieval.application.LlamaCppEmbedding", return_value=_Embedding()):
             index = self.sdk.index.build("commerce", model_path=model)
             index_before = index.path.read_bytes()
             packet = self.sdk.context.graph("commerce", "sales_2024_01", model_path=model)
@@ -403,7 +404,7 @@ class ObjectFamilyApplicationTests(TestCase):
             arguments = ["family", operation, "commerce"]
             if operation == "show":
                 arguments.append(family.id)
-            status, output, errors = self._cli(arguments + ["--format", "json"])
+            status, output, errors = self._cli([*arguments, "--format", "json"])
             self.assertEqual((status, errors), (0, ""))
             self.assertNotIn("member_ids", output)
 
@@ -528,6 +529,13 @@ def _graph() -> GraphDocument:
 
 
 class _Embedding:
+    input_strategy = LOCAL_EMBEDDING_INPUT
+    max_input_tokens = None
+    runtime_version = ""
+
+    def token_count(self, text):
+        del text
+
     model_id = "deterministic-test-embedding"
 
     def embed_documents(

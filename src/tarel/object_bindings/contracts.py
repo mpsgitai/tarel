@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
 from tarel.object_families.contracts import FamilyReview
 from tarel.reference_mapping.contracts import ReferenceMappingEvidence
 from tarel.topology.endpoint_contracts import LogicalEndpoint
@@ -16,10 +17,8 @@ CONTRACT_VERSION = "tarel.object-value-binding.v0.1.experimental"
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
-class ObjectBindingFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class ObjectBindingFailure(TarelError):
+    """Raised when an object binding operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

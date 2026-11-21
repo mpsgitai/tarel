@@ -9,7 +9,9 @@ from pathlib import Path
 from tarel.runtime import TarelRuntime
 from tarel.semantics.application import import_semantic_use_case
 from tarel.semantics.contracts import SemanticImportDocument
-from tarel.ui.presentation import browser_graph
+from tarel.ui.payloads.graph import (
+    browser_graph,
+)
 
 
 def main() -> None:

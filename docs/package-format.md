@@ -141,3 +141,8 @@ Encryption belongs around the complete package as a separate envelope, for examp
 `team.tarel.age`; it should not make individual ZIP members partly readable or add key management
 to the metadata kernel. A later signing contract can authenticate the package revision without
 changing the internal graph documents.
+
+## Publications for metadata sync
+
+`tarel sync` carries an unchanged package from a site to a central state inside a separate
+`.tarelpub` envelope. See [Metadata sync](sync.md).

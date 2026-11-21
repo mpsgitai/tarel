@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from tarel.lineage.contracts import LineageFailure
 
 if TYPE_CHECKING:
-    from tarel.lineage.runtime import (
+    from tarel.lineage.runtime_inputs import (
         RuntimeAnalysisEvidence,
         RuntimeAnalysisInputFrame,
         RuntimeExecutor,
@@ -43,14 +43,19 @@ class RuntimeLogicalArtifactReference:
     def from_dict(cls, data: dict[str, Any]) -> RuntimeLogicalArtifactReference:
         # Local imports keep the shared event validation in one place without
         # making the legacy runtime contracts depend on an eagerly imported adapter.
-        from tarel.lineage.runtime import _choice, _fields, _safe_code, _sha256
+        from tarel.lineage._runtime_parse import (
+            require_choice,
+            require_fields,
+            require_safe_code,
+            require_sha256,
+        )
 
-        _fields(data, {"kind", "graph", "id", "revision"}, "logical artifact reference")
+        require_fields(data, {"kind", "graph", "id", "revision"}, "logical artifact reference")
         return cls(
-            kind=_choice(data.get("kind"), "logical artifact kind", _ARTIFACT_KINDS),
-            graph=_safe_code(data.get("graph"), "logical artifact graph"),
-            id=_safe_code(data.get("id"), "logical artifact id"),
-            revision=_sha256(data.get("revision"), "logical artifact revision"),
+            kind=require_choice(data.get("kind"), "logical artifact kind", _ARTIFACT_KINDS),
+            graph=require_safe_code(data.get("graph"), "logical artifact graph"),
+            id=require_safe_code(data.get("id"), "logical artifact id"),
+            revision=require_sha256(data.get("revision"), "logical artifact revision"),
         )
 
 
@@ -92,21 +97,20 @@ class RuntimeLogicalOperation:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RuntimeLogicalOperation:
-        from tarel.lineage.runtime import (
-            _FEDERATED_STATUSES,
-            _MAX_INPUTS,
-            _analysis_metadata,
-            _analysis_result,
-            _choice,
-            _fields,
-            _integer,
-            _objects,
-            _sha256,
-            _strings,
-            _text,
+        from tarel.lineage._runtime_parse import (
+            FEDERATED_STATUSES,
+            MAX_INPUTS,
+            require_choice,
+            require_fields,
+            require_integer,
+            require_objects,
+            require_sha256,
+            require_strings,
+            require_text,
         )
+        from tarel.lineage.runtime_inputs import analysis_metadata, analysis_result
 
-        _fields(
+        require_fields(
             data,
             {
                 "kind",
@@ -135,10 +139,12 @@ class RuntimeLogicalOperation:
                 "Logical operations require kind logical_operation "
                 "and caller_claimed artifact validation.",
             )
-        operation = _choice(data.get("operation"), "logical operation", _OPERATIONS)
-        status = _choice(data.get("status"), "logical operation status", _FEDERATED_STATUSES)
-        result, error_code = _analysis_result(data, status=status, label="logical operation")
-        consumes = _strings(data.get("consumes"), "logical operation consumes", limit=_MAX_INPUTS)
+        operation = require_choice(data.get("operation"), "logical operation", _OPERATIONS)
+        status = require_choice(data.get("status"), "logical operation status", FEDERATED_STATUSES)
+        result, error_code = analysis_result(data, status=status, label="logical operation")
+        consumes = require_strings(
+            data.get("consumes"), "logical operation consumes", limit=MAX_INPUTS
+        )
         if len(consumes) != len(set(consumes)) or (
             not consumes and operation not in _METADATA_OPERATIONS
         ):
@@ -149,7 +155,9 @@ class RuntimeLogicalOperation:
             )
         refs = tuple(
             RuntimeLogicalArtifactReference.from_dict(item)
-            for item in _objects(data.get("dependency_refs"), "logical dependency references")
+            for item in require_objects(
+                data.get("dependency_refs"), "logical dependency references"
+            )
         )
         if not 1 <= len(refs) <= 32 or len(refs) != len(set(refs)):
             raise LineageFailure(
@@ -160,7 +168,7 @@ class RuntimeLogicalOperation:
             raise LineageFailure(
                 "invalid_runtime_lineage", "Logical operation requires its matching artifact kind."
             )
-        executor, inputs, analysis = _analysis_metadata(
+        executor, inputs, analysis = analysis_metadata(
             data, consumes=consumes, status=status, required=True
         )
         if executor is None or analysis is None:
@@ -168,11 +176,11 @@ class RuntimeLogicalOperation:
                 "invalid_runtime_lineage", "Logical operation metadata is required."
             )
         return cls(
-            sequence=_integer(data.get("sequence"), "logical event sequence", minimum=1),
-            call_id=_text(data.get("call_id"), "logical event call_id"),
+            sequence=require_integer(data.get("sequence"), "logical event sequence", minimum=1),
+            call_id=require_text(data.get("call_id"), "logical event call_id"),
             status=status,
             operation=operation,
-            operation_sha256=_sha256(data.get("operation_sha256"), "operation_sha256"),
+            operation_sha256=require_sha256(data.get("operation_sha256"), "operation_sha256"),
             consumes=consumes,
             dependency_refs=refs,
             executor=executor,

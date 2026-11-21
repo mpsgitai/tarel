@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from tarel.graph.changes import GraphChange, classify_graph_changes, node_reference
@@ -151,6 +151,7 @@ def refresh_graph(
     current: GraphDocument,
     discovered: GraphDocument,
 ) -> tuple[GraphDocument, GraphRefreshReport]:
+    """Adopt ``discovered`` structure and carry reviewed knowledge over where it still applies."""
     if current.name != discovered.name:
         raise GraphFailure("refresh_mismatch", "Graph refresh requires the same graph name.")
     if current.connector != discovered.connector or current.catalog != discovered.catalog:
@@ -161,13 +162,65 @@ def refresh_graph(
 
     before_revision = graph_revision(current)
     changes = classify_graph_changes(current, discovered)
+    tally = _Tally()
+    nodes = _refresh_nodes(tally, current, discovered, before_revision, changes)
+    refreshed = replace(discovered, nodes=nodes)
+    carried = _refresh_relationships(
+        tally, current, refreshed, discovered, before_revision, changes
+    )
+
+    refreshed = replace(
+        refreshed, edges=(*refreshed.edges, *sorted(carried, key=lambda edge: edge.id))
+    )
+    current_nodes = current.node_by_id()
+    removed_node_ids = set(current_nodes) - {node.id for node in discovered.nodes}
+    report = GraphRefreshReport(
+        before_revision=before_revision,
+        after_revision=graph_revision(refreshed),
+        changes=changes,
+        stale_claims=tuple(
+            sorted(tally.stale_claims, key=lambda item: (item.reference.casefold(), item.target_id))
+        ),
+        carried_annotations=tally.carried_annotations,
+        carried_relationships=len(carried),
+        removed_annotated_nodes=sum(
+            current_nodes[node_id].annotation is not None for node_id in removed_node_ids
+        ),
+        removed_relationships=tally.removed_relationships
+        + sum(change.kind == "relationship_removed" for change in changes),
+        superseded_relationships=tally.superseded_relationships,
+        review_required_annotations=tally.review_required_annotations,
+        review_required_relationships=tally.review_required_relationships,
+        added_nodes=len({node.id for node in discovered.nodes} - set(current_nodes)),
+        removed_nodes=len(removed_node_ids),
+    )
+    return refreshed, report
+
+
+@dataclass(slots=True)
+class _Tally:
+    """Stale claims and counts one graph refresh collects for its report."""
+
+    stale_claims: list[StaleClaim] = field(default_factory=list)
+    carried_annotations: int = 0
+    review_required_annotations: int = 0
+    removed_relationships: int = 0
+    superseded_relationships: int = 0
+    review_required_relationships: int = 0
+
+
+def _refresh_nodes(
+    tally: _Tally,
+    current: GraphDocument,
+    discovered: GraphDocument,
+    before_revision: str,
+    changes: tuple[GraphChange, ...],
+) -> tuple[GraphNode, ...]:
+    """Carry annotations of unchanged nodes; flag changed ones and report removed ones."""
     reasons_by_node = _stale_reasons_by_node(changes)
     source_reasons_by_node = _source_change_reasons_by_node(changes)
     current_nodes = current.node_by_id()
     discovered_ids = {node.id for node in discovered.nodes}
-    carried_annotations = 0
-    review_required_annotations = 0
-    stale_claims: list[StaleClaim] = []
     refreshed_nodes: list[GraphNode] = []
     for node in discovered.nodes:
         previous = current_nodes.get(node.id)
@@ -180,7 +233,7 @@ def refresh_graph(
                 metadata[key] = previous.metadata[key]
         annotation = previous.annotation
         if annotation is not None:
-            carried_annotations += 1
+            tally.carried_annotations += 1
             reasons = reasons_by_node.get(node.id, ())
             source_reasons = source_reasons_by_node.get(node.id, ())
             if source_reasons:
@@ -195,8 +248,8 @@ def refresh_graph(
                     "from_revision": before_revision,
                     "reasons": list(reasons),
                 }
-                review_required_annotations += 1
-                stale_claims.append(
+                tally.review_required_annotations += 1
+                tally.stale_claims.append(
                     _annotation_claim(
                         replace(node, metadata=metadata, annotation=annotation),
                         current,
@@ -212,7 +265,7 @@ def refresh_graph(
         node = current_nodes[node_id]
         if node.annotation is not None:
             reasons = reasons_by_node.get(node.id, ("node_removed",))
-            stale_claims.append(
+            tally.stale_claims.append(
                 _annotation_claim(
                     node,
                     current,
@@ -221,14 +274,21 @@ def refresh_graph(
                     reasons=reasons,
                 )
             )
+    return tuple(refreshed_nodes)
 
+
+def _refresh_relationships(
+    tally: _Tally,
+    current: GraphDocument,
+    refreshed: GraphDocument,
+    discovered: GraphDocument,
+    before_revision: str,
+    changes: tuple[GraphChange, ...],
+) -> list[GraphEdge]:
+    """Carry relationship candidates whose endpoints still exist; flag changed validated ones."""
     candidates = [edge for edge in current.edges if edge.type == "relationship_candidate"]
     declared_relationships = [edge for edge in discovered.edges if edge.type == "foreign_key"]
     carried: list[GraphEdge] = []
-    removed_relationships = 0
-    superseded_relationships = 0
-    review_required_relationships = 0
-    refreshed = replace(discovered, nodes=tuple(refreshed_nodes))
     changed_field_ids = {
         change.target_id
         for change in changes
@@ -243,8 +303,8 @@ def refresh_graph(
     }
     for candidate in candidates:
         if not _candidate_endpoints_exist(refreshed, candidate):
-            removed_relationships += 1
-            stale_claims.append(
+            tally.removed_relationships += 1
+            tally.stale_claims.append(
                 _relationship_claim(
                     candidate,
                     present=False,
@@ -253,8 +313,8 @@ def refresh_graph(
             )
             continue
         if any(_same_field_pair(candidate, declared) for declared in declared_relationships):
-            superseded_relationships += 1
-            stale_claims.append(
+            tally.superseded_relationships += 1
+            tally.stale_claims.append(
                 _relationship_claim(
                     candidate,
                     present=False,
@@ -271,8 +331,8 @@ def refresh_graph(
                 "reasons": ["relationship_endpoint_changed"],
             }
             candidate = replace(candidate, metadata=metadata)
-            review_required_relationships += 1
-            stale_claims.append(
+            tally.review_required_relationships += 1
+            tally.stale_claims.append(
                 _relationship_claim(
                     candidate,
                     present=True,
@@ -281,30 +341,7 @@ def refresh_graph(
                 )
             )
         carried.append(candidate)
-
-    refreshed_edges = (*refreshed.edges, *sorted(carried, key=lambda edge: edge.id))
-    refreshed = replace(refreshed, edges=refreshed_edges)
-    report = GraphRefreshReport(
-        before_revision=before_revision,
-        after_revision=graph_revision(refreshed),
-        changes=changes,
-        stale_claims=tuple(
-            sorted(stale_claims, key=lambda item: (item.reference.casefold(), item.target_id))
-        ),
-        carried_annotations=carried_annotations,
-        carried_relationships=len(carried),
-        removed_annotated_nodes=sum(
-            current_nodes[node_id].annotation is not None for node_id in removed_node_ids
-        ),
-        removed_relationships=removed_relationships
-        + sum(change.kind == "relationship_removed" for change in changes),
-        superseded_relationships=superseded_relationships,
-        review_required_annotations=review_required_annotations,
-        review_required_relationships=review_required_relationships,
-        added_nodes=len(discovered_ids - set(current_nodes)),
-        removed_nodes=len(removed_node_ids),
-    )
-    return refreshed, report
+    return carried
 
 
 def unchanged_refresh_report(graph: GraphDocument) -> GraphRefreshReport:
@@ -316,9 +353,7 @@ def unchanged_refresh_report(graph: GraphDocument) -> GraphRefreshReport:
         changes=(),
         stale_claims=(),
         carried_annotations=sum(node.annotation is not None for node in graph.nodes),
-        carried_relationships=sum(
-            edge.type == "relationship_candidate" for edge in graph.edges
-        ),
+        carried_relationships=sum(edge.type == "relationship_candidate" for edge in graph.edges),
         removed_annotated_nodes=0,
         removed_relationships=0,
         superseded_relationships=0,
@@ -351,8 +386,7 @@ def _source_change_reasons_by_node(
     changes: tuple[GraphChange, ...],
 ) -> dict[str, tuple[str, ...]]:
     reasons = {
-        target_id: set(values)
-        for target_id, values in _stale_reasons_by_node(changes).items()
+        target_id: set(values) for target_id, values in _stale_reasons_by_node(changes).items()
     }
     for change in changes:
         if change.entity_type == "node" and change.kind == "technical_description_changed":
@@ -417,12 +451,11 @@ def _candidate_endpoints_exist(graph: GraphDocument, edge: GraphEdge) -> bool:
         return False
     source_fields = _candidate_fields(edge, "from_fields", "from_field")
     target_fields = _candidate_fields(edge, "to_fields", "to_field")
-    return bool(source_fields) and bool(target_fields) and all(
-        _field_exists(graph, edge.source_id, field)
-        for field in source_fields
-    ) and all(
-        _field_exists(graph, edge.target_id, field)
-        for field in target_fields
+    return (
+        bool(source_fields)
+        and bool(target_fields)
+        and all(_field_exists(graph, edge.source_id, field) for field in source_fields)
+        and all(_field_exists(graph, edge.target_id, field) for field in target_fields)
     )
 
 

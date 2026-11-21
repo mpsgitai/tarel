@@ -34,7 +34,7 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 async function api(path, payload, timeoutMs = 0) {
-  const options = payload === undefined ? {} : {
+  const options = payload === undefined ? {headers: {"X-Tarel-Token": TOKEN}} : {
     method: "POST",
     headers: {"Content-Type": "application/json", "X-Tarel-Token": TOKEN},
     body: JSON.stringify(payload),
@@ -101,7 +101,7 @@ async function load(familyMode = state.familyMode, focusNames = undefined, deriv
     state.structureLevel = defaultStructureLevel(visibleObjects());
     if (state.structureLevel === "systems") setPanel("inspector", false);
   }
-  if (!state.selectedId && state.data.objects.length) state.selectedId = defaultVisibleObject();
+  if (!state.selectedId) adoptFocusSelection();
   if (!state.reviewId) state.reviewId = nextReview()?.id || null;
   renderAll();
   if (typeof queryToolsScopeChanged === "function") queryToolsScopeChanged();
@@ -120,16 +120,16 @@ function renderAll() {
   $("#graph-name").textContent = data.title || data.graph;
   $("#revision").textContent = data.revision.slice(0, 12);
   $("#revision").title = `Graph revision ${data.revision}`;
-  $("#mode").textContent = data.editable ? "Edit enabled" : "Read only";
-  $("#mode").className = `mode-badge${data.editable ? " edit" : ""}`;
+  applyWritePermissions();
   renderReviewBadge();
-  for (const selector of ["#add-lineage", "#add-lineage-drawer", "#new-zone"]) {
-    $(selector).disabled = !data.editable || (selector === "#new-zone" && Boolean(state.familyMode));
-    $(selector).title = !data.editable ? "Read-only session. Restart tarel ui with --edit to change metadata." : selector === "#new-zone" && state.familyMode ? "Switch to physical objects before editing zones." : "";
-  }
+  $("#new-zone").disabled = Boolean(state.familyMode);
+  $("#new-zone").title = state.familyMode ? "Switch to physical objects before editing zones." : "";
   const hasLineage = Boolean(data.lineages.length);
-  $('[data-canvas-mode="lineage"]').disabled = !hasLineage;
-  $('[data-canvas-mode="lineage"]').title = hasLineage ? "Show selected lineage documents" : "No lineage documents loaded. Add --lineage when starting the UI.";
+  // Without lineage the choice does not exist; the View menu says how to load it.
+  $('[data-canvas-mode="lineage"]').hidden = !hasLineage;
+  $('[data-canvas-mode="lineage"]').title = "Show selected lineage documents";
+  $("#lineage-load-hint").hidden = hasLineage;
+  syncCanvasModeGroup();
   $("#entity-layer-option").hidden = !state.loadedHintEdges.size && !data.edges.some(isOptionalHintEdge);
   $("#entity-layer-option span").textContent = "Show loaded hint edges";
   $("#toggle-derived-relations").disabled = Boolean(state.familyMode);
@@ -240,9 +240,7 @@ async function applyFocuses() {
     state.trace = null;
     state.traceOnCanvas = false;
     const visible = visibleObjects();
-    state.selectedId = visible.some(item => item.id === state.selectedId)
-      ? state.selectedId
-      : defaultVisibleObject();
+    if (!visible.some(item => item.id === state.selectedId)) adoptFocusSelection();
     renderAll();
     setFooter("Ready");
   } catch (error) {
@@ -274,7 +272,8 @@ async function clearFocuses() {
   state.reviewRequest += 1;
   state.trace = null;
   state.traceOnCanvas = false;
-  state.selectedId = mostConnectedObject();
+  state.selectedId = null;
+  setPanel("inspector", false);
   renderAll();
   return true;
 }
@@ -320,18 +319,44 @@ function renderScopeFilters() {
     state.scopeFilters[facet] = new Set(state.scopeFacets[facet]);
     applyVisualScope();
   }));
-  $("#scope-count").textContent = `${visibleObjects().length}/${state.data.objects.length}`;
-  const narrowed = visibleObjects().length !== state.data.objects.length;
+  const visible = visibleObjects().length;
+  const total = state.data.objects.length;
+  $("#scope-count").textContent = `${visible}/${total}`;
+  const narrowed = visible !== total;
   $("#scope-panel").hidden = !narrowed && !Object.values(state.scopeFacets).some(values => values.length > 1);
   const reports = state.focusSelection?.focuses || [];
-  $("#active-scope").hidden = !narrowed && !reports.length;
-  $("#active-scope").textContent = reports.length ? `Report filter: ${reports.join(", ")}` : `${visibleObjects().length} of ${state.data.objects.length} objects in view`;
+  const count = narrowed ? `${visible.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} objects in view` : `All ${total.toLocaleString("en-US")} objects in view`;
+  $("#active-scope").textContent = reports.length ? `${count} · Report filter: ${reports.join(", ")}` : count;
+  // Searching "here" only differs from the project once the view is narrowed.
+  $("#search-here").hidden = !narrowed;
+  renderFiltersCount();
+}
+
+// One number for every restriction someone set; each filter keeps its own heading and meaning.
+function activeFilterCount() {
+  const facets = Object.entries(state.scopeFacets || {});
+  const source = facets.filter(([facet, values]) => (state.scopeFilters?.[facet]?.size ?? values.length) < values.length).length;
+  const reports = state.focusSelection?.focuses.length || 0;
+  const refine = typeof refineFilterCount === "function" ? refineFilterCount() : 0;
+  return source + reports + refine;
+}
+
+function renderFiltersCount() {
+  const count = activeFilterCount();
+  $("#filters-count").textContent = count ? String(count) : "";
+  $("#filters-toggle").classList.toggle("has-filters", count > 0);
+}
+
+function toggleSidebarPanel(button, open = button.getAttribute("aria-expanded") !== "true") {
+  button.setAttribute("aria-expanded", String(open));
+  $(`#${button.getAttribute("aria-controls")}`).hidden = !open;
 }
 
 function applyVisualScope() {
   clearLoadedHintEdges();
   if (state.selectedId && !visibleObjects().some(item => item.id === state.selectedId)) {
-    state.selectedId = visibleObjects()[0]?.id || null;
+    state.selectedId = null;
+    setPanel("inspector", false);
   }
   renderScopeFilters();
   renderObjectList();
@@ -416,10 +441,11 @@ function renderGraph() {
   } else {
     elements.push(...lineageElements(objectIds));
   }
-  if (state.cy) state.cy.destroy();
+  if (state.cy) { if (state.canvasMode === "lineage") rememberLineageLayout(); state.cy.destroy(); }
   state.cy = cytoscape({
     container: $("#graph-canvas"), elements,
-    layout: state.canvasMode === "space" ? {name: "preset", fit: true, padding: 75} : {name: "breadthfirst", directed: true, fit: true, padding: 115, spacingFactor: 1.25, animate: !state.traceOnCanvas, animationDuration: 260},
+    layout: state.canvasMode === "space" || window.TarelAtlas?.active() ? {name: "preset", fit: true, padding: 75} : {name: "breadthfirst", directed: true, fit: true, padding: 115, spacingFactor: 1.25, animate: !state.traceOnCanvas, animationDuration: 260},
+    ...lineageRenderOptions(elements),
     minZoom: .002, maxZoom: 2.3, wheelSensitivity: .18,
     style: [
       {selector: "node", style: {"background-color": "#181818", "border-color": "#5f5f68", "border-width": 1, "color": "#f4f4f5", "font-family": "Inter, sans-serif", "font-size": 11, "label": "data(label)", "shape": "round-rectangle", "text-max-width": 104, "text-wrap": "ellipsis", "text-valign": "center", "width": 112, "height": 42}},
@@ -467,15 +493,18 @@ function renderGraph() {
       ? `Analysis: ${analyzer}${dialect ? ` · ${dialect}` : ""} · review state remains separate. Trace this asset to show its upstream path.`
       : "Trace this lineage asset to show its upstream path.";
   });
+  bindLineageCanvas();
   if (state.selectedId && state.cy.$id(state.selectedId).length) state.cy.$id(state.selectedId).select();
   if (state.traceOnCanvas && state.trace) setTimeout(focusTrace, 0);
+  state.lineagePathActive = false;
+  updateLineagePathControls();
   const focusCount = state.focusSelection?.focuses.length || 0;
   $("#canvas-title").textContent = focusCount
     ? `Report filter · ${focusCount} report${focusCount === 1 ? "" : "s"}`
-    : state.canvasMode === "space" ? "Information space" : "Data & process lineage";
+    : state.canvasMode === "space" ? "Information space" : state.lineageProcessNodes ? "Processes & data" : "Data flow";
   $("#canvas-subtitle").textContent = state.canvasMode === "space"
     ? `${objects.length} objects · ${graphRelationshipSummary(graphEdgesForView(objectIds))} · ${lanes.length} schema spaces`
-    : `${objects.length} graph objects · ${activeLineageFlows().edges.length} lineage edges${focusCount ? ` · ${state.focusSelection.origins.length} origins` : ` · ${data.lineages.length} documents`}`;
+    : `${objects.length} graph objects · ${activeLineageFlows().edges.length} data flows${baseLineageFlows().truncated ? ` of ${baseLineageFlows().total_edges}` : ""}${focusCount ? ` · ${state.focusSelection.origins.length} origins` : ` · ${data.lineages.length} documents`}`;
 }
 
 function lineageObjectIds() {
@@ -522,75 +551,12 @@ function showSpaceGroups(objects) {
   return new Set(objects.map(item => `${item.system || ""}::${item.area || ""}::${item.graph}::${item.namespace}`)).size > 1;
 }
 
-function lineageElements(visibleObjectIds) {
-  const flows = activeLineageFlows();
-  const trace = state.traceOnCanvas && state.trace ? traceElements(state.trace) : {nodes: [], edges: []};
-  const allEdges = [...flows.edges.map(item => ({...item, type: item.type || "lineage"})), ...trace.edges];
-  const connected = new Set();
-  for (const edge of allEdges) { connected.add(edge.source); connected.add(edge.target); }
-  const nodes = [...flows.nodes, ...trace.nodes]
-    .filter((item, index, values) => values.findIndex(candidate => candidate.id === item.id) === index)
-    .filter(item => connected.has(item.id))
-    .filter(item => !visibleObjectIds.has(item.id))
-    .map(item => ({data: {id: item.id, label: item.label || item.reference, reference: item.reference, type: item.kind || "asset", state: item.state || "observed", analyzer: item.analyzer || null, dialect: item.dialect || null}}));
-  const known = new Set([...visibleObjectIds, ...nodes.map(item => item.data.id)]);
-  const edges = allEdges
-    .filter(item => known.has(item.source) && known.has(item.target))
-    .map(item => ({data: {id: item.id, source: item.source, target: item.target, type: item.type, state: item.state, relation: item.relation}}));
-  return [...nodes, ...edges];
-}
-
-function activeLineageFlows() {
-  const selection = state.focusSelection;
-  if (!selection?.focuses.length) return state.data.lineage_flows || {nodes: [], edges: []};
-  return {
-    edges: selection.edges,
-    nodes: selection.members.map(item => ({
-      id: item.id,
-      kind: item.kind,
-      label: item.label,
-      reference: item.reference,
-      state: item.annotation_state || "observed",
-    })),
-  };
-}
-
-function traceElements(trace) {
-  const references = new Map();
-  const nodes = [];
-  const resolve = item => {
-    const existing = resolveReference(item.reference);
-    if (existing) return existing;
-    if (!references.has(item.id)) {
-      const id = `trace-ref::${references.size}`;
-      references.set(item.id, id);
-      nodes.push({id, label: item.name || item.reference, reference: item.reference, kind: item.kind || "asset", state: item.annotation_state || "observed"});
-    }
-    return references.get(item.id);
-  };
-  const edges = trace.hops.map(hop => ({id: `trace-edge::${hop.id}`, source: resolve(hop.source), target: resolve(hop.target), type: "lineage", state: hop.state, relation: hop.relation}));
-  resolve(trace.start);
-  trace.origins.forEach(resolve);
-  return {nodes, edges};
-}
-
 function resolveReference(reference) {
   const needle = String(reference || "").toLowerCase();
   const objects = state.data.objects.filter(item => [item.id, item.object_id, item.label, item.reference].some(value => String(value || "").toLowerCase() === needle));
   if (objects.length === 1) return objects[0].id;
-  const lineage = (state.data.lineage_flows.nodes || []).filter(item => String(item.reference || "").toLowerCase() === needle);
+  const lineage = baseLineageFlows().nodes.filter(item => String(item.reference || "").toLowerCase() === needle);
   return lineage.length === 1 ? lineage[0].id : null;
-}
-
-function focusTrace() {
-  const traceIds = new Set(state.trace.hops.flatMap(hop => [resolveReference(hop.source.reference), resolveReference(hop.target.reference)]).filter(Boolean));
-  const traceEdges = state.cy.edges('[id ^= "trace-edge::"]');
-  traceEdges.forEach(edge => { traceIds.add(edge.source().id()); traceIds.add(edge.target().id()); });
-  state.cy.elements().addClass("dimmed");
-  traceEdges.removeClass("dimmed").addClass("trace-focus");
-  traceIds.forEach(id => state.cy.$id(id).removeClass("dimmed").addClass("trace-focus"));
-  const focus = state.cy.elements(".trace-focus");
-  if (focus.length) state.cy.fit(focus, 95);
 }
 
 function selectObject(id) {
@@ -637,9 +603,17 @@ function focusSelected() {
 
 function selectedObject() { return state.data.objects.find(item => item.id === state.selectedId); }
 
+// A group with only "Structure" left offers no choice, so it is not drawn.
+function syncCanvasModeGroup() {
+  const choices = [...document.querySelectorAll("#canvas-mode-group [data-canvas-mode]")].filter(button => !button.hidden);
+  $("#canvas-mode-group").hidden = choices.length < 2;
+}
+
 function renderInspector() {
   const item = selectedObject();
+  document.body?.classList.toggle("has-selection", Boolean(item));
   $("#trace-selected").disabled = !item?.reference || !state.data.lineages.length;
+  $("#fit-graph").disabled = !item;
   $("#trace-selected").title = state.data.lineages.length ? "Trace the selected object's upstream lineage" : "No lineage documents loaded. Add --lineage when starting the UI.";
   if (!item) {
     $("#inspector").innerHTML = `${inspectorHeading("Object details", "Nothing selected")}<div class="empty-state"><h2>Select an object</h2><p>Choose a table from the list or graph.</p></div>`;
@@ -656,18 +630,22 @@ function renderInspector() {
   }
   const annotation = item.annotation;
   const relationships = connectedEdges.filter(edge => !["derives", "entity_resolution_candidate", "reference_mapping"].includes(edge.type));
+  const facts = [["Role", annotation?.role], ["Grain", item.grain], ["Primary key", item.primary_key.join(", ")]];
+  const known = facts.filter(([, value]) => value);
+  const unknown = facts.filter(([, value]) => !value).map(([label]) => label.toLowerCase());
+  const unknownLine = unknown.length ? `Not documented: ${unknown.join(", ")}.` : "";
+  const fieldState = uniformFieldState(item.fields);
   $("#inspector").innerHTML = `
-    ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label)}
+    ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label, item.id)}
     ${sourceChangeNotice(item.source_change)}
-    <section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation?.description || "No TAREL annotation yet.")}</p>
-      ${annotation?.synonyms?.length ? fieldDetail("Synonyms", annotation.synonyms.join(" · ")) : ""}
-      ${annotation?.tags?.length ? fieldDetail("Tags", annotation.tags.join(" · ")) : ""}
+    ${annotation ? `<section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation.description)}</p>
+      ${annotation.synonyms?.length ? fieldDetail("Synonyms", annotation.synonyms.join(" · ")) : ""}
+      ${annotation.tags?.length ? fieldDetail("Tags", annotation.tags.join(" · ")) : ""}
       <small class="semantic-origin">Optional metadata on the existing object · autonomous drafts are usable</small></section>
-    <section class="detail-section"><div class="fact-grid">
-      ${fact("State", stateLabel(annotation?.state || "missing"))}${fact("Role", annotation?.role || "—")}${fact("Grain", item.grain || "—")}${fact("Primary key", item.primary_key.join(", ") || "—")}
-    </div></section>
+    <section class="detail-section"><div class="fact-grid">${fact("State", stateLabel(annotation.state))}${known.map(([label, value]) => fact(label, value)).join("")}</div>${unknownLine ? `<p class="semantic-origin">${escapeHtml(unknownLine)}</p>` : ""}</section>`
+    : `<section class="detail-section tarel-semantics"><p class="annotation-gap">No TAREL annotation yet.${known.map(([label, value]) => ` ${escapeHtml(label)}: <strong>${escapeHtml(value)}</strong>.`).join("")}${unknownLine ? ` ${escapeHtml(unknownLine)}` : ""}</p></section>`}
     ${annotation?.warnings?.length ? `<section class="detail-section"><h3>Warnings</h3><p class="logical-warning">${annotation.warnings.map(escapeHtml).join(" · ")}</p></section>` : ""}
-    <section class="detail-section"><h3>Fields · ${item.fields.length}</h3><div class="field-list">${item.fields.map(fieldAnnotationCard).join("")}</div></section>
+    <section class="detail-section"><h3>Fields · ${item.fields.length}</h3>${fieldStateLine(fieldState, item.fields.length)}<div class="field-list">${item.fields.map(field => fieldAnnotationCard(field, !fieldState)).join("")}</div></section>
     ${relationshipList(relationships)}`;
   $$('[data-related-object]').forEach(button => button.addEventListener("click", () => selectObject(button.dataset.relatedObject)));
   $$(".field-quick-annotation").forEach(form => form.addEventListener("submit", saveQuickFieldAnnotation));
@@ -701,8 +679,9 @@ async function saveQuickFieldAnnotation(event) {
   }
 }
 
-function inspectorHeading(kind, name, reference = "") {
-  return `<div class="inspector-head"><p class="eyebrow">${escapeHtml(kind)}</p><h2>${escapeHtml(name)}</h2>${reference ? `<p class="mono">${escapeHtml(reference)}</p>` : ""}<button class="icon-button panel-close" data-close-panel="inspector" aria-label="Close object details">×</button></div>`;
+// Only a heading that names an object gets that object's summary; other panels have no such object.
+function inspectorHeading(kind, name, reference = "", objectId = null) {
+  return `<div class="inspector-head"${objectId ? ` data-inspector-object="${escapeAttr(objectId)}"` : ""}><p class="eyebrow">${escapeHtml(kind)}</p><h2>${escapeHtml(name)}</h2>${reference ? `<p class="mono">${escapeHtml(reference)}</p>` : ""}<button class="icon-button panel-close" data-close-panel="inspector" aria-label="Close object details">×</button></div>`;
 }
 
 function optionalDetails(title, count, content, trust = "") {
@@ -730,7 +709,7 @@ function renderFamilyInspector(item) {
   const page = state.familyPages.get(item.id);
   const hidden = family.hidden_details;
   $("#inspector").innerHTML = `
-    ${inspectorHeading(`Logical object family · ${item.graph}`, item.name)}
+    ${inspectorHeading(`Logical object family · ${item.graph}`, item.name, "", item.id)}
     <section class="detail-section"><div class="fact-grid">${fact("State", stateLabel(family.state))}${fact("Usage", family.usage)}${fact("Scope members", String(family.member_count))}${fact("Namespaces", String(family.namespace_count))}${fact("Grain", family.grain.join(" + ") || "—")}${fact("Revision", shortRevision(family.revision))}</div></section>
     <p class="logical-warning">Schema compatibility only. Membership does not prove partition disjointness, common business meaning or a family-wide join.${family.usage === "exploratory_only" ? " Exploratory only · validate at runtime." : ""}</p>
     <section class="detail-section"><h3>Common schema · ${item.fields.length}</h3><div class="logical-field-list">${item.fields.map(logicalOutputFieldCard).join("")}</div></section>
@@ -762,7 +741,7 @@ function renderDerivedRelationInspector(item, connectedEdges) {
   const evidence = logical.evidence || [];
   const derives = connectedEdges.filter(edge => edge.type === "derives");
   $("#inspector").innerHTML = `
-    ${inspectorHeading(`Logical object · ${item.namespace}`, item.name, `Derived from ${source?.label || logical.source_object || "unknown source"}`)}
+    ${inspectorHeading(`Logical object · ${item.namespace}`, item.name, `Derived from ${source?.label || logical.source_object || "unknown source"}`, item.id)}
     <section class="detail-section"><div class="fact-grid">
       ${fact("State", stateLabel(logical.state || item.state))}${fact("Usage", logical.usage || item.usage || "exploratory_only")}${fact("Grain", (logical.grain_fields || item.primary_key || []).join(" + ") || "—")}${fact("Output fields", String(item.fields.length))}
       ${fact("Steps", String((logical.step_kinds || []).length))}${fact("Evidence runs", String(evidence.length))}${fact("Plan revision", shortRevision(logical.plan_revision))}${fact("Topology revision", shortRevision(logical.document_revision))}
@@ -847,7 +826,19 @@ function sourceStateBadge(label, reviewState = label, requiresRuntimeValidation 
   return `<span class="source-state${confirmed ? "" : " caution"}">${escapeHtml(label || "unknown")}</span>`;
 }
 
-function fieldAnnotationCard(field) {
+// When every field carries the same state, one line says it instead of a pill on each field.
+function uniformFieldState(fields) {
+  const states = new Set(fields.map(field => field.annotation?.state || "missing"));
+  return fields.length && states.size === 1 ? [...states][0] : null;
+}
+
+function fieldStateLine(fieldState, count) {
+  if (!fieldState) return "";
+  const text = fieldState === "missing" ? `No field descriptions (0/${count})` : `All ${count} fields: ${stateLabel(fieldState)}`;
+  return `<p class="field-state-line" data-state="${escapeAttr(fieldState)}">${escapeHtml(text)}</p>`;
+}
+
+function fieldAnnotationCard(field, showState = true) {
   const annotation = field.annotation;
   const provenance = annotation?.provenance;
   const reviewEvents = Array.isArray(field.review?.events) ? field.review.events : [];
@@ -857,7 +848,7 @@ function fieldAnnotationCard(field) {
   return `<details class="field-card">
     <summary>
       <span class="field-summary-copy"><strong>${escapeHtml(field.label)}</strong><small class="mono">${escapeHtml(field.data_type || "—")}</small>${annotation?.description ? `<small class="field-summary-description">${escapeHtml(annotation.description)}</small>` : ""}</span>
-      <span class="field-summary-badges">${field.source_change ? '<span class="source-change-pill">Source changed</span>' : ""}${field.semantic_type ? `<span class="semantic-pill">${escapeHtml(field.semantic_type)}</span>` : ""}<span class="state-badge" data-state="${escapeAttr(annotation?.state || "missing")}">${escapeHtml(stateLabel(annotation?.state || "missing"))}</span></span>
+      <span class="field-summary-badges">${field.source_change ? '<span class="source-change-pill">Source changed</span>' : ""}${field.semantic_type ? `<span class="semantic-pill">${escapeHtml(field.semantic_type)}</span>` : ""}${showState ? `<span class="state-badge" data-state="${escapeAttr(annotation?.state || "missing")}">${escapeHtml(stateLabel(annotation?.state || "missing"))}</span>` : ""}</span>
     </summary>
     <div class="field-annotation-body">
       ${sourceChangeNotice(field.source_change)}
@@ -872,7 +863,7 @@ function fieldAnnotationCard(field) {
           <div class="field-provenance"><strong>Provenance</strong><span>${escapeHtml(provenance?.source || "unknown")}${provenance?.provider ? ` · ${escapeHtml(provenance.provider)}` : ""}${provenance?.model ? ` · ${escapeHtml(provenance.model)}` : ""}</span></div>
           ${latestReview ? fieldDetail(`Human review · ${reviewActionLabel(latestReview.action)}`, latestReview.reason) : ""}
           ${contextDocuments.length ? fieldDetail("Context documents", contextDocuments.map(item => `${item.id}@${item.revision}`).join(" · ")) : ""}
-        </div></details>` : `<p class="field-missing">No TAREL field annotation yet.</p>${state.data.editable ? `<form class="field-quick-annotation" data-graph="${escapeAttr(selectedObject().graph)}" data-reference="${escapeAttr(field.reference)}"><label><span>Description</span><textarea name="description" required placeholder="What does this field mean?"></textarea></label><details><summary>Optional synonyms &amp; tags</summary><label class="form-half"><span>Synonyms · one per line</span><textarea name="synonyms"></textarea></label><label class="form-half"><span>Tags · one per line</span><textarea name="tags"></textarea></label></details><button class="quiet-button">Add annotation</button></form>` : ""}`}
+        </div></details>` : `<p class="field-missing">No TAREL field annotation yet.</p>${canWrite("graph") ? `<form class="field-quick-annotation" data-graph="${escapeAttr(selectedObject().graph)}" data-reference="${escapeAttr(field.reference)}"><label><span>Description</span><textarea name="description" required placeholder="What does this field mean?"></textarea></label><details><summary>Optional synonyms &amp; tags</summary><label class="form-half"><span>Synonyms · one per line</span><textarea name="synonyms"></textarea></label><label class="form-half"><span>Tags · one per line</span><textarea name="tags"></textarea></label></details><button class="quiet-button">Add annotation</button></form>` : ""}`}
       ${sourceSemantics.length ? `<div class="field-source-semantics"><strong>Imported source semantics</strong><div>${sourceSemantics.map(entry => `<span class="source-pill" title="${escapeAttr(entry.import_name)}">${escapeHtml(entry.name)}</span>`).join(" ")}</div></div>` : ""}
     </div>
   </details>`;
@@ -905,10 +896,11 @@ function sourceSemanticCards(entries, title) {
   return `<section class="detail-section source-semantics"><h3>${escapeHtml(title)} · ${entries.length}</h3><p class="semantic-origin">Imported values remain separate. Saving creates a TAREL overlay; the original source snapshot stays unchanged.</p>${entries.map(entry => `
     <form class="source-semantic-card source-semantic-form" data-import-name="${escapeAttr(entry.import_name)}" data-target-id="${escapeAttr(entry.target_id)}" data-revision="${escapeAttr(entry.import_revision)}">
       <header><span><strong>${escapeHtml(entry.display_label || entry.field_label || entry.name)}</strong><small>${escapeHtml(entry.import_name)} · ${escapeHtml(entry.kind)}</small></span><span class="source-state">${entry.patch_count ? `${entry.patch_count} edit${entry.patch_count === 1 ? "" : "s"}` : "source"}</span></header>
-      <label><span>Description</span><textarea name="description" ${state.data.editable ? "" : "disabled"}>${escapeHtml(entry.description || "")}</textarea></label>
-      <label class="form-half"><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${state.data.editable ? "" : "disabled"}>${escapeHtml((entry.synonyms || []).join("\n"))}</textarea></label>
-      <label><span>Edit reason</span><input name="reason" value="Reviewed in the local TAREL UI." required ${state.data.editable ? "" : "disabled"} /></label>
-      <div class="source-actions"><small class="mono">${escapeHtml(entry.source_reference)}</small><button class="quiet-button" type="submit" ${state.data.editable ? "" : "disabled"}>Save source overlay</button></div>
+      ${canWrite("graph") ? `<label><span>Description</span><textarea name="description">${escapeHtml(entry.description || "")}</textarea></label>
+      <label class="form-half"><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms">${escapeHtml((entry.synonyms || []).join("\n"))}</textarea></label>
+      <label><span>Edit reason · optional</span><input name="reason" maxlength="2000" placeholder="${REASON_PLACEHOLDER}" /></label>`
+      : `${readField("Description", entry.description || "No description")}${readField("Synonyms", (entry.synonyms || []).join(" · "))}`}
+      <div class="source-actions"><small class="mono">${escapeHtml(entry.source_reference)}</small><button class="quiet-button" type="submit" data-write="graph">Save source overlay</button></div>
       ${entry.original ? `<details><summary>Original imported values</summary><p>${escapeHtml(entry.original.description || "No description")}</p><small>${escapeHtml((entry.original.synonyms || []).join(" · ") || "No synonyms")}</small></details>` : '<p class="semantic-origin">Original source snapshots are intentionally not included in this projection.</p>'}
     </form>`).join("")}</section>`;
 }
@@ -948,7 +940,7 @@ async function saveSourceSemantic(event) {
       target_id: form.dataset.targetId,
       revision: form.dataset.revision,
       patch: {description: emptyToNull(values.get("description")), synonyms: lines(values.get("synonyms"))},
-      reason: values.get("reason"),
+      reason: decisionReason(values.get("reason"), "save"),
     });
     toast("Imported semantics updated; source snapshot preserved.");
     await load();
@@ -958,7 +950,7 @@ async function saveSourceSemantic(event) {
 function renderZones() {
   const contexts = [];
   for (const workspace of state.data.workspaces) for (const system of workspace.systems) for (const zone of system.zones) contexts.push({workspace, system, zone});
-  $("#zones-panel").hidden = !contexts.length && !state.data.editable;
+  $("#zones-panel").hidden = !contexts.length && !canWrite("graph");
   $("#zone-count").textContent = String(contexts.length);
   $("#zone-list").innerHTML = contexts.map((context, index) => `
     <article class="zone-card" data-zone-index="${index}"><header><strong>${escapeHtml(context.zone.name)}</strong><small>${context.zone.members.length}</small></header><p>${escapeHtml(context.zone.description || `${context.workspace.name} · ${context.system.name}`)}</p><div class="zone-members">${context.zone.members.map(member => { const object = objectForZoneMember(member); return `<button class="zone-member" data-focus-object="${escapeAttr(object?.id || "")}">${escapeHtml(object?.name || `${member.graph}:${member.object_id}`)}</button>`; }).join("")}</div></article>`).join("") || '<div class="zone-card"><strong>No zones yet</strong><p>Create one to group objects across schemas.</p></div>';
@@ -1011,7 +1003,7 @@ function renderReviewBadge() {
   const summary = state.reviewData?.review_summary || state.data?.review_summary;
   const badge = $("#review-badge");
   badge.textContent = summary?.known ? String(summary.review_objects) : "?";
-  badge.title = summary?.known ? `${summary.pending_tables} table proposals · ${summary.pending_fields} field proposals awaiting review. Display grouping does not change this count.` : "Review counts have not been loaded. Open Review to inspect the physical scope.";
+  badge.title = summary?.known ? `${counted(summary.pending_tables, "table proposal")} · ${counted(summary.pending_fields, "field proposal")} awaiting review. Display grouping does not change this count.` : "Review counts have not been loaded. Open Review to inspect the physical scope.";
 }
 
 async function loadReview() {
@@ -1048,13 +1040,13 @@ function renderReview() {
   const scopedReview = reviewRecords();
   const pending = scopedReview.filter(reviewPending);
   const summary = state.reviewData.review_summary;
-  $("#review-progress").textContent = `${summary.pending_tables} table proposals · ${summary.pending_fields} field proposals pending · ${summary.missing_tables} tables / ${summary.missing_fields} fields missing annotations`;
+  $("#review-progress").textContent = `${counted(summary.pending_tables, "table proposal")} · ${counted(summary.pending_fields, "field proposal")} pending · ${counted(summary.missing_tables, "table")} / ${counted(summary.missing_fields, "field")} missing annotations`;
   const decided = scopedReview.filter(item => !reviewPending(item) && item.state !== "missing").length;
   $("#review-progress-bar").style.width = `${summary.total_objects ? Math.round(decided / summary.total_objects * 100) : 0}%`;
   const records = state.reviewFilter === "pending" ? pending : scopedReview;
   if (!records.some(item => item.id === state.reviewId)) state.reviewId = records[0]?.id || null;
   $("#review-list").innerHTML = records.map(item => `
-    <button class="review-item${item.id === state.reviewId ? " is-active" : ""}" data-review="${escapeAttr(item.id)}"><i class="state-dot ${item.pending_field_count ? "draft" : escapeAttr(item.state)}"></i><span><strong>${escapeHtml(item.label)}</strong><small>${item.pending_field_count ? `${item.pending_field_count} field proposal${item.pending_field_count === 1 ? "" : "s"} pending · ` : ""}${escapeHtml(item.annotation?.description || "No semantic description")}</small></span><span class="state-badge" data-state="${escapeAttr(item.state)}">${stateLabel(item.state)}</span></button>`).join("") || '<div class="empty-state"><p>No proposals in this filter.</p></div>';
+    <button class="review-item${item.id === state.reviewId ? " is-active" : ""}" data-review="${escapeAttr(item.id)}"><i class="state-dot ${item.pending_field_count ? "draft" : escapeAttr(item.state)}"></i><span><strong>${escapeHtml(item.label)}</strong><small>${item.pending_field_count ? `${item.pending_field_count} field proposal${item.pending_field_count === 1 ? "" : "s"} pending · ` : ""}${escapeHtml(item.annotation?.description || "No semantic description")}</small></span><span class="state-badge" data-state="${escapeAttr(item.state)}">${queueStateLabel(item)}</span></button>`).join("") || '<div class="empty-state"><p>No proposals in this filter.</p></div>';
   $$(".review-item").forEach(button => button.addEventListener("click", () => { state.reviewId = button.dataset.review; setPanel("review-queue", false); renderReview(); }));
   renderReviewEditor();
 }
@@ -1071,30 +1063,43 @@ function renderReviewEditor() {
     return;
   }
   const annotation = record.annotation;
-  const disabled = !state.data.editable || !annotation;
+  const disabled = !annotation;
+  const readOnly = !canWrite("graph");
   const contextDocuments = record.context_documents || [];
   const documentById = new Map((state.reviewData.knowledge_documents || []).map(item => [item.id, item]));
   const availableDocuments = (record.available_context_document_ids || []).map(id => documentById.get(id)).filter(Boolean);
   $("#review-editor").innerHTML = `
-    <div class="review-title"><div><p class="eyebrow">${escapeHtml(record.type)} annotation</p><h2>${escapeHtml(record.label)}</h2><p>${record.field_count} fields · ${stateLabel(record.state)}</p></div><span class="state-badge" data-state="${escapeAttr(record.state)}">${stateLabel(record.state)}</span></div>
-    <div class="step-strip"><div class="step"><strong>1 · Read</strong>Understand the proposal</div><div class="step"><strong>2 · Check</strong>Compare evidence</div><div class="step"><strong>3 · Edit</strong>Correct meaning</div><div class="step"><strong>4 · Decide</strong>Approve or reject</div></div>
-    ${!state.data.editable ? '<p class="review-field-notice">Read-only session. Evidence and proposals are inspectable; restart with <code>--edit</code> to record a decision.</p>' : ""}
+    <div class="review-title"><div><p class="eyebrow">${escapeHtml(record.type)} annotation</p><h2>${escapeHtml(record.label)}</h2><p>${counted(record.field_count, "field")}</p></div><span class="state-badge" data-state="${escapeAttr(record.state)}">${stateLabel(record.state)}</span></div>
     ${record.pending_field_count ? `<div class="review-field-notice"><strong>${record.pending_field_count} field proposals also need review.</strong><p>Approving only the table does not approve its fields. Inspect the field descriptions before applying a decision to them.</p><button id="inspect-review-fields" class="quiet-button">Inspect fields${state.familyMode ? " · physical view" : ""}</button></div>` : ""}
     ${knowledgeContextPanel(record, contextDocuments, availableDocuments)}
-    ${!annotation ? `<div class="missing-callout"><strong>No provider proposal exists for this table.</strong><p>Generate one with the configured provider or coding agent, then return here for review. Add a private connector configuration and sampling only when required.</p><code>${escapeHtml(annotationCommand(record))}</code></div>` : `
+    ${!annotation ? `<div class="missing-callout"><strong>No provider proposal exists for this table.</strong><p>Generate one with the configured provider or coding agent, then return here for review. Add a private connector configuration and sampling only when required.</p><code>${escapeHtml(annotationCommand(record))}</code></div>` : readOnly ? reviewReadView(record) : `
     <form id="annotation-form" class="editor-form">
       <label><span>Business description</span><textarea name="description" required ${disabled ? "disabled" : ""}>${escapeHtml(annotation.description)}</textarea></label>
       <div class="field-grid"><label><span>Business role</span><input name="role" value="${escapeAttr(annotation.role || "")}" ${disabled ? "disabled" : ""} /></label><label><span>Grain</span><input name="grain" value="${escapeAttr(record.grain || "")}" ${disabled ? "disabled" : ""} /></label></div>
       <label class="form-half"><span>Synonyms · one per line</span><textarea class="short-textarea" name="synonyms" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.synonyms || []).join("\n"))}</textarea></label>
       <label class="form-half"><span>Tags · one per line</span><textarea class="short-textarea" name="tags" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.tags || []).join("\n"))}</textarea></label>
       <label><span>Warnings · one per line</span><textarea class="short-textarea" name="warnings" ${disabled ? "disabled" : ""}>${escapeHtml((annotation.warnings || []).join("\n"))}</textarea></label>
-      <label><span>Human review reason</span><input name="reason" value="Reviewed in the local TAREL UI." required ${disabled ? "disabled" : ""} /></label>
+      <label><span>Human review reason · optional</span><input name="reason" maxlength="2000" placeholder="${REASON_PLACEHOLDER}" ${disabled ? "disabled" : ""} /></label>
       ${includeFieldsOption(record, disabled)}
     </form>
     <div class="editor-actions"><button class="danger-button" data-review-action="reject" ${disabled ? "disabled" : ""}>Reject</button><button class="quiet-button" data-review-action="later">Later</button><button class="quiet-button" data-review-action="save" ${disabled ? "disabled" : ""}>Save edits</button><span class="spacer"></span><button class="primary-button" data-review-action="approve" ${disabled ? "disabled" : ""}>Approve &amp; next</button></div>`}`;
   $$('[data-review-action]').forEach(button => button.addEventListener("click", () => reviewAction(button.dataset.reviewAction)));
   $("#inspect-review-fields")?.addEventListener("click", () => inspectReviewFields(record));
   renderEvidence(record);
+}
+
+// Reading a proposal: the values as text, empty ones left out, and navigation to the next one.
+function reviewReadView(record) {
+  const annotation = record.annotation;
+  return `<section class="review-read">
+      ${readField("Business description", annotation.description)}
+      ${readField("Business role", annotation.role)}
+      ${readField("Grain", record.grain)}
+      ${readField("Synonyms", (annotation.synonyms || []).join(" · "))}
+      ${readField("Tags", (annotation.tags || []).join(" · "))}
+      ${readField("Warnings", (annotation.warnings || []).join("\n"), "warning")}
+    </section>
+    <div class="editor-actions"><small class="read-hint">Decisions need <code>${EDIT_COMMANDS.graph}</code>.</small><span class="spacer"></span><button class="quiet-button" data-review-action="later">Next proposal</button></div>`;
 }
 
 // The decision can include the fields that have a proposal; fields without one stay
@@ -1140,7 +1145,7 @@ async function reviewAction(action) {
   if (!form?.reportValidity()) return;
   const values = new FormData(form);
   const patch = {description: values.get("description"), role: emptyToNull(values.get("role")), grain: emptyToNull(values.get("grain")), synonyms: lines(values.get("synonyms")), tags: lines(values.get("tags")), warnings: lines(values.get("warnings"))};
-  const reason = values.get("reason");
+  const reason = decisionReason(values.get("reason"), action);
   try {
     if (action === "save" || changed(record, patch)) {
       const result = await api("/api/annotation/edit", {graph: record.graph, reference: record.label, patch, reason, revision: state.reviewData.revisions[record.graph]});
@@ -1188,7 +1193,7 @@ function renderManualLineage() {
       <article class="manual-document">
         <header><span><strong>${escapeHtml(document.name)}</strong><small>${document.jobs.length} jobs · ${document.hops.length} hops</small></span><code>${escapeHtml(document.revision.slice(0, 10))}</code></header>
         <div class="manual-jobs">${document.jobs.map(job => `<div class="manual-job"><span class="kind-icon">${job.kind === "procedure" ? "SP" : "S"}</span><span><strong>${escapeHtml(job.qualified_name)}</strong><small>${escapeHtml(job.description || job.source_reference)}</small></span></div>`).join("")}</div>
-        <div class="manual-hops">${document.hops.map(hop => `<div class="manual-hop"><span><strong>${escapeHtml(hop.source)}</strong><small>${escapeHtml(hop.role)}</small></span><span class="hop-relation">${escapeHtml(hop.operation)} →</span><span><strong>${escapeHtml(hop.target)}</strong><small>via ${escapeHtml(hop.job)}</small></span><span class="state-badge" data-state="${escapeAttr(hop.state)}">${stateLabel(hop.state)}</span>${hop.state === "draft" && state.data.editable ? `<span class="manual-review-actions"><button class="quiet-button" data-lineage-decision="reject" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Reject</button><button class="primary-button" data-lineage-decision="validate" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Approve</button></span>` : ""}</div>`).join("") || '<p class="guidance">No data-flow hops yet.</p>'}</div>
+        <div class="manual-hops">${document.hops.map(hop => `<div class="manual-hop"><span><strong>${escapeHtml(hop.source)}</strong><small>${escapeHtml(hop.role)}</small></span><span class="hop-relation">${escapeHtml(hop.operation)} →</span><span><strong>${escapeHtml(hop.target)}</strong><small>via ${escapeHtml(hop.job)}</small></span><span class="state-badge" data-state="${escapeAttr(hop.state)}">${stateLabel(hop.state)}</span>${hop.state === "draft" && canWrite("graph") ? `<span class="manual-review-actions"><button class="quiet-button" data-lineage-decision="reject" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Reject</button><button class="primary-button" data-lineage-decision="validate" data-lineage="${escapeAttr(document.name)}" data-item="${escapeAttr(hop.item_id)}">Approve</button></span>` : ""}</div>`).join("") || '<p class="guidance">No data-flow hops yet.</p>'}</div>
       </article>`).join("");
   }
   $$('[data-lineage-decision]').forEach(button => button.addEventListener("click", () => decideManualHop(button)));
@@ -1197,11 +1202,11 @@ function renderManualLineage() {
 async function decideManualHop(button) {
   const document = state.data.lineage_documents.find(item => item.name === button.dataset.lineage);
   const decision = button.dataset.lineageDecision;
-  const reason = window.prompt(
-    decision === "validate" ? "Why is this lineage hop correct?" : "Why should this hop be rejected?",
-    decision === "validate" ? "Reviewed in the local TAREL UI." : "Rejected in the local TAREL UI.",
+  const answer = window.prompt(
+    `${decision === "validate" ? "Why is this lineage hop correct?" : "Why should this hop be rejected?"} (optional)`, "",
   );
-  if (!reason) return;
+  if (answer === null) return;  // Cancel stops; an empty answer is recorded as "no reason given".
+  const reason = decisionReason(answer, decision);
   try {
     await api("/api/lineage/decision", {lineage: document.name, item_id: button.dataset.item, decision, reason, revision: document.revision});
     toast(decision === "validate" ? "Lineage hop approved." : "Lineage hop rejected.");
@@ -1270,6 +1275,11 @@ async function createManualHop(event) {
   } catch (error) { toast(error.message); }
 }
 
+// An unresolved name's own name says which scope it belongs to; its reference cannot.
+function traceLabel(item) {
+  return item.kind === "unresolved" ? item.name : item.reference;
+}
+
 async function trace(reference) {
   if (!state.data.lineages.length) { $("#lineage-drawer").hidden = false; $("#lineage-status").className = "notice error"; $("#lineage-status").textContent = "Restart with one or more --lineage options."; return; }
   $("#lineage-drawer").hidden = false; $("#lineage-reference").value = reference; $("#lineage-status").className = "notice"; $("#lineage-status").textContent = "Resolving selected lineage documents…";
@@ -1278,10 +1288,10 @@ async function trace(reference) {
     state.trace = result;
     state.traceOnCanvas = false;
     $("#show-trace-canvas").hidden = false;
-    $("#lineage-title").textContent = result.start.reference;
+    $("#lineage-title").textContent = traceLabel(result.start);
     $("#lineage-status").textContent = `${result.hops.length} hops · ${result.origins.length} origins${result.truncated ? " · truncated" : ""}${result.warnings.length ? ` · ${result.warnings.join(" ")}` : ""}`;
-    $("#lineage-origins").innerHTML = result.origins.map(item => `<span class="origin">Origin · ${escapeHtml(item.reference)}</span>`).join("");
-    $("#lineage-hops").innerHTML = result.hops.map(hop => `<article class="hop"><span class="hop-depth">${hop.depth}</span><span><strong>${escapeHtml(hop.source.reference)}</strong><small>${escapeHtml(hop.source.kind)}</small></span><span class="hop-relation">${escapeHtml(hop.relation)} →</span><span><strong>${escapeHtml(hop.target.reference)}</strong><small>${escapeHtml(hop.state)}${hop.via_definition ? ` · via ${escapeHtml(hop.via_definition)}` : ""}</small>${hop.evidence?.reason ? `<small class="hop-evidence">Evidence · ${escapeHtml(hop.evidence.reason)}</small>` : ""}${hop.write_evidence?.reason ? `<small class="hop-evidence">Write · ${escapeHtml(hop.write_evidence.reason)}</small>` : ""}</span></article>`).join("") || '<div class="empty-state"><p>No upstream hops found.</p></div>';
+    $("#lineage-origins").innerHTML = result.origins.map(item => `<span class="origin">Origin · ${escapeHtml(traceLabel(item))}</span>`).join("");
+    $("#lineage-hops").innerHTML = result.hops.map(hop => `<article class="hop"><span class="hop-depth">${hop.depth}</span><span><strong>${escapeHtml(traceLabel(hop.source))}</strong><small>${escapeHtml(hop.source.kind)}</small></span><span class="hop-relation">${escapeHtml(hop.relation)} →</span><span><strong>${escapeHtml(traceLabel(hop.target))}</strong><small>${escapeHtml(hop.state)}${hop.via_definition ? ` · via ${escapeHtml(hop.via_definition)}` : ""}</small>${hop.evidence?.reason ? `<small class="hop-evidence">Evidence · ${escapeHtml(hop.evidence.reason)}</small>` : ""}${hop.write_evidence?.reason ? `<small class="hop-evidence">Write · ${escapeHtml(hop.write_evidence.reason)}</small>` : ""}</span></article>`).join("") || '<div class="empty-state"><p>No upstream hops found.</p></div>';
   } catch (error) { state.trace = null; state.traceOnCanvas = false; $("#show-trace-canvas").hidden = true; $("#lineage-status").className = "notice error"; $("#lineage-status").textContent = error.message; $("#lineage-origins").innerHTML = ""; $("#lineage-hops").innerHTML = ""; }
 }
 
@@ -1313,7 +1323,11 @@ async function createZone(event) {
 function switchView(view) {
   $$(".tab").forEach(button => button.classList.toggle("is-active", button.dataset.view === view));
   $$(".view").forEach(section => section.classList.toggle("is-active", section.id === `${view}-view`));
-  if (view === "graph" && state.cy) setTimeout(() => { state.cy.resize(); state.cy.fit(undefined, 70); }, 0);
+  if (view === "graph" && state.cy) setTimeout(() => {
+    state.cy.resize();
+    if (systemOverviewActive() && window.TarelAtlas?.active()) window.TarelAtlas.showSystems(state.cy);
+    else state.cy.fit(undefined, 70);
+  }, 0);
   if (view === "review" && !state.reviewData && !state.reviewLoading) loadReview();
   for (const panel of ["objects", "review-queue", "evidence"]) setPanel(panel, false);
 }
@@ -1327,21 +1341,63 @@ function setPanel(name, open) {
   if (open && name === "objects") $("#object-search").focus();
 }
 
+// The one place that decides what this session may write. Every write control carries
+// data-write="graph" or data-write="architecture"; without the permission it is not shown
+// at all, so a read-only session reads as reading instead of as a greyed-out form.
+const EDIT_COMMANDS = {graph: "tarel ui --edit", architecture: "tarel ui --architecture-edit"};
+
+function canWrite(surface = "graph") {
+  if (surface === "architecture") return Boolean(typeof arch !== "undefined" && arch.snapshot?.editable);
+  return Boolean(state.data?.editable);
+}
+
+function applyWritePermissions() {
+  document.body?.classList.toggle("can-write-graph", canWrite("graph"));
+  document.body?.classList.toggle("can-write-architecture", canWrite("architecture"));
+  renderModeChip();
+}
+
+// The chip names the mode and, when reading only, the command that allows changes.
+function renderModeChip() {
+  const architecture = Boolean(document.body?.classList.contains("architecture-mode"));
+  const surface = architecture ? "architecture" : "graph";
+  const editable = canWrite(surface);
+  const chip = $("#mode");
+  // The command is code, so the font cannot fuse "--" into a dash.
+  chip.innerHTML = !editable ? `Read only · <code>${escapeHtml(EDIT_COMMANDS[surface])}</code>`
+    : escapeHtml(architecture ? `Map editable · graph ${canWrite("graph") ? "editable" : "read-only"}` : "Edit enabled");
+  chip.title = editable ? "" : `Restart with ${EDIT_COMMANDS[surface]} to ${architecture ? "change the architecture map" : "record decisions and change metadata"}.`;
+  chip.className = `mode-badge${editable ? " edit" : ""}`;
+}
+
+// A decision without a written reason is recorded as exactly that, never as an invented one.
+const NO_REASON = {
+  approve: "Approved in the local UI; no reason given",
+  validate: "Approved in the local UI; no reason given",
+  reject: "Rejected in the local UI; no reason given",
+  save: "Edited in the local UI; no reason given",
+};
+
+function decisionReason(text, action) {
+  return String(text ?? "").trim() || NO_REASON[action] || NO_REASON.save;
+}
+
+const REASON_PLACEHOLDER = "Optional. Left empty, TAREL records that no reason was given.";
+
+function readField(label, value, className = "") {
+  return value ? `<div class="read-field${className ? ` ${className}` : ""}"><small>${escapeHtml(label)}</small><p>${escapeHtml(value)}</p></div>` : "";
+}
+
 function fact(label, value) { return `<div class="fact"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`; }
-function defaultVisibleObject() {
+// Only an explicit focus preselects an object. Otherwise the map stays whole and unfaded until someone chooses.
+function adoptFocusSelection() {
   const objectIds = new Set(state.focusSelection?.object_ids || []);
   const focusMember = state.focusSelection?.members
-    .filter(item => objectIds.has(item.id))
+    ?.filter(item => objectIds.has(item.id))
     .sort((left, right) => left.depth - right.depth || left.reference.localeCompare(right.reference))[0];
-  return focusMember?.id || mostConnectedObject(visibleObjects());
-}
-function mostConnectedObject(objects = state.data.objects) {
-  const allowed = new Set(objects.map(item => item.id));
-  const degree = new Map(objects.map(item => [item.id, 0]));
-  state.data.edges
-    .filter(edge => allowed.has(edge.source) && allowed.has(edge.target))
-    .forEach(edge => { degree.set(edge.source, (degree.get(edge.source) || 0) + 1); degree.set(edge.target, (degree.get(edge.target) || 0) + 1); });
-  return [...degree].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] || objects[0]?.id;
+  state.selectedId = focusMember?.id || null;
+  if (!state.selectedId) setPanel("inspector", false);
+  else if (state.structureLevel !== "systems" && !window.matchMedia("(max-width: 1100px)").matches) setPanel("inspector", true);
 }
 function annotationText(item) {
   const imported = [
@@ -1366,6 +1422,12 @@ function knowledgeRevisionState(item, used, available) {
   return current.revision === item.revision ? " · current" : " · changed since proposal";
 }
 function shellArg(value) { return `'${String(value).replaceAll("'", "'\\''")}'`; }
+function counted(count, noun) { return `${count} ${noun}${count === 1 ? "" : "s"}`; }
+// A decided table can stay queued for its fields; the badge then must not read as the entry's outcome.
+function queueStateLabel(item) {
+  const decided = item.state === "validated" || item.state === "rejected";
+  return item.pending_field_count && decided ? `Table ${stateLabel(item.state).toLowerCase()}` : stateLabel(item.state);
+}
 function stateLabel(value) { return ({draft: "Draft", review_required: "Review required", deferred: "Deferred", validated: "Approved", rejected: "Removed", missing: "Missing"})[value] || value; }
 function reviewActionLabel(value) { return ({validate: "Approved", reject: "Removed", defer: "Deferred", edit: "Edited"})[value] || value; }
 function lines(value) { return String(value || "").split("\n").map(item => item.trim()).filter(Boolean); }
@@ -1439,6 +1501,7 @@ $("#focus-selected-only").addEventListener("change", event => {
 });
 $("#apply-focuses").addEventListener("click", applyFocuses);
 $("#clear-focuses").addEventListener("click", clearFocuses);
+for (const id of ["#search-settings-toggle", "#filters-toggle"]) $(id).addEventListener("click", () => toggleSidebarPanel($(id)));
 $$('[data-kind]').forEach(button => button.addEventListener("click", () => { state.objectKind = button.dataset.kind; $$('[data-kind]').forEach(item => item.classList.toggle("is-active", item === button)); renderObjectList(); }));
 $$('.tab').forEach(button => button.addEventListener("click", () => switchView(button.dataset.view)));
 $$('.review-filter').forEach(button => button.addEventListener("click", () => { state.reviewFilter = button.dataset.reviewFilter; $$('.review-filter').forEach(item => item.classList.toggle("is-active", item === button)); renderReview(); }));
@@ -1466,6 +1529,7 @@ $$('[data-canvas-mode]').forEach(button => button.addEventListener("click", () =
   renderGraph();
 }));
 $("#close-lineage").addEventListener("click", () => { $("#lineage-drawer").hidden = true; });
+bindLineageControls();
 $("#lineage-form").addEventListener("submit", event => { event.preventDefault(); trace($("#lineage-reference").value); });
 $("#add-lineage").addEventListener("click", () => openLineageDialog("job"));
 $("#add-lineage-drawer").addEventListener("click", () => openLineageDialog("job"));

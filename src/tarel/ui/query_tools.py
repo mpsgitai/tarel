@@ -4,29 +4,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
-from tarel.application import (
+from tarel.context.application import (
     compare_context_use_case,
     compile_context_prefix_use_case,
     compile_context_use_case,
     compile_workspace_context_prefix_use_case,
     compile_workspace_context_use_case,
     describe_context_use_case,
-    load_focus_use_case,
-    load_workspace_use_case,
+)
+from tarel.context.compiler import ContextFailure
+from tarel.context.output import canonical_hash
+from tarel.expansion.application import expand_context_use_case
+from tarel.expansion.contracts import ExpansionTarget
+from tarel.focus.application import load_focus_use_case
+from tarel.retrieval.search_application import (
     resolve_graph_object_scope_use_case,
-    resolve_workspace_scope_use_case,
     search_graph_use_case,
     search_workspace_use_case,
 )
-from tarel.context import ContextFailure
-from tarel.context_output import canonical_hash
-from tarel.expansion.application import expand_context_use_case
-from tarel.expansion.contracts import ExpansionTarget
-from tarel.graph.store import FileGraphStore
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.search import SearchFilters
+from tarel.workspaces.application import load_workspace_use_case, resolve_workspace_scope_use_case
 
 _SCOPE_NOTICE = (
     "The server launch scope is the outer boundary. An explicit working scope can narrow "
@@ -50,6 +50,17 @@ class UIQueryFailure(RuntimeError):
         super().__init__(message)
         self.code = code
         self.status = status
+
+
+class ScopeSelectors(TypedDict):
+    """The workspace selectors every scoped use case accepts as keyword arguments."""
+
+    systems: tuple[str, ...]
+    graphs: tuple[str, ...]
+    areas: tuple[str, ...]
+    schemas: tuple[str, ...]
+    zones: tuple[str, ...]
+    focuses: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +99,7 @@ class UIQueryScope:
                     "invalid_query_scope", "Query selectors require a workspace launch scope."
                 )
 
-    def selectors(self) -> dict[str, tuple[str, ...]]:
+    def selectors(self) -> ScopeSelectors:
         return {
             "systems": self.systems, "graphs": self.graphs, "areas": self.areas,
             "schemas": self.schemas, "zones": self.zones, "focuses": self.focuses,
@@ -98,14 +109,14 @@ class UIQueryScope:
 def query_scope_snapshot(
     scope: UIQueryScope, *, scope_objects: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Expose exact source revisions without inventing a viewport selection contract."""
     if scope.workspace:
         resolved = resolve_workspace_scope_use_case(
             scope.workspace, **scope.selectors(), objects=scope_objects, runtime=runtime,
         )
         names = resolved.graph_names
-        selection: dict[str, object] = {
+        selection: dict[str, Any] = {
             "mode": "workspace", "workspace": scope.workspace,
             "selection": resolved.selection.to_dict(),
             "graphs": list(names), "scope_hash": resolved.scope_hash,
@@ -122,7 +133,7 @@ def query_scope_snapshot(
         if scope_objects:
             _graph_scope_ids(scope.graph, scope_objects, runtime=runtime)
             selection["objects"] = list(scope_objects)
-    store = runtime.graph_store() if runtime else FileGraphStore()
+    store = resolve_runtime(runtime).graph_store()
     revisions = {name: store.header(name).revision for name in names}
     for name in scope.focuses:
         revisions[f"focus:{name}"] = load_focus_use_case(name, runtime=runtime).revision
@@ -137,7 +148,7 @@ def query_scope_snapshot(
 
 def search_metadata(
     scope: UIQueryScope, payload: dict[str, Any], *, runtime: TarelRuntime | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     _request_keys(
         payload,
         {
@@ -189,7 +200,7 @@ def search_metadata(
 
 def preview_context(
     scope: UIQueryScope, payload: dict[str, Any], *, runtime: TarelRuntime | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     _request_keys(
         payload,
         {
@@ -227,7 +238,7 @@ def preview_context(
         raise UIQueryFailure(
             "invalid_previous_context", "Previous context must be a complete context packet."
         )
-    budgets = {
+    budgets: dict[str, Any] = {
         name: _integer(payload, name, default=default, minimum=minimum, maximum=maximum)
         for name, (default, minimum, maximum) in _BUDGETS.items()
     }
@@ -278,7 +289,7 @@ def preview_context(
         )
     _check_unchanged(scope, before, runtime, scope_objects=scope_objects)
     packet = result.to_dict()
-    response: dict[str, object] = {
+    response: dict[str, Any] = {
         **before,
         "brief": describe_context_use_case(result).to_dict(),
         "packet": packet,
@@ -293,7 +304,7 @@ def preview_context(
 
 def preview_expansion(
     scope: UIQueryScope, payload: dict[str, Any], *, runtime: TarelRuntime | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Expand fields for physical objects already present in a validated context packet."""
     _request_keys(
         payload,
@@ -433,7 +444,7 @@ def _graph_scope_ids(
                 "invalid_query_scope", "Working-scope object belongs to another graph."
             )
         object_ids.append(object_id)
-    store = runtime.graph_store() if runtime else FileGraphStore()
+    store = resolve_runtime(runtime).graph_store()
     graph = store.load(graph_name)
     known = {node.id for node in graph.nodes if node.type in {"table", "view"}}
     if set(object_ids) - known:
@@ -442,7 +453,7 @@ def _graph_scope_ids(
 
 
 def _check_expected(
-    payload: dict[str, Any], snapshot: dict[str, object], *, required: bool,
+    payload: dict[str, Any], snapshot: dict[str, Any], *, required: bool,
 ) -> None:
     if not required and not (_EXPECTED_KEYS & payload.keys()):
         return
@@ -462,7 +473,7 @@ def _check_expected(
 
 
 def _check_unchanged(
-    scope: UIQueryScope, before: dict[str, object], runtime: TarelRuntime | None,
+    scope: UIQueryScope, before: dict[str, Any], runtime: TarelRuntime | None,
     *, scope_objects: tuple[str, ...] = (),
 ) -> None:
     if query_scope_snapshot(

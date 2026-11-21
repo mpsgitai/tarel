@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tarel.atomic import write_atomic
 from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.local import DEFAULT_MODEL_NAME, default_model_path, model_spec
 
@@ -149,15 +148,8 @@ def save_settings(runtime: TarelRuntime | None, settings: RetrievalSettings) -> 
             "Use a client without an override to save project settings."
         )
     path = settings_path(runtime)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".retrieval-", suffix=".json")
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(settings.to_dict(), stream, indent=2, sort_keys=True)
-            stream.write("\n")
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+    payload = json.dumps(settings.to_dict(), indent=2, sort_keys=True)
+    write_atomic(path, payload + "\n", prefix=".retrieval-")
     return settings.to_dict()
 
 

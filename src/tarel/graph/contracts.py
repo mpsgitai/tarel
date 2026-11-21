@@ -5,15 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from tarel.errors import TarelError
+
 ANNOTATION_STATES = frozenset(
     {"deferred", "draft", "rejected", "review_required", "validated"}
 )
 
 
-class GraphFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+SYNC_ORIGIN_KEY = "sync_origin"
+
+
+class GraphFailure(TarelError):
+    """Raised when a graph operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +118,7 @@ class GraphNode:
     id: str
     type: str
     label: str
-    metadata: dict[str, object]
+    metadata: dict[str, Any]
     annotation: GraphAnnotation | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -150,7 +153,7 @@ class GraphEdge:
     source_id: str
     target_id: str
     type: str
-    metadata: dict[str, object] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -188,6 +191,14 @@ class GraphDocument:
 
     def node_by_id(self) -> dict[str, GraphNode]:
         return {node.id: node for node in self.nodes}
+
+    def sync_origin(self) -> dict[str, Any] | None:
+        """Who publishes this graph, when another installation owns its observations."""
+        for node in self.nodes:
+            if node.type == "catalog":
+                origin = node.metadata.get(SYNC_ORIGIN_KEY)
+                return origin if isinstance(origin, dict) else None
+        return None
 
     def to_dict(self) -> dict[str, object]:
         return {

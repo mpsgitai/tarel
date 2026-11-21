@@ -7,15 +7,15 @@ from collections.abc import Hashable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
+
 WORKSPACE_CONTRACT_VERSION = "tarel.workspace.v0.1"
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _RELATIONSHIP_STATES = frozenset({"draft", "rejected", "validated"})
 
 
-class WorkspaceFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class WorkspaceFailure(TarelError):
+    """Raised when a workspace operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 
-from tarel.file_lock import state_write_lock
+from tarel.atomic import write_atomic
 from tarel.focus.contracts import FocusDocument, FocusFailure, validate_focus
 
 _FOCUS_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -23,21 +21,9 @@ class FileFocusStore:
         path = self.path(document.name)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(document.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".focus-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            with state_write_lock(self.root.parent):
-                os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".focus-", lock_root=self.root.parent)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise FocusFailure(
                 "focus_save_failed",
                 f"Could not save focus: {document.name}",

@@ -79,10 +79,10 @@ class OpenRouterProvider:
                 "invalid_provider_response",
                 "OpenRouter returned an unreadable response.",
             ) from exc
-        return _structured_content(response_data, provider_label="OpenRouter")
+        return structured_content(response_data, provider_label="OpenRouter")
 
 
-def _structured_content(data: Any, *, provider_label: str) -> dict[str, object]:
+def structured_content(data: Any, *, provider_label: str) -> dict[str, object]:
     try:
         message = data["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:

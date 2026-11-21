@@ -6,15 +6,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from tarel.application import (
-    GraphBuildResult,
-    GraphRefreshResult,
-    build_graph_use_case,
+from tarel.connectors.application import (
     discover_catalog_use_case,
-    load_graph_use_case,
     probe_connector_use_case,
     profile_connector_use_case,
-    refresh_graph_use_case,
     sample_connector_use_case,
 )
 from tarel.connectors.contracts import (
@@ -26,10 +21,13 @@ from tarel.connectors.contracts import (
     SampleResult,
 )
 from tarel.connectors.host import check_connector
-from tarel.enrichment import (
-    EnrichmentFailure,
-    EnrichmentWorkfile,
-    compile_enrichment_workfile,
+from tarel.enrichment import EnrichmentFailure, EnrichmentWorkfile, compile_enrichment_workfile
+from tarel.graph.application import (
+    GraphBuildResult,
+    GraphRefreshResult,
+    build_graph_use_case,
+    load_graph_use_case,
+    refresh_graph_use_case,
 )
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphNode
 from tarel.graph.revision import graph_revision

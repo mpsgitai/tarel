@@ -26,8 +26,20 @@ from tarel.object_families.contracts import (
     review_family,
 )
 from tarel.object_families.store import FileObjectFamilyStore
-from tarel.ui.presentation import browser_graph, browser_workspace
-from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+    UIFailure,
+)
+from tarel.ui.payloads.graph import (
+    browser_graph,
+    browser_workspace,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceSystem, Zone, ZoneMember
 from tarel.workspaces.scope import ResolvedScope, ResolvedScopeObject, ScopeSelection
 
@@ -118,9 +130,13 @@ try {
     def test_member_edges_are_counted_but_not_promoted_to_family_edges(self) -> None:
         graph = _graph()
         objects = [node for node in graph.nodes if node.type == "table"]
-        graph = replace(graph, edges=graph.edges + (
-            GraphEdge("example-join", objects[0].id, objects[1].id, "foreign_key", {}),
-        ))
+        graph = replace(
+            graph,
+            edges=(
+                *graph.edges,
+                GraphEdge("example-join", objects[0].id, objects[1].id, "foreign_key", {}),
+            ),
+        )
         payload = browser_graph(
             graph, family_mode="confirmed_only", object_families=(_family(graph),)
         )
@@ -137,14 +153,28 @@ try {
         workspace, scope = _workspace(graph, allowed)
         # Workspace metadata itself may name members excluded by this scope.
         system = workspace.systems[0]
-        workspace = replace(workspace, systems=(replace(system, zones=(Zone(
-            name="selected", members=tuple(
-                ZoneMember(graph.name, member_id) for member_id in family.member_ids
+        workspace = replace(
+            workspace,
+            systems=(
+                replace(
+                    system,
+                    zones=(
+                        Zone(
+                            name="selected",
+                            members=tuple(
+                                ZoneMember(graph.name, member_id) for member_id in family.member_ids
+                            ),
+                        ),
+                    ),
+                ),
             ),
-        ),)),))
+        )
         payload = browser_workspace(
-            (graph,), scope, workspace=workspace,
-            family_mode="confirmed_only", object_families=(family,),
+            (graph,),
+            scope,
+            workspace=workspace,
+            family_mode="confirmed_only",
+            object_families=(family,),
         )
         self.assertEqual(len(payload["objects"]), 1)
         item = payload["objects"][0]
@@ -166,8 +196,12 @@ try {
         for marker in ('id="family-mode"', 'value="confirmed_only"', 'value="include_candidates"'):
             self.assertIn(marker, html)
         for marker in (
-            '"/api/families/members"', "limit: 50", "renderFamilyInspector", "exploratory_only",
-            "Disable object families before editing zones", 'node[type = "object_family"]',
+            '"/api/families/members"',
+            "limit: 50",
+            "renderFamilyInspector",
+            "exploratory_only",
+            "Disable object families before editing zones",
+            'node[type = "object_family"]',
         ):
             self.assertIn(marker, script)
 
@@ -211,7 +245,11 @@ process.stdout.write(JSON.stringify(elements.get('#inspector').children));
 """
         result = subprocess.run(
             [shutil.which("node"), "-e", renderer, str(script)],
-            input=json.dumps(fixture), capture_output=True, text=True, check=True, timeout=10,
+            input=json.dumps(fixture),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
         )
         self.assertIn("Scope members", result.stdout)
         self.assertIn("Load members", result.stdout)
@@ -233,9 +271,9 @@ class ObjectFamilyBackendTests(TestCase):
         self.graph_store.save(self.graph)
         self.family_store.save(self.family)
         for target, value in (
-            ("tarel.object_families.application.FileObjectFamilyStore", self.family_store),
-            ("tarel.object_families.application.FileGraphStore", self.graph_store),
-            ("tarel.application.FileGraphStore", self.graph_store),
+            ("tarel.object_families.store.FileObjectFamilyStore", self.family_store),
+            ("tarel.runtime.FileGraphStore", self.graph_store),
+            ("tarel.runtime.FileGraphStore", self.graph_store),
         ):
             self.stack.enter_context(patch(target, return_value=value))
         self.backend = TarelUIBackend(UIConfig(graph=self.graph.name))
@@ -246,8 +284,11 @@ class ObjectFamilyBackendTests(TestCase):
 
     def _request(self, **updates):
         return {
-            "graph": self.graph.name, "family_id": self.family.id,
-            "revision": self.family.revision, "mode": "confirmed_only", **updates,
+            "graph": self.graph.name,
+            "family_id": self.family.id,
+            "revision": self.family.revision,
+            "mode": "confirmed_only",
+            **updates,
         }
 
     def test_default_does_not_touch_family_store_and_modes_do_not_mutate_backend(self) -> None:
@@ -328,24 +369,36 @@ class ObjectFamilyBackendTests(TestCase):
 
 
 def _graph(count=3, *, namespaces=False):
-    return build_graph_from_catalog("estate", CatalogResult(
-        connector="test", source_type="database", catalog="Demo", dialect="sqlite",
-        objects=tuple(
-            CatalogObject(
-                namespace=f"tenant_{index % 2}" if namespaces else "sales",
-                name=f"sales_{index:05d}", kind="table",
-                fields=(CatalogField("id", 1, "integer", False),), primary_key=("id",),
-            ) for index in range(count)
+    return build_graph_from_catalog(
+        "estate",
+        CatalogResult(
+            connector="test",
+            source_type="database",
+            catalog="Demo",
+            dialect="sqlite",
+            objects=tuple(
+                CatalogObject(
+                    namespace=f"tenant_{index % 2}" if namespaces else "sales",
+                    name=f"sales_{index:05d}",
+                    kind="table",
+                    fields=(CatalogField("id", 1, "integer", False),),
+                    primary_key=("id",),
+                )
+                for index in range(count)
+            ),
         ),
-    ))
+    )
 
 
 def _family(graph):
     candidate = ObjectFamily(
-        graph_name=graph.name, graph_revision=physical_graph_revision(graph),
-        id="sales-family", name="sales", member_ids=tuple(
-            node.id for node in graph.nodes if node.type == "table"
-        ), schema=(FamilyField("id", "integer", False),), grain=("id", "partition"),
+        graph_name=graph.name,
+        graph_revision=physical_graph_revision(graph),
+        id="sales-family",
+        name="sales",
+        member_ids=tuple(node.id for node in graph.nodes if node.type == "table"),
+        schema=(FamilyField("id", "integer", False),),
+        grain=("id", "partition"),
         attributes=(FamilyAttribute("partition", "object_name", "sales_"),),
         producer="test_harness",
     )
@@ -354,19 +407,38 @@ def _family(graph):
 
 def _workspace(graph, allowed):
     nodes = graph.node_by_id()
-    workspace = WorkspaceDocument(name="estate", systems=(WorkspaceSystem(
-        name="analytics", graphs=(graph.name,), zones=(Zone(
-            name="selected",
-            members=tuple(ZoneMember(graph.name, member_id) for member_id in allowed),
-        ),),
-    ),))
+    workspace = WorkspaceDocument(
+        name="estate",
+        systems=(
+            WorkspaceSystem(
+                name="analytics",
+                graphs=(graph.name,),
+                zones=(
+                    Zone(
+                        name="selected",
+                        members=tuple(ZoneMember(graph.name, member_id) for member_id in allowed),
+                    ),
+                ),
+            ),
+        ),
+    )
     scope = ResolvedScope(
-        workspace=workspace.name, selection=ScopeSelection(), graph_names=(graph.name,),
-        scope_hash="0" * 64, objects=tuple(
+        workspace=workspace.name,
+        selection=ScopeSelection(),
+        graph_names=(graph.name,),
+        scope_hash="0" * 64,
+        objects=tuple(
             ResolvedScopeObject(
-                graph.name, "analytics", None, nodes[member_id].metadata["namespace"],
-                member_id, nodes[member_id].label, nodes[member_id].type, ("analytics:selected",),
-            ) for member_id in allowed
+                graph.name,
+                "analytics",
+                None,
+                nodes[member_id].metadata["namespace"],
+                member_id,
+                nodes[member_id].label,
+                nodes[member_id].type,
+                ("analytics:selected",),
+            )
+            for member_id in allowed
         ),
     )
     return workspace, scope

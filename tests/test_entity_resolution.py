@@ -9,7 +9,9 @@ from unittest import TestCase
 
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
-from tarel.entity_resolution.contracts import EntityResolutionFailure
+from tarel.entity_resolution.contracts import (
+    EntityResolutionFailure,
+)
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.revision import graph_revision
 from tarel.sdk import EntityResolutionCandidate, Tarel

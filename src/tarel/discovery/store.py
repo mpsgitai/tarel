@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Protocol
 
-from tarel.discovery.contracts import DiscoveryFailure, DiscoveryRun, validate_discovery_run
+from tarel.atomic import write_atomic
+from tarel.discovery.contracts import (
+    DiscoveryFailure,
+)
 from tarel.discovery.coverage import (
     QueryLinkedCoverageFailure,
     QueryLinkedEntityCoverage,
+)
+from tarel.discovery.runs import (
+    DiscoveryRun,
+    validate_discovery_run,
 )
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -43,21 +48,9 @@ class FileDiscoveryStore:
         path = self.path(run.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(run.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".discovery-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".discovery-")
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise DiscoveryFailure(
                 "discovery_save_failed", f"Could not save discovery run: {run.id}"
             ) from exc
@@ -107,21 +100,9 @@ class FileDiscoveryStore:
         payload = json.dumps(
             coverage.to_dict(), ensure_ascii=False, indent=2, sort_keys=True
         )
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".query-linked-coverage-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".query-linked-coverage-")
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise DiscoveryFailure(
                 "discovery_save_failed",
                 f"Could not save query-linked coverage: {coverage.run_id}",

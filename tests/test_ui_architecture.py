@@ -18,54 +18,63 @@ from tarel.ui.architecture_store import (
     endpoint_members,
     validate_document,
 )
-from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+    UIFailure,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceSystem
 
 
 def fixture():
-    return dict(
-        format=FORMAT,
-        workspace="demo",
-        layers=[dict(id="source", label="Source", color="#abcdef")],
-        nodes=[
-            dict(
-                id=f"asset::{graph}::source",
-                label=graph,
-                graph=graph,
-                area="source",
-                system=system,
-                layer="source",
-                source_type="sqlite",
-                method="fixture",
-                objects=count,
-                namespaces=["main"],
-            )
+    return {
+        "format": FORMAT,
+        "workspace": "demo",
+        "layers": [{"id": "source", "label": "Source", "color": "#abcdef"}],
+        "nodes": [
+            {
+                "id": f"asset::{graph}::source",
+                "label": graph,
+                "graph": graph,
+                "area": "source",
+                "system": system,
+                "layer": "source",
+                "source_type": "sqlite",
+                "method": "fixture",
+                "objects": count,
+                "namespaces": ["main"],
+            }
             for graph, system, count in (("a", "one", 2), ("b", "two", 3), ("empty", "two", 0))
         ],
-        collections=[
-            dict(
-                id="all",
-                label="All",
-                description="Test collection",
-                members=["system::one", "system::two"],
-            )
+        "collections": [
+            {
+                "id": "all",
+                "label": "All",
+                "description": "Test collection",
+                "members": ["system::one", "system::two"],
+            }
         ],
-        connections=[],
-        positions={},
-    )
+        "connections": [],
+        "positions": {},
+    }
 
 
 def connection():
-    return dict(
-        id="test",
-        source="graph::a",
-        target="graph::b",
-        label="Test planned flow",
-        state="planned",
-        kind="data_flow",
-        reason="Intent only",
-        evidence="test plan",
-    )
+    return {
+        "id": "test",
+        "source": "graph::a",
+        "target": "graph::b",
+        "label": "Test planned flow",
+        "state": "planned",
+        "kind": "data_flow",
+        "reason": "Intent only",
+        "evidence": "test plan",
+    }
 
 
 class ArchitectureTests(TestCase):
@@ -106,20 +115,20 @@ class ArchitectureTests(TestCase):
         self.assertEqual(len(self.store.snapshot()["document"]["connections"]), 1)
 
     def test_layout_bounds_no_hidden_node_loss_and_collection_overlap(self):
-        self.mutate("layout", positions={"graph::a": dict(x=20, y=40)})
-        self.mutate("layout", positions={"graph::b": dict(x=-20, y=70)})
+        self.mutate("layout", positions={"graph::a": {"x": 20, "y": 40}})
+        self.mutate("layout", positions={"graph::b": {"x": -20, "y": 70}})
         self.assertEqual(len(self.store.snapshot()["document"]["positions"]), 2)
         self.mutate(
             "collection",
-            item=dict(
-                id="second",
-                label="Overlap",
-                description="Intentional",
-                members=["system::one", "graph::b"],
-            ),
+            item={
+                "id": "second",
+                "label": "Overlap",
+                "description": "Intentional",
+                "members": ["system::one", "graph::b"],
+            },
         )
         self.assertEqual(len(self.store.snapshot()["document"]["collections"]), 2)
-        for position in (dict(x=float("nan"), y=2), dict(x=1e9, y=0), dict(x=True, y=0)):
+        for position in ({"x": float("nan"), "y": 2}, {"x": 1e9, "y": 0}, {"x": True, "y": 0}):
             with self.assertRaises(ArchitectureFailure):
                 self.mutate("layout", positions={"graph::a": position})
         self.mutate("collection-delete", id="second")
@@ -181,7 +190,7 @@ class ArchitectureTests(TestCase):
         backend = TarelUIBackend(UIConfig(workspace="demo", architecture_file=self.path))
         with (
             patch.object(backend, "_bootstrap", return_value={"graphs": [{"name": "a"}]}),
-            patch("tarel.ui.server.load_workspace_use_case", return_value=WorkspaceDocument(
+            patch("tarel.ui.backend.load_workspace_use_case", return_value=WorkspaceDocument(
                 name="demo", systems=(WorkspaceSystem(name="one", graphs=("a",)),),
             )),
             self.assertRaises(ArchitectureFailure) as caught,
@@ -192,7 +201,7 @@ class ArchitectureTests(TestCase):
             patch.object(backend, "_bootstrap", return_value={
                 "graphs": [{"name": name} for name in ("a", "b")],
             }),
-            patch("tarel.ui.server.load_workspace_use_case", return_value=WorkspaceDocument(
+            patch("tarel.ui.backend.load_workspace_use_case", return_value=WorkspaceDocument(
                 name="demo", systems=(
                     WorkspaceSystem(name="one", graphs=("a",)),
                     WorkspaceSystem(name="two", graphs=("b", "empty")),
@@ -220,7 +229,7 @@ class ArchitectureTests(TestCase):
             with urlopen(f"{base}/{asset}") as response:
                 self.assertEqual(response.status, 200)
         payload = json.dumps(
-            dict(revision=self.store.snapshot()["revision"], item=connection())
+            {"revision": self.store.snapshot()["revision"], "item": connection()}
         ).encode()
         with self.assertRaises(HTTPError) as caught:
             urlopen(

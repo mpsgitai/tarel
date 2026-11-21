@@ -9,7 +9,6 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from tarel.annotations.review import decide_annotation
-from tarel.application import context_packet_impact_use_case, refresh_graph_use_case
 from tarel.cli import main
 from tarel.connectors.contracts import (
     CatalogField,
@@ -17,8 +16,14 @@ from tarel.connectors.contracts import (
     CatalogRelationship,
     CatalogResult,
 )
-from tarel.context import compile_context
-from tarel.context_packets import context_packet_from_dict, context_packet_impact
+from tarel.context.application import (
+    context_packet_impact_use_case,
+)
+from tarel.context.compiler import compile_context
+from tarel.context.packets import context_packet_from_dict, context_packet_impact
+from tarel.graph.application import (
+    refresh_graph_use_case,
+)
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.change_store import FileGraphChangeStore
 from tarel.graph.contracts import GraphAnnotation, GraphFailure
@@ -100,7 +105,7 @@ class ChangeRadarTests(TestCase):
             os.utime(path, ns=(stable_time, stable_time))
 
             with patch(
-                "tarel.application.discover_catalog_use_case",
+                "tarel.graph.application.discover_catalog_use_case",
                 return_value=_catalog(changed=False),
             ):
                 result = refresh_graph_use_case(graph.name, runtime=runtime)
@@ -126,12 +131,12 @@ class ChangeRadarTests(TestCase):
             original = path.read_bytes()
 
             with patch(
-                "tarel.application.discover_catalog_use_case",
+                "tarel.graph.application.discover_catalog_use_case",
                 return_value=sales_catalog,
             ), self.assertRaises(GraphFailure) as partial:
                 refresh_graph_use_case(graph.name, namespace="sales", runtime=runtime)
             with patch(
-                "tarel.application.discover_catalog_use_case",
+                "tarel.graph.application.discover_catalog_use_case",
                 return_value=empty_catalog,
             ), self.assertRaises(GraphFailure) as empty:
                 refresh_graph_use_case(graph.name, runtime=runtime)
@@ -153,7 +158,7 @@ class ChangeRadarTests(TestCase):
             runtime.graph_store().save(graph)
 
             with patch(
-                "tarel.application.discover_catalog_use_case",
+                "tarel.graph.application.discover_catalog_use_case",
                 return_value=sales_catalog,
             ):
                 result = refresh_graph_use_case(
@@ -180,10 +185,10 @@ class ChangeRadarTests(TestCase):
 
             with (
                 patch(
-                    "tarel.application.discover_catalog_use_case",
+                    "tarel.graph.application.discover_catalog_use_case",
                     return_value=_catalog(changed=True),
                 ),
-                patch("tarel.application.load_provider", return_value=provider),
+                patch("tarel.graph.application.load_provider", return_value=provider),
             ):
                 result = refresh_graph_use_case(
                     "warehouse",
@@ -236,10 +241,10 @@ class ChangeRadarTests(TestCase):
 
             with (
                 patch(
-                    "tarel.application.discover_catalog_use_case",
+                    "tarel.graph.application.discover_catalog_use_case",
                     return_value=_catalog(changed=False),
                 ),
-                patch("tarel.application.load_provider") as load_provider,
+                patch("tarel.graph.application.load_provider") as load_provider,
             ):
                 result = refresh_graph_use_case(
                     "warehouse",
@@ -257,11 +262,11 @@ class ChangeRadarTests(TestCase):
 
             with (
                 patch(
-                    "tarel.application.discover_catalog_use_case",
+                    "tarel.graph.application.discover_catalog_use_case",
                     return_value=_catalog(changed=True),
                 ),
                 patch(
-                    "tarel.application.load_provider",
+                    "tarel.graph.application.load_provider",
                     side_effect=ProviderFailure("provider_unavailable", "offline"),
                 ),
                 self.assertRaises(ProviderFailure),

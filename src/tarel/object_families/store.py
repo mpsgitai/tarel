@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Any, Protocol
 
+from tarel.atomic import write_atomic
 from tarel.object_families.contracts import ObjectFamily, ObjectFamilyFailure, validate_family
 
 _PATH_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -32,22 +31,9 @@ class FileObjectFamilyStore:
         validate_family(family)
         path = self.path(family.graph_name, family.id)
         payload = json.dumps(family.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
-        temporary: Path | None = None
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, temporary_name = tempfile.mkstemp(
-                dir=path.parent, prefix=".family-", suffix=".tmp", text=True
-            )
-            temporary = Path(temporary_name)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                os.fchmod(handle.fileno(), 0o600)
-                handle.write(payload + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".family-", durable=True)
         except OSError as exc:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
             raise ObjectFamilyFailure(
                 "object_family_save_failed", "Could not save object-family declaration."
             ) from exc

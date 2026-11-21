@@ -5,22 +5,30 @@ from __future__ import annotations
 import hashlib
 
 from tarel.discovery.contracts import (
-    DiscoveryCandidate,
     DiscoveryFailure,
+)
+from tarel.discovery.programs import (
+    DiscoveryProgram,
+)
+from tarel.discovery.runs import (
+    DiscoveryCandidate,
     DiscoveryMetrics,
     DiscoveryObservation,
-    DiscoveryProgram,
     DiscoveryRun,
+)
+from tarel.entity_resolution.candidates import (
+    EntityResolutionCandidate,
+    validate_entity_resolution_candidate,
 )
 from tarel.entity_resolution.contracts import (
     ENTITY_RESOLUTION_CONTRACT_VERSION,
-    EntityResolutionCandidate,
+)
+from tarel.entity_resolution.evidence import (
     EntityResolutionEvidence,
     EntityResolutionProvenance,
     EntityResolutionQuality,
     SelfEntityMatch,
     entity_resolution_quality_rating,
-    validate_entity_resolution_candidate,
 )
 from tarel.graph.contracts import GraphDocument
 from tarel.relationships.core import RelationshipFailure, resolve_field
