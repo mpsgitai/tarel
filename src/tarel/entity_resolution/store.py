@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Protocol
 
-from tarel.entity_resolution.contracts import (
+from tarel.atomic import write_atomic
+from tarel.entity_resolution.candidates import (
     EntityResolutionCandidate,
-    EntityResolutionFailure,
     validate_entity_resolution_candidate,
+)
+from tarel.entity_resolution.contracts import (
+    EntityResolutionFailure,
 )
 
 _CANDIDATE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -42,21 +43,9 @@ class FileEntityResolutionStore:
             indent=2,
             sort_keys=True,
         )
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".entity-resolution-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".entity-resolution-")
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise EntityResolutionFailure(
                 "entity_resolution_save_failed",
                 f"Could not save entity-resolution candidate: {candidate.id}",

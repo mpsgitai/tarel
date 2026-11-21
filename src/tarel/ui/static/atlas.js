@@ -168,7 +168,7 @@
           const name = String(node.data("label") ?? "");
           node.data({atW: Math.round(Math.max(128, Math.min(270, name.length * 7.2 + 48))), atH: 34, atName: name});
         } else if (type === "asset") node.data({atW: 34, atH: 34, atName: String(node.data("label") ?? "")});
-        else if (type === "system-summary") node.data({atW: 272, atH: 150});
+        else if (type === "system-summary") node.data({atW: SYSTEM_CARD.w, atH: SYSTEM_CARD.h});
         else if (type === "architecture-card") node.data({atW: 228, atH: 104});
         else if (type === "architecture-anchor") node.data({atW: 1, atH: 1});
         else if (GROUP_TYPES.has(type) || type === "architecture-layer") {
@@ -379,16 +379,26 @@
     if (result) cy.batch(() => result.place(0, 0));
   }
 
+  // The system overview is a list of cards, not a picture: columns follow the width at a
+  // readable zoom, and further rows are a scroll away instead of being shrunk into view.
+  const SYSTEM_CARD = {w: 236, h: 118, gapX: 20, gapY: 18};
+  const READABLE_ZOOM = .9, OVERVIEW_PAD = 28;
+
   function arrangeSystems(cy) {
     const nodes = cy.nodes('[type = "system-summary"]').toArray();
-    const width = Math.max(320, cy.width()), height = Math.max(240, cy.height());
-    let best = {columns: 1, scale: 0};
-    for (let columns = 1; columns <= nodes.length; columns += 1) {
-      const rows = Math.ceil(nodes.length / columns);
-      const scale = Math.min((width - 80) / (columns * 300), (height - 80) / (rows * 178));
-      if (scale > best.scale) best = {columns, scale};
-    }
-    cy.batch(() => nodes.forEach((node, i) => node.position({x: (i % best.columns) * 300, y: Math.floor(i / best.columns) * 178})));
+    const slotW = SYSTEM_CARD.w + SYSTEM_CARD.gapX, slotH = SYSTEM_CARD.h + SYSTEM_CARD.gapY;
+    const usable = Math.max(SYSTEM_CARD.w, cy.width() - 2 * OVERVIEW_PAD);
+    const columns = Math.max(1, Math.min(nodes.length, Math.floor((usable + SYSTEM_CARD.gapX * READABLE_ZOOM) / (slotW * READABLE_ZOOM))));
+    cy.batch(() => nodes.forEach((node, i) => node.position({x: (i % columns) * slotW, y: Math.floor(i / columns) * slotH})));
+  }
+
+  function showSystemsReadable(cy) {
+    cy.resize();
+    const box = cy.elements(":visible").boundingBox();
+    if (!box.w) return;
+    const zoom = Math.min(1.1, (cy.width() - 2 * OVERVIEW_PAD) / box.w);
+    cy.zoom(zoom);
+    cy.pan({x: (cy.width() - box.w * zoom) / 2 - box.x1 * zoom, y: OVERVIEW_PAD - box.y1 * zoom});
   }
 
   function arrange(cy, kind) {
@@ -398,13 +408,36 @@
     if (kind === "architecture") { clampZoom(cy); return; }
     cy.nodes().stop(true, false);
     cy.stop(true, false);
+    if (kind === "lineage" && restoreLineageLayout(cy)) { cy.scratch("_atlasLayered", true); return; }
     if (kind === "structure") arrangeStructure(cy);
     else if (kind === "lineage") arrangeLineage(cy);
     else if (kind === "systems") arrangeSystems(cy);
     cy.scratch("_atlasLayered", layered);
     const focus = cy.elements(".trace-focus");
-    cy.fit(focus.length ? focus : cy.elements(":visible"), kind === "systems" ? 40 : 64);
-    clampZoom(cy);
+    const fit = () => {
+      if (cy !== current || cy.destroyed()) return;
+      if (kind === "systems") { showSystemsReadable(cy); return; }
+      fitClearOfOverlays(cy, focus.length ? focus : cy.elements(":visible"), 64);
+      clampZoom(cy);
+    };
+    fit();
+    // The toolbar settles its final height only after this render; fit again against the real canvas.
+    requestAnimationFrame(fit);
+  }
+
+  // cy.fit pads evenly, but the legend and zoom controls float over the bottom of the canvas.
+  function fitClearOfOverlays(cy, elements, padding) {
+    cy.resize();
+    cy.fit(elements, padding);
+    const box = cy.container().getBoundingClientRect();
+    const tops = [...document.querySelectorAll(".at-legend, .canvas-zoom")]
+      .filter(overlay => overlay.getClientRects().length)
+      .map(overlay => overlay.getBoundingClientRect().top - box.top);
+    if (!tops.length) return;
+    const limit = Math.min(...tops) - 8;
+    const bottom = elements.renderedBoundingBox().y2;
+    if (bottom <= limit || limit <= padding) return;
+    cy.zoom({level: cy.zoom() * (limit - padding) / (bottom - padding), renderedPosition: {x: cy.width() / 2, y: padding}});
   }
 
   // The neighbour view (app focusSelected) uses a ring; Atlas reads it as a flow:
@@ -512,6 +545,13 @@
       {selector: 'edge[type = "lineage"]', style: {"line-color": t.edgeStrong, "target-arrow-color": t.edgeStrong, "width": far ? 1 : 1.6}},
       {selector: 'edge[type = "process"]', style: {"line-color": t.edge, "target-arrow-color": t.edge, "line-style": "dashed", "line-dash-pattern": [5, 3]}},
       {selector: 'edge[state = "draft"]', style: {"line-style": "dashed", "line-color": t.warn, "target-arrow-color": t.warn}},
+      // Data flow: the state stays readable by line style, and width counts the processes.
+      {selector: 'edge[flowEdge][processCount]', style: {"width": ele => (far ? 1 : 1.6) + Math.min(3, ele.data("processCount") - 1) * .9}},
+      {selector: 'edge[state = "review_required"]', style: {"line-style": "solid", "line-color": t.warn, "target-arrow-color": t.warn}},
+      {selector: 'edge[flowEdge][state = "validated"]', style: {"line-style": "solid", "line-color": t.ok, "target-arrow-color": t.ok}},
+      {selector: 'edge[?indirect]', style: {"line-style": "dotted", "line-dash-pattern": [2, 4], "target-arrow-fill": "hollow"}},
+      {selector: "edge[flowEdge].at-hover, edge[flowEdge]:selected", style: {"label": "data(label)"}},
+      {selector: "node[?ambiguous]", style: {"border-style": "dashed", "border-color": t.warn}},
       // Architecture connections: documented solid, planned dashed, unverified dotted, confirmed heavy green.
       {selector: 'edge[type = "architecture-flow"]', style: {"curve-style": "bezier", "width": 1.8, "line-color": t.edgeStrong, "target-arrow-color": t.edgeStrong,
         "label": "", "font-family": t.sans, "font-size": 11}},
@@ -524,6 +564,7 @@
       {selector: ".hidden", style: {"display": "none"}},
       {selector: ".dimmed", style: {"opacity": .35}},
       {selector: ".at-fade", style: {"opacity": .14}},
+      {selector: ".at-recede", style: {"opacity": .55}},
       {selector: "node.at-near", style: {"border-color": t.accent, "border-width": 1.6, "border-style": "solid"}},
       {selector: "edge.at-lit, edge.at-hover", style: {"line-color": t.accent, "target-arrow-color": t.accent, "source-arrow-color": t.accent,
         "width": 2.2, "z-index": 40, "opacity": 1}},
@@ -579,8 +620,11 @@
     map.addEventListener("pointerup", () => { dragging = false; });
     map.addEventListener("keydown", panFromKeyboard);
     ui = {pane, canvas, layer, inner, legend, map, tip, empty, table, cards: new Map(), frame: null, idle: null, mapFrame: null};
-    // The table covers the canvas below the toolbar, whose height changes as it wraps.
-    new ResizeObserver(() => pane.style.setProperty("--at-toolbar-h", `${canvas.offsetTop}px`)).observe(pane);
+    // The card layer and the table start where the canvas starts. The toolbar can grow without
+    // the pane resizing (its controls appear once data loads), so the canvas is observed as well.
+    const toolbarHeight = new ResizeObserver(() => pane.style.setProperty("--at-toolbar-h", `${canvas.offsetTop}px`));
+    toolbarHeight.observe(pane);
+    toolbarHeight.observe(canvas);
     return ui;
   }
 
@@ -606,14 +650,16 @@
       const objects = visibleObjects().filter(item => (item.system || "Standalone graphs") === name);
       const counts = {ok: 0, warn: 0, none: 0, err: 0};
       objects.forEach(item => { counts[status(objectState(item)).tone] += 1; });
-      const graphs = new Set(objects.map(item => item.graph)), areas = [...new Set(objects.map(item => item.area).filter(Boolean))].sort();
+      // Name, size, one bar and one line; graphs and areas stay in the hover detail.
       const total = objects.length || 1;
       const bar = ["ok", "warn", "none", "err"].filter(key => counts[key]).map(key => `<i class="at-seg at-seg-${key}" data-w="${Math.max(2, Math.round(counts[key] / total * 100))}"></i>`).join("");
-      return {className: "at-card at-system", html: `<header><span class="at-title"><small>System</small><strong>${esc(name)}</strong></span></header>
-        <div class="at-system-count"><b>${objects.length.toLocaleString()}</b><span>objects · ${plural(graphs.size, "graph")}</span></div>
-        <div class="at-bar" role="img">${bar}</div>
-        <p class="at-bar-key"><span class="${counts.ok ? "at-k-ok" : ""}">${counts.ok} approved</span><span class="${counts.warn ? "at-k-warn" : ""}">${counts.warn} draft</span><span>${counts.none} not annotated</span></p>
-        <p class="at-areas">${esc(areas.slice(0, 4).join(" · "))}${areas.length > 4 ? ` +${areas.length - 4}` : ""}</p>`};
+      const parts = [["ok", "approved", "at-k-ok"], ["warn", "draft", "at-k-warn"], ["none", "not annotated", ""], ["err", "need attention", "at-k-err"]]
+        .filter(([tone]) => counts[tone]).map(([tone, label, cls]) => ({cls, text: `${counts[tone].toLocaleString()} ${label}`}));
+      const key = parts.map(part => `<span class="${part.cls}">${part.text}</span>`).join("");
+      return {className: "at-card at-system", html: `<header><span class="at-title"><strong>${esc(name)}</strong></span></header>
+        <div class="at-system-count"><b>${objects.length.toLocaleString()}</b><span>${objects.length === 1 ? "object" : "objects"}</span></div>
+        <div class="at-bar" role="img" aria-label="${esc(parts.map(part => part.text).join(", "))}">${bar}</div>
+        <p class="at-bar-key">${key}</p>`};
     }
     if (type === "architecture-card") {
       const members = node.data("members") || [];
@@ -686,6 +732,7 @@
       placeCard(card, node);
       card.classList.toggle("is-selected", node.selected());
       card.classList.toggle("is-faded", node.hasClass("at-fade") || node.hasClass("arch-muted") || node.hasClass("dimmed"));
+      card.classList.toggle("is-receded", node.hasClass("at-recede"));
       card.classList.toggle("is-near", node.hasClass("at-near"));
       card.classList.toggle("is-hover", node.hasClass("at-hover"));
       card.classList.toggle("is-trace", node.hasClass("trace-focus"));
@@ -732,7 +779,7 @@
 
   // ---------- focus and hover ----------
   function clearFocus(cy) {
-    cy.batch(() => cy.elements(".at-fade, .at-near, .at-lit").removeClass("at-fade at-near at-lit"));
+    cy.batch(() => cy.elements(".at-fade, .at-recede, .at-near, .at-lit").removeClass("at-fade at-recede at-near at-lit"));
   }
 
   function applyFocus(cy) {
@@ -744,7 +791,7 @@
       const node = selected[0], around = node.closedNeighborhood();
       const fade = cy.nodes(":visible").length <= 600;
       cy.batch(() => {
-        if (fade) cy.elements(":visible").difference(around).filter(ele => !ele.isNode() || !ele.isParent()).addClass("at-fade");
+        if (fade) cy.elements(":visible").difference(around).filter(ele => !ele.isNode() || !ele.isParent()).addClass("at-recede");
         around.edges().addClass("at-lit");
         around.nodes().difference(node).addClass("at-near");
       });
@@ -797,12 +844,12 @@
   function legendFor(kind) {
     if (kind === "architecture") return `<ul>${legendItem(lineSwatch("is-solid"), "Documented")}${legendItem(lineSwatch("is-dashed is-warn"), "Planned")}${legendItem(lineSwatch("is-dotted"), "Unverified")}${legendItem(lineSwatch("is-heavy is-ok"), "Manually confirmed")}${legendItem(lineSwatch("is-dashdot"), "Orchestration")}</ul><p>Architecture is not table lineage. Documented does not mean currently running.</p>`;
     if (kind === "systems") return `<ul>${legendItem(swatch("at-sw-ok"), "Approved by a person")}${legendItem(swatch("at-sw-warn"), "Draft · usable, unreviewed")}${legendItem(swatch("at-sw-none"), "Not annotated")}</ul><p>Click a system to open its objects.</p>`;
-    const types = `${legendItem(swatch("at-sw-table"), "Table")}${legendItem(swatch("at-sw-view"), "View")}${kind === "lineage" ? legendItem(swatch("at-sw-process is-pill"), "Process / job") : legendItem(swatch("at-sw-neutral"), "Derived or family")}`;
+    const types = `${legendItem(swatch("at-sw-table"), "Table")}${legendItem(swatch("at-sw-view"), "View")}${kind === "lineage" ? legendItem(swatch("at-sw-process is-pill"), "Process, with Processes as nodes") : legendItem(swatch("at-sw-neutral"), "Derived or family")}`;
     const states = `${legendItem(swatch("at-sw-card is-dashed"), "Draft annotation")}${legendItem(swatch("at-sw-card is-ok"), "Approved by a person")}${legendItem(swatch("at-sw-card"), "Observed from source only")}`;
     const edges = kind === "lineage"
-      ? `${legendItem(lineSwatch("is-solid"), "Data flow")}${legendItem(lineSwatch("is-dashed"), "Process step")}${legendItem(lineSwatch("is-dashed is-warn"), "Draft hop")}`
+      ? `${legendItem(lineSwatch("is-solid is-ok"), "Confirmed flow")}${legendItem(lineSwatch("is-dashed is-warn"), "Draft flow")}${legendItem(lineSwatch("is-solid is-warn"), "Needs review")}${legendItem(lineSwatch("is-dotted"), "Read, not named as a write input")}${legendItem(lineSwatch("is-dashed"), "Process step")}`
       : `${legendItem(lineSwatch("is-solid is-fk"), "Declared key · dot = referencing side")}${legendItem(lineSwatch("is-dashed is-warn is-hollow"), "Join candidate · unconfirmed")}${legendItem(lineSwatch("is-dotted"), "Derivation")}`;
-    return `<div class="at-legend-cols"><div><h4>Type</h4><ul>${types}</ul></div><div><h4>Review</h4><ul>${states}</ul></div><div><h4>Relations</h4><ul>${edges}</ul></div></div><p><span class="at-key is-pk">PK</span> primary key · <span class="at-key is-fk">FK</span> declared foreign key</p>`;
+    return `<div class="at-legend-cols"><div><h4>Type</h4><ul>${types}</ul></div><div><h4>Review</h4><ul>${states}</ul></div><div><h4>Relations</h4><ul>${edges}</ul></div></div>${kind === "lineage" ? "<p>Click a flow to see its processes and source lines. Analysis: SQLGlot, provider, manual or dbt declared.</p>" : ""}<p><span class="at-key is-pk">PK</span> primary key · <span class="at-key is-fk">FK</span> declared foreign key</p>`;
   }
 
   function scheduleMinimap() {
@@ -820,7 +867,8 @@
 
   function drawMinimap() {
     const cy = current;
-    if (!ui || !cy || cy.destroyed() || !active() || surface !== "graph") { if (ui) ui.map.hidden = true; return; }
+    // The system overview scrolls like a list; a minimap would only cover its cards.
+    if (!ui || !cy || cy.destroyed() || !active() || surface !== "graph" || kindOf(cy) === "systems") { if (ui) ui.map.hidden = true; return; }
     const extent = cy.extent(), all = cy.elements(":visible").boundingBox();
     const overflow = all.w > extent.w * 1.05 || all.h > extent.h * 1.05;
     ui.map.hidden = !overflow || !cy.nodes(":visible").length;
@@ -841,7 +889,7 @@
       }
       const type = node.data("type");
       ctx.fillStyle = node.selected() ? t.accent : colors[TYPE_CLASS[type]] || t.ink3;
-      ctx.globalAlpha = node.hasClass("at-fade") ? .25 : .85;
+      ctx.globalAlpha = node.hasClass("at-fade") ? .25 : node.hasClass("at-recede") ? .5 : .85;
       ctx.fillRect(tx(b.x1), ty(b.y1), Math.max(1.5, b.w * g.scale), Math.max(1.5, b.h * g.scale));
     });
     ctx.globalAlpha = 1;
@@ -1081,10 +1129,9 @@
   function decorateInspector() {
     if (!active()) return;
     const inspector = element("inspector");
-    const head = inspector.querySelector(".inspector-head");
+    const head = inspector.querySelector(".inspector-head[data-inspector-object]");
     if (!head || inspector.querySelector(".at-summary")) return;
-    const s = appState();
-    const item = s?.data?.objects.find(entry => entry.id === s.selectedId);
+    const item = appState()?.data?.objects.find(entry => entry.id === head.dataset.inspectorObject);
     if (!item) return;
     const degree = indexData().degree.get(item.id) || {out: 0, in: 0};
     const provenance = item.annotation?.provenance?.source;
@@ -1108,12 +1155,12 @@
       ${types.size ? `<p class="at-typemix">${[...types].sort((a, b) => b[1] - a[1]).map(([name, count]) => `<span><b>${esc(name)}</b>×${count}</span>`).join("")}</p>` : ""}
       <div class="at-actions">
         <button type="button" class="at-btn" data-at-action="neighbours">${ICON.focus}Neighbours</button>
-        <button type="button" class="at-btn" data-at-action="trace"${element("trace-selected")?.disabled ? " disabled" : ""}>${ICON.trace}Trace</button>
+        ${appState()?.data?.lineages?.length ? `<button type="button" class="at-btn" data-at-action="trace"${element("trace-selected")?.disabled ? " disabled" : ""}>${ICON.trace}Trace</button>` : ""}
         <button type="button" class="at-btn" data-at-action="copy">${ICON.copy}Copy reference</button>
       </div>`;
     head.after(summary);
     summary.querySelector('[data-at-action="neighbours"]').addEventListener("click", () => { setSurface("graph"); element("fit-graph").click(); });
-    summary.querySelector('[data-at-action="trace"]').addEventListener("click", () => { setSurface("graph"); element("trace-selected").click(); });
+    summary.querySelector('[data-at-action="trace"]')?.addEventListener("click", () => { setSurface("graph"); element("trace-selected").click(); });
     summary.querySelector('[data-at-action="copy"]').addEventListener("click", async () => {
       try { await navigator.clipboard.writeText(item.reference || item.label); toast(`Copied ${item.reference || item.label}`); }
       catch (_) { toast("Copying is not available in this browser context."); }
@@ -1195,14 +1242,18 @@
     if (surface === "table") selectFromTable(item.id); else selectObject(item.id);
   }
 
-  function paletteCommands() {
-    const s = appState();
-    const mode = name => () => {
+  function paletteMode(name) {
+    return () => {
       switchView("graph");
       setSurface("graph");
       const button = document.querySelector(`[data-canvas-mode="${name}"]`);
       if (button && !button.disabled && !button.hidden) button.click();
     };
+  }
+
+  function paletteCommands() {
+    const s = appState();
+    const mode = paletteMode;
     return [
       {group: "Go to", label: "Structure", detail: "Objects and declared keys", run: mode("space")},
       {group: "Go to", label: "Lineage", detail: "Loaded data and process flows", run: mode("lineage"), disabled: !s?.data?.lineages?.length},
@@ -1230,7 +1281,10 @@
           detail: `${item.name} · ${String(field.data_type || "").toLowerCase()}`, type: "field", run: () => openObjectFromPalette(item)});
       }
     }
-    paletteResults = [...commands.slice(0, query ? 5 : 8), ...objects.slice(0, query ? 14 : 8), ...fields];
+    const processes = query ? (s?.data?.lineage_flows?.processes || [])
+      .filter(item => `${item.label} ${item.qualified_name} ${item.summary || ""}`.toLowerCase().includes(query)).slice(0, 8)
+      .map(item => ({group: "Processes", label: item.label, detail: `${item.lineage} · ${item.edges.length} flows`, run: () => { paletteMode("lineage")(); highlightLineageProcess(item.id); }})) : [];
+    paletteResults = [...commands.slice(0, query ? 5 : 8), ...objects.slice(0, query ? 14 : 8), ...fields, ...processes];
     paletteIndex = 0;
     const list = element("at-palette-list");
     let group = "";
@@ -1435,7 +1489,8 @@
     if (appState()?.cy) attach(appState().cy);
   }
 
-  window.TarelAtlas = {attach, active, renderTable: () => renderTable()};
+  window.TarelAtlas = {attach, active, renderTable: () => renderTable(), showSystems: cy => showSystemsReadable(cy),
+    fit: (cy, padding) => fitClearOfOverlays(cy, cy.elements(":visible"), padding)};
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", activate);
   else activate();
 })();

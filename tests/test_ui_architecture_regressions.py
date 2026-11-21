@@ -12,7 +12,15 @@ from unittest.mock import patch
 
 from tarel.cli import main
 from tarel.ui.architecture_store import ArchitectureFailure, ArchitectureStore, validate_document
-from tarel.ui.server import TarelUIBackend, UIConfig, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceSystem
 from tests.test_ui_architecture import fixture
 
@@ -76,7 +84,7 @@ class ArchitectureReviewTests(TestCase):
             with (
                 self.subTest(system=system),
                 patch.object(backend, "_bootstrap", return_value={}),
-                patch("tarel.ui.server.load_workspace_use_case", return_value=workspace),
+                patch("tarel.ui.backend.load_workspace_use_case", return_value=workspace),
             ):
                 with self.assertRaises(ArchitectureFailure) as caught:
                     backend.bootstrap()

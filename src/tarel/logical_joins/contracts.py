@@ -8,8 +8,14 @@ import re
 from dataclasses import dataclass
 from typing import Any, NoReturn
 
-from tarel.discovery.contracts import DiscoveryFailure, DiscoveryObservation
+from tarel.discovery.contracts import (
+    DiscoveryFailure,
+)
 from tarel.discovery.logical_program import LogicalJoinProgram
+from tarel.discovery.runs import (
+    DiscoveryObservation,
+)
+from tarel.errors import TarelError
 from tarel.topology.endpoint_contracts import LogicalEndpointFailure
 
 LOGICAL_JOIN_CONTRACT = "tarel.logical-join.v0.1.experimental"
@@ -18,10 +24,8 @@ LOGICAL_JOIN_MODES = frozenset(
 )
 
 
-class LogicalJoinFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class LogicalJoinFailure(TarelError):
+    """Raised when a logical join operation is rejected."""
 
 
 def identifier(value: object) -> str:

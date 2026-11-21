@@ -6,24 +6,25 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from tarel.discovery.contracts import DiscoveryFailure
-from tarel.discovery.store import FileDiscoveryStore
-from tarel.entity_resolution.contracts import (
-    ENTITY_RESOLUTION_MODES,
+from tarel.discovery.contracts import (
+    DiscoveryFailure,
+)
+from tarel.entity_resolution.candidates import (
     EntityAliasMatch,
     EntityResolutionCandidate,
-    EntityResolutionFailure,
     EntityResolutionMatch,
     review_candidate,
     validate_entity_resolution_candidate,
 )
+from tarel.entity_resolution.contracts import (
+    ENTITY_RESOLUTION_MODES,
+    EntityResolutionFailure,
+)
 from tarel.entity_resolution.store import FileEntityResolutionStore
 from tarel.graph.contracts import GraphDocument, GraphNode
 from tarel.graph.revision import graph_revision
-from tarel.graph.store import FileGraphStore
 from tarel.relationships.core import RelationshipFailure, resolve_field
-from tarel.runtime import TarelRuntime
-from tarel.sources.store import FileSourceStore
+from tarel.runtime import TarelRuntime, resolve_runtime
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,10 +45,10 @@ def import_entity_resolution_candidate_use_case(
             "invalid_entity_resolution_import",
             "New entity-resolution imports must be unreviewed candidates.",
         )
-    graph = _graph_store(runtime).load(candidate.graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(candidate.graph_name)
     _validate_candidate_binding(candidate, graph)
     _validate_alias_policy(candidate, runtime=runtime)
-    store = _entity_store(runtime)
+    store = resolve_runtime(runtime).entity_resolution_store()
     _validate_self_supersede(candidate, store)
     if store.exists(candidate.id):
         current = store.load(candidate.id)
@@ -73,7 +74,7 @@ def load_entity_resolution_candidate_use_case(
     *,
     runtime: TarelRuntime | None = None,
 ) -> EntityResolutionCandidate:
-    return _entity_store(runtime).load(candidate_id)
+    return resolve_runtime(runtime).entity_resolution_store().load(candidate_id)
 
 
 def list_entity_resolution_candidates_use_case(
@@ -81,7 +82,7 @@ def list_entity_resolution_candidates_use_case(
     graph_name: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> tuple[EntityResolutionCandidate, ...]:
-    store = _entity_store(runtime)
+    store = resolve_runtime(runtime).entity_resolution_store()
     candidates = tuple(store.load(candidate_id) for candidate_id in store.list())
     if graph_name is not None:
         candidates = tuple(item for item in candidates if item.graph_name == graph_name)
@@ -96,7 +97,7 @@ def find_entity_resolution_candidates_use_case(
     mode: str = "confirmed_then_candidates",
     runtime: TarelRuntime | None = None,
 ) -> tuple[EntityResolutionMatch, ...]:
-    graph = _graph_store(runtime).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     return find_entity_resolution_candidates_for_graph_use_case(
         graph,
         source=source,
@@ -176,7 +177,7 @@ def resolve_entity_aliases_use_case(
         raise EntityResolutionFailure(
             "invalid_entity_resolution", "Entity alias lookup requires a record key."
         )
-    graph = _graph_store(runtime).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     object_node = next(
         (
             node
@@ -242,7 +243,7 @@ def decide_entity_resolution_candidate_use_case(
     expected_revision: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> EntityResolutionChangeResult:
-    store = _entity_store(runtime)
+    store = resolve_runtime(runtime).entity_resolution_store()
     candidate = store.load(candidate_id)
     if any(
         store.load(current_id).provenance.supersedes_candidate_id == candidate_id
@@ -257,7 +258,7 @@ def decide_entity_resolution_candidate_use_case(
             "stale_entity_resolution_candidate",
             "The candidate changed after it was loaded. Reload it before reviewing.",
         )
-    graph = _graph_store(runtime).load(candidate.graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(candidate.graph_name)
     _validate_candidate_binding(candidate, graph)
     _validate_alias_policy(candidate, runtime=runtime)
     changed = review_candidate(candidate, decision=decision, reason=reason)
@@ -327,7 +328,7 @@ def _match(
     runtime: TarelRuntime | None,
 ) -> EntityResolutionMatch:
     coverage = None
-    discovery_store = _discovery_store(runtime)
+    discovery_store = resolve_runtime(runtime).discovery_store()
     run_id = candidate.provenance.run_id
     if discovery_store.coverage_exists(run_id):
         try:
@@ -430,7 +431,7 @@ def _validate_alias_policy(
             "entity_aliases_not_allowed",
             "Durable entity aliases require explicit source provenance.",
         )
-    store = _source_store(runtime)
+    store = resolve_runtime(runtime).source_store()
     for source_name in candidate.provenance.source_names:
         source = store.load(source_name)
         if (
@@ -476,17 +477,5 @@ def _resolve_optional_field(graph: GraphDocument, reference: str | None) -> str 
         ) from exc
 
 
-def _graph_store(runtime: TarelRuntime | None) -> FileGraphStore:
-    return FileGraphStore() if runtime is None else runtime.graph_store()
 
 
-def _entity_store(runtime: TarelRuntime | None) -> FileEntityResolutionStore:
-    return FileEntityResolutionStore() if runtime is None else runtime.entity_resolution_store()
-
-
-def _discovery_store(runtime: TarelRuntime | None) -> FileDiscoveryStore:
-    return FileDiscoveryStore() if runtime is None else runtime.discovery_store()
-
-
-def _source_store(runtime: TarelRuntime | None) -> FileSourceStore:
-    return FileSourceStore() if runtime is None else runtime.source_store()

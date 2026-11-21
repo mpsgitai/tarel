@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tarel.atomic import write_atomic
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphFailure, GraphNode
 from tarel.graph.revision import graph_revision, physical_graph_revision, physical_schema_revision
 
@@ -406,7 +407,7 @@ def _build_index(store: FileGraphStore, name: str, source_fingerprint: list[int]
             raise GraphFailure(
                 "graph_changed_during_read", "Graph changed during cache creation; retry."
             )
-        os.replace(temporary, cache)
+        temporary.replace(cache)
         _write_descriptor(
             descriptor,
             {
@@ -556,14 +557,7 @@ def _descriptor(path: Path) -> dict[str, object]:
 
 
 def _write_descriptor(path: Path, data: dict[str, object]) -> None:
-    descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=".selective-", suffix=".tmp")
-    temporary = Path(name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(_json(data))
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_atomic(path, _json(data), prefix=".selective-")
 
 
 def _json(data: dict[str, object]) -> str:

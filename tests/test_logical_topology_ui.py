@@ -26,7 +26,10 @@ from tarel.topology import (
     new_logical_topology_document,
     review_derived_relation,
 )
-from tarel.ui.presentation import browser_graph, browser_workspace
+from tarel.ui.payloads.graph import (
+    browser_graph,
+    browser_workspace,
+)
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceSystem
 from tarel.workspaces.scope import (
     ResolvedScope,

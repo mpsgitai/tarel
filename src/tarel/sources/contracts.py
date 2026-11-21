@@ -9,6 +9,8 @@ from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 from typing import Any
 
+from tarel.errors import TarelError
+
 SOURCE_CONTRACT_VERSION = "tarel.source.v0.1"
 ENRICHMENT_PERMISSIONS = frozenset(
     {"aggregates", "entity_aliases", "raw_samples", "small_domains"}
@@ -19,10 +21,8 @@ _CONNECTOR_NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-class SourceFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class SourceFailure(TarelError):
+    """Raised when a source operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

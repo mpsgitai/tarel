@@ -12,7 +12,13 @@ from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.revision import graph_revision
 from tarel.sdk import Tarel
-from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+    UIFailure,
+)
 
 
 def mixed_graph():
@@ -144,13 +150,13 @@ class MixedFieldDecisionTests(TestCase):
             graph = mixed_graph()
             sdk.runtime.graph_store().save(graph)
             backend = TarelUIBackend(UIConfig(graph=graph.name, editable=True), runtime=sdk.runtime)
-            payload = dict(
-                reference="audit.Sales",
-                state="validated",
-                reason="UI regression.",
-                include_fields=True,
-                revision=graph_revision(graph),
-            )
+            payload = {
+                "reference": "audit.Sales",
+                "state": "validated",
+                "reason": "UI regression.",
+                "include_fields": True,
+                "revision": graph_revision(graph),
+            }
             result = backend.mutate("/api/annotation/decision", payload)
             persisted = sdk.runtime.graph_store().load(graph.name)
             self.assertEqual(result["revision"], graph_revision(persisted))
@@ -177,12 +183,12 @@ class MixedFieldDecisionTests(TestCase):
             with self.assertRaises(UIFailure):
                 backend.mutate(
                     "/api/annotation/decision",
-                    dict(
-                        reference="audit.Sales",
-                        state="validated",
-                        reason="Read-only.",
-                        include_fields=True,
-                        revision=graph_revision(graph),
-                    ),
+                    {
+                        "reference": "audit.Sales",
+                        "state": "validated",
+                        "reason": "Read-only.",
+                        "include_fields": True,
+                        "revision": graph_revision(graph),
+                    },
                 )
             self.assertEqual(sdk.runtime.graph_store().load(graph.name), graph)

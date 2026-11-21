@@ -8,8 +8,8 @@ from unittest import TestCase
 from test_context import _context_graph
 
 from tarel.cli import main
-from tarel.context import ContextFailure, compile_context
-from tarel.context_packets import (
+from tarel.context.compiler import ContextFailure, compile_context
+from tarel.context.packets import (
     context_packet_from_dict,
     diff_context_packets,
     load_context_packet,
@@ -100,7 +100,7 @@ class ContextPacketTests(TestCase):
 
 
 def _rehash(payload: dict[str, object]) -> None:
-    from tarel.context_output import canonical_hash
+    from tarel.context.output import canonical_hash
 
     stable_hash = canonical_hash(payload["stable"])
     dynamic_hash = canonical_hash(payload["dynamic"])

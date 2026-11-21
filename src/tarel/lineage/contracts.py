@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
+
 _CONTRACT_VERSION = "tarel.lineage.v0.5"
 _READABLE_CONTRACT_VERSIONS = frozenset(
     {_CONTRACT_VERSION, "tarel.lineage.v0.4", "tarel.lineage.v0.3", "tarel.lineage.v0.2"}
@@ -20,10 +22,8 @@ _STATES = frozenset({"draft", "rejected", "review_required", "validated"})
 _MATERIALIZATION_MODES = frozenset({"incremental", "table", "view"})
 
 
-class LineageFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class LineageFailure(TarelError):
+    """Raised when a lineage operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +370,19 @@ class LineageDocument:
 
 
 def validate_lineage_document(document: LineageDocument) -> None:
+    """Raise ``LineageFailure`` unless every section of ``document`` is internally consistent."""
+    _validate_header(document)
+    _validate_definitions(document)
+    definitions = document.definition_by_id()
+    _validate_steps(document, definitions)
+    _validate_analyses(document, definitions)
+    _validate_claims(document, definitions)
+    _validate_materializations(document, definitions)
+    _validate_write_units(document, definitions)
+
+
+def _validate_header(document: LineageDocument) -> None:
+    """Workflow identity: names, references and the source revision."""
     for value, label in (
         (document.name, "name"),
         (document.source_kind, "source_kind"),
@@ -381,102 +394,114 @@ def validate_lineage_document(document: LineageDocument) -> None:
         _text_value(value, label)
     _sha256(document.source_revision, "source_revision")
 
+
+def _validate_definitions(document: LineageDocument) -> None:
+    """Definitions carry text identity, a supported kind and content hashes, all unique."""
     definition_ids: list[str] = []
     definition_external_ids: list[str] = []
-    for item in document.definitions:
+    for definition in document.definitions:
         for value, label in (
-            (item.id, "definition id"),
-            (item.external_id, "definition external_id"),
-            (item.kind, "definition kind"),
-            (item.name, "definition name"),
-            (item.qualified_name, "definition qualified_name"),
-            (item.language, "definition language"),
-            (item.source_reference, "definition source_reference"),
+            (definition.id, "definition id"),
+            (definition.external_id, "definition external_id"),
+            (definition.kind, "definition kind"),
+            (definition.name, "definition name"),
+            (definition.qualified_name, "definition qualified_name"),
+            (definition.language, "definition language"),
+            (definition.source_reference, "definition source_reference"),
         ):
             _text_value(value, label)
-        if item.kind not in _DEFINITION_KINDS:
-            raise LineageFailure("invalid_lineage", f"Unsupported definition kind: {item.kind}")
-        _sha256(item.content_hash, "definition content_hash")
-        _sha256(item.revision, "definition revision")
-        definition_ids.append(item.id)
-        definition_external_ids.append(item.external_id)
+        if definition.kind not in _DEFINITION_KINDS:
+            raise LineageFailure(
+                "invalid_lineage", f"Unsupported definition kind: {definition.kind}"
+            )
+        _sha256(definition.content_hash, "definition content_hash")
+        _sha256(definition.revision, "definition revision")
+        definition_ids.append(definition.id)
+        definition_external_ids.append(definition.external_id)
     _unique(definition_ids, "definition IDs")
     _unique(definition_external_ids, "definition external IDs")
-    definitions = document.definition_by_id()
 
+
+def _validate_steps(document: LineageDocument, definitions: dict[str, LineageDefinition]) -> None:
+    """Workflow steps reference known definitions and form an acyclic dependency graph."""
     step_ids: list[str] = []
     step_external_ids: list[str] = []
-    for item in document.steps:
+    for step in document.steps:
         for value, label in (
-            (item.id, "step id"),
-            (item.external_id, "step external_id"),
-            (item.name, "step name"),
-            (item.definition_id, "step definition_id"),
+            (step.id, "step id"),
+            (step.external_id, "step external_id"),
+            (step.name, "step name"),
+            (step.definition_id, "step definition_id"),
         ):
             _text_value(value, label)
-        if item.definition_id not in definitions:
+        if step.definition_id not in definitions:
             raise LineageFailure(
                 "invalid_lineage",
                 "Workflow step references an unknown definition.",
             )
-        if not all(isinstance(value, str) and value for value in item.depends_on):
+        if not all(isinstance(value, str) and value for value in step.depends_on):
             raise LineageFailure("invalid_lineage", "Step dependencies must be strings.")
-        step_ids.append(item.id)
-        step_external_ids.append(item.external_id)
+        step_ids.append(step.id)
+        step_external_ids.append(step.external_id)
     _unique(step_ids, "step IDs")
     _unique(step_external_ids, "step external IDs")
     _validate_step_graph(document.steps)
 
+
+def _validate_analyses(
+    document: LineageDocument, definitions: dict[str, LineageDefinition]
+) -> None:
+    """Each definition is analyzed or failed at its current revision, never both."""
     analysis_ids: list[str] = []
-    for item in document.analyses:
-        _text_value(item.definition_id, "analysis definition_id")
-        if item.definition_id not in definitions:
+    for analysis in document.analyses:
+        _text_value(analysis.definition_id, "analysis definition_id")
+        if analysis.definition_id not in definitions:
             raise LineageFailure("invalid_lineage", "Analysis references an unknown definition.")
-        _sha256(item.definition_revision, "analysis definition_revision")
-        if item.definition_revision != definitions[item.definition_id].revision:
+        _sha256(analysis.definition_revision, "analysis definition_revision")
+        if analysis.definition_revision != definitions[analysis.definition_id].revision:
             raise LineageFailure(
                 "invalid_lineage",
                 "Analysis revision does not match its lineage definition.",
             )
-        _text_value(item.summary, "analysis summary")
-        _text_value(item.analyzer, "analysis analyzer")
-        for value, label in (
-            (item.analyzer_version, "analysis analyzer_version"),
-            (item.dialect, "analysis dialect"),
+        _text_value(analysis.summary, "analysis summary")
+        _text_value(analysis.analyzer, "analysis analyzer")
+        for optional_value, label in (
+            (analysis.analyzer_version, "analysis analyzer_version"),
+            (analysis.dialect, "analysis dialect"),
         ):
-            if value is not None:
-                _text_value(value, label)
-        if not all(isinstance(value, str) for value in item.warnings):
+            if optional_value is not None:
+                _text_value(optional_value, label)
+        if not all(isinstance(value, str) for value in analysis.warnings):
             raise LineageFailure("invalid_lineage", "Analysis warnings must be strings.")
-        for excluded in item.excluded_writes:
+        for excluded in analysis.excluded_writes:
             if excluded.operation not in _WRITE_OPERATIONS:
                 raise LineageFailure("invalid_lineage", "Invalid excluded-write operation.")
             if excluded.disposition not in _EXCLUSION_KINDS:
                 raise LineageFailure("invalid_lineage", "Invalid excluded-write disposition.")
             _text_value(excluded.target, "excluded-write target")
             _validate_evidence(excluded.evidence)
-        analysis_ids.append(item.definition_id)
+        analysis_ids.append(analysis.definition_id)
     _unique(analysis_ids, "analysis definition IDs")
 
     failure_ids: list[str] = []
-    for item in document.analysis_failures:
-        _text_value(item.definition_id, "analysis failure definition_id")
-        if item.definition_id not in definitions:
+    for failure in document.analysis_failures:
+        _text_value(failure.definition_id, "analysis failure definition_id")
+        if failure.definition_id not in definitions:
             raise LineageFailure(
                 "invalid_lineage",
                 "Analysis failure references an unknown definition.",
             )
-        _sha256(item.definition_revision, "analysis failure definition_revision")
-        if item.definition_revision != definitions[item.definition_id].revision:
+        _sha256(failure.definition_revision, "analysis failure definition_revision")
+        if failure.definition_revision != definitions[failure.definition_id].revision:
             raise LineageFailure(
                 "invalid_lineage",
                 "Analysis failure revision does not match its lineage definition.",
             )
-        _text_value(item.code, "analysis failure code")
-        _text_value(item.provider, "analysis failure provider")
-        if item.model is not None:
-            _text_value(item.model, "analysis failure model")
-        failure_ids.append(item.definition_id)
+        _text_value(failure.code, "analysis failure code")
+        _text_value(failure.provider, "analysis failure provider")
+        if failure.model is not None:
+            _text_value(failure.model, "analysis failure model")
+        failure_ids.append(failure.definition_id)
     _unique(failure_ids, "analysis failure definition IDs")
     if set(failure_ids) & set(analysis_ids):
         raise LineageFailure(
@@ -484,83 +509,99 @@ def validate_lineage_document(document: LineageDocument) -> None:
             "A definition cannot be both analyzed and failed.",
         )
 
+
+def _validate_claims(document: LineageDocument, definitions: dict[str, LineageDefinition]) -> None:
+    """Declared claims reference known definitions and carry evidence and reviews."""
     claim_ids: list[str] = []
-    for item in document.claims:
+    for claim in document.claims:
         for value, label in (
-            (item.id, "claim id"),
-            (item.definition_id, "claim definition_id"),
-            (item.operation, "claim operation"),
-            (item.target, "claim target"),
-            (item.state, "claim state"),
+            (claim.id, "claim id"),
+            (claim.definition_id, "claim definition_id"),
+            (claim.operation, "claim operation"),
+            (claim.target, "claim target"),
+            (claim.state, "claim state"),
         ):
             _text_value(value, label)
-        if item.definition_id not in definitions:
+        if claim.definition_id not in definitions:
             raise LineageFailure("invalid_lineage", "Claim references an unknown definition.")
-        if item.operation not in _OPERATIONS or item.state not in _STATES:
+        if claim.operation not in _OPERATIONS or claim.state not in _STATES:
             raise LineageFailure("invalid_lineage", "Unsupported claim operation or state.")
-        _validate_evidence(item.evidence)
-        for review in item.reviews:
+        _validate_evidence(claim.evidence)
+        for review in claim.reviews:
             _text_value(review.decision, "review decision")
             _text_value(review.reason, "review reason")
             _text_value(review.source, "review source")
             if review.decision not in {"reject", "validate"} or review.source != "human":
                 raise LineageFailure("invalid_lineage", "Invalid lineage review.")
-        if item.state == "draft" and item.reviews:
+        if claim.state == "draft" and claim.reviews:
             raise LineageFailure("invalid_lineage", "Draft claims cannot contain reviews.")
-        if item.state in {"rejected", "validated"}:
-            expected = "reject" if item.state == "rejected" else "validate"
-            if not item.reviews or item.reviews[-1].decision != expected:
+        if claim.state in {"rejected", "validated"}:
+            expected = "reject" if claim.state == "rejected" else "validate"
+            if not claim.reviews or claim.reviews[-1].decision != expected:
                 raise LineageFailure("invalid_lineage", "Claim state requires a matching review.")
-        claim_ids.append(item.id)
+        claim_ids.append(claim.id)
     _unique(claim_ids, "claim IDs")
 
+
+def _validate_materializations(
+    document: LineageDocument, definitions: dict[str, LineageDefinition]
+) -> None:
+    """Materializations describe how a definition persists its target."""
     materialization_ids: list[str] = []
     materialized_definitions: list[str] = []
-    for item in document.materializations:
+    for materialization in document.materializations:
         for value, label in (
-            (item.id, "materialization id"),
-            (item.definition_id, "materialization definition_id"),
-            (item.target, "materialization target"),
-            (item.mode, "materialization mode"),
-            (item.state, "materialization state"),
+            (materialization.id, "materialization id"),
+            (materialization.definition_id, "materialization definition_id"),
+            (materialization.target, "materialization target"),
+            (materialization.mode, "materialization mode"),
+            (materialization.state, "materialization state"),
         ):
             _text_value(value, label)
-        if item.definition_id not in definitions:
+        if materialization.definition_id not in definitions:
             raise LineageFailure(
                 "invalid_lineage",
                 "Materialization references an unknown definition.",
             )
-        if item.mode not in _MATERIALIZATION_MODES or item.state not in _STATES:
+        if (
+            materialization.mode not in _MATERIALIZATION_MODES
+            or materialization.state not in _STATES
+        ):
             raise LineageFailure(
                 "invalid_lineage",
                 "Unsupported materialization mode or state.",
             )
-        _validate_evidence(item.evidence)
-        _validate_reviews(item.state, item.reviews, "materialization")
-        materialization_ids.append(item.id)
-        materialized_definitions.append(item.definition_id)
+        _validate_evidence(materialization.evidence)
+        _validate_reviews(materialization.state, materialization.reviews, "materialization")
+        materialization_ids.append(materialization.id)
+        materialized_definitions.append(materialization.definition_id)
     _unique(materialization_ids, "materialization IDs")
     _unique(materialized_definitions, "materialized definition IDs")
 
+
+def _validate_write_units(
+    document: LineageDocument, definitions: dict[str, LineageDefinition]
+) -> None:
+    """Write units describe persistent writes with their sources and exclusions."""
     write_unit_ids: list[str] = []
-    for item in document.write_units:
+    for unit in document.write_units:
         for value, label in (
-            (item.id, "write-unit id"),
-            (item.definition_id, "write-unit definition_id"),
-            (item.operation, "write-unit operation"),
-            (item.target, "write-unit target"),
-            (item.state, "write-unit state"),
+            (unit.id, "write-unit id"),
+            (unit.definition_id, "write-unit definition_id"),
+            (unit.operation, "write-unit operation"),
+            (unit.target, "write-unit target"),
+            (unit.state, "write-unit state"),
         ):
             _text_value(value, label)
-        if item.definition_id not in definitions:
+        if unit.definition_id not in definitions:
             raise LineageFailure("invalid_lineage", "Write unit references an unknown definition.")
-        if item.operation not in _WRITE_OPERATIONS or item.state not in _STATES:
+        if unit.operation not in _WRITE_OPERATIONS or unit.state not in _STATES:
             raise LineageFailure("invalid_lineage", "Unsupported write-unit operation or state.")
-        _validate_evidence(item.evidence)
-        if not all(isinstance(value, str) for value in item.warnings):
+        _validate_evidence(unit.evidence)
+        if not all(isinstance(value, str) for value in unit.warnings):
             raise LineageFailure("invalid_lineage", "Write-unit warnings must be strings.")
         source_keys = []
-        for source in item.sources:
+        for source in unit.sources:
             _text_value(source.target, "write source target")
             if source.role not in _SOURCE_ROLES:
                 raise LineageFailure("invalid_lineage", "Unsupported write-source role.")
@@ -577,8 +618,8 @@ def validate_lineage_document(document: LineageDocument) -> None:
             )
         if len(source_keys) != len(set(source_keys)):
             raise LineageFailure("invalid_lineage", "Write unit contains duplicate sources.")
-        _validate_reviews(item.state, item.reviews, "write unit")
-        write_unit_ids.append(item.id)
+        _validate_reviews(unit.state, unit.reviews, "write unit")
+        write_unit_ids.append(unit.id)
     _unique(write_unit_ids, "write-unit IDs")
 
 
@@ -623,9 +664,7 @@ def _analysis(data: dict[str, Any]) -> LineageAnalysis:
         "analysis",
     )
     values = {
-        key: value
-        for key, value in data.items()
-        if key not in {"excluded_writes", "warnings"}
+        key: value for key, value in data.items() if key not in {"excluded_writes", "warnings"}
     }
     for field in ("analyzer_version", "dialect"):
         value = values.get(field)
@@ -654,10 +693,10 @@ def _analysis_failure(data: dict[str, Any]) -> LineageAnalysisFailure:
     if model is not None and not isinstance(model, str):
         raise LineageFailure("invalid_lineage", "Analysis failure model must be a string or null.")
     return LineageAnalysisFailure(
-        definition_id=data.get("definition_id"),
-        definition_revision=data.get("definition_revision"),
-        code=data.get("code"),
-        provider=data.get("provider"),
+        definition_id=data["definition_id"],
+        definition_revision=data["definition_revision"],
+        code=data["code"],
+        provider=data["provider"],
         model=model,
     )
 
@@ -688,8 +727,7 @@ def _materialization(data: dict[str, Any]) -> LineageMaterialization:
         **values,
         evidence=_evidence(data.get("evidence"), "materialization evidence"),
         reviews=tuple(
-            _review(item)
-            for item in _objects(data.get("reviews"), "materialization reviews")
+            _review(item) for item in _objects(data.get("reviews"), "materialization reviews")
         ),
     )
 
@@ -731,8 +769,8 @@ def _write_unit(data: dict[str, Any]) -> LineageWriteUnit:
 def _write_source(data: dict[str, Any]) -> LineageWriteSource:
     _fields(data, {"evidence", "role", "target", "via"}, "write source")
     return LineageWriteSource(
-        target=data.get("target"),
-        role=data.get("role"),
+        target=data["target"],
+        role=data["role"],
         via=_strings(data.get("via"), "write-source via"),
         evidence=_evidence(data.get("evidence"), "write-source evidence"),
     )
@@ -741,9 +779,9 @@ def _write_source(data: dict[str, Any]) -> LineageWriteSource:
 def _excluded_write(data: dict[str, Any]) -> LineageExcludedWrite:
     _fields(data, {"disposition", "evidence", "operation", "target"}, "excluded write")
     return LineageExcludedWrite(
-        disposition=data.get("disposition"),
-        operation=data.get("operation"),
-        target=data.get("target"),
+        disposition=data["disposition"],
+        operation=data["operation"],
+        target=data["target"],
         evidence=_evidence(data.get("evidence"), "excluded-write evidence"),
     )
 

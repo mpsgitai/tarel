@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from tarel.atomic import write_atomic
 from tarel.semantic_concepts.contracts import SemanticConceptDocument, SemanticConceptFailure
 
 
@@ -19,21 +18,10 @@ class FileSemanticConceptStore:
     def save(self, document: SemanticConceptDocument) -> Path:
         checked = SemanticConceptDocument.from_dict(document.to_dict())
         path = self.path(checked.graph_name)
-        temporary: Path | None = None
+        payload = json.dumps(checked.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=".concept-", suffix=".tmp")
-            temporary = Path(name)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                os.fchmod(handle.fileno(), 0o600)
-                json.dump(checked.to_dict(), handle, ensure_ascii=False, indent=2, sort_keys=True)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".concept-", durable=True)
         except OSError as exc:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
             raise SemanticConceptFailure(
                 "semantic_concepts_save_failed",
                 "Could not save semantic concept declarations.",

@@ -10,13 +10,22 @@ from unittest.mock import Mock, patch
 
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
-from tarel.discovery.application import (
+from tarel.discovery.advice import (
     advise_discovery_run_use_case,
-    promote_discovery_candidates_use_case,
+)
+from tarel.discovery.application import (
     start_discovery_run_use_case,
     submit_discovery_step_use_case,
 )
-from tarel.discovery.contracts import DiscoveryFailure, DiscoveryRun
+from tarel.discovery.contracts import (
+    DiscoveryFailure,
+)
+from tarel.discovery.promotion import (
+    promote_discovery_candidates_use_case,
+)
+from tarel.discovery.runs import (
+    DiscoveryRun,
+)
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.revision import graph_revision, physical_graph_revision
 from tarel.reference_mapping.application import (
@@ -544,7 +553,7 @@ class ReferenceMappingTests(TestCase):
             provider.default_model = "local-model"
             provider.generate_structured.return_value = {"proposals": [_proposal()]}
             with patch(
-                "tarel.discovery.application.load_provider", return_value=provider
+                "tarel.discovery.advice.load_provider", return_value=provider
             ):
                 advised = advise_discovery_run_use_case(
                     run.id,

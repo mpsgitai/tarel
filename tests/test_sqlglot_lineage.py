@@ -9,16 +9,23 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from tarel.cli import main
+from tarel.lineage.analysis_application import (
+    run_lineage_analysis_use_case,
+)
 from tarel.lineage.application import (
     build_lineage_use_case,
-    run_lineage_analysis_use_case,
 )
 from tarel.lineage.contracts import LineageDocument, LineageFailure
 from tarel.lineage.source import LineageInput, SourceDefinition, SourceStep
 from tarel.lineage.sqlglot_adapter import analyze_with_sqlglot
 from tarel.lineage.status import lineage_status
 from tarel.sdk import Tarel
-from tarel.ui.presentation import browser_lineages
+from tarel.ui.payloads.lineage import (
+    browser_lineages,
+)
+
+# Patch target: where definition analysis looks up its provider.
+LOAD_PROVIDER = "tarel.lineage.analysis_application.load_provider"
 
 
 class SqlglotLineageTests(TestCase):
@@ -227,7 +234,7 @@ class SqlglotLineageTests(TestCase):
                 source_path = Path("source.json")
                 _write_source(source_path, source)
                 build_lineage_use_case("dynamic", source_path=source_path)
-                with patch("tarel.lineage.application.load_provider", return_value=provider):
+                with patch(LOAD_PROVIDER, return_value=provider):
                     result = run_lineage_analysis_use_case(
                         "dynamic",
                         source_path=source_path,

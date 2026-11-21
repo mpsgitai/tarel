@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Any, Protocol
 
+from tarel.atomic import write_atomic
 from tarel.topology.contracts import (
     LogicalTopologyDocument,
     LogicalTopologyFailure,
@@ -42,23 +41,9 @@ class FileLogicalTopologyStore:
             indent=2,
             sort_keys=True,
         )
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".logical-topology-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            os.fchmod(descriptor, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".logical-topology-", durable=True)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise LogicalTopologyFailure(
                 "logical_topology_save_failed",
                 f"Could not save logical topology for graph: {document.graph_name}",

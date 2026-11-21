@@ -6,14 +6,15 @@ import hashlib
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from tarel.discovery.contracts import DiscoveryCandidate, DiscoveryRun
 from tarel.discovery.logical_program import LogicalJoinProgram
+from tarel.discovery.runs import (
+    DiscoveryCandidate,
+    DiscoveryRun,
+)
 from tarel.graph.contracts import GraphDocument
 from tarel.graph.revision import physical_graph_revision
-from tarel.graph.store import FileGraphStore
 from tarel.logical_joins.contracts import LOGICAL_JOIN_MODES, LogicalJoin, LogicalJoinFailure
-from tarel.logical_joins.store import FileLogicalJoinStore
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.topology.endpoint_contracts import (
     LogicalEndpoint,
     LogicalEndpointFailure,
@@ -111,7 +112,7 @@ def promote_logical_join_use_case(
     )
     LogicalJoin.from_dict(join.to_dict())
     _resolve(join, graph, mode="include_candidates", runtime=runtime)
-    store = _store(runtime)
+    store = resolve_runtime(runtime).logical_join_store()
     if store.exists(join.id):
         current = store.load(join.id)
         if replace(current, state="candidate", review_reason=None) != join:
@@ -126,7 +127,7 @@ def load_logical_join_use_case(
     runtime: TarelRuntime | None = None,
 ) -> LogicalJoin:
     """Load an audit record; find/review revalidate current dependencies."""
-    return _store(runtime).load(join_id)
+    return resolve_runtime(runtime).logical_join_store().load(join_id)
 
 
 def list_logical_joins_use_case(
@@ -134,7 +135,7 @@ def list_logical_joins_use_case(
     graph_name: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> tuple[LogicalJoin, ...]:
-    store = _store(runtime)
+    store = resolve_runtime(runtime).logical_join_store()
     return tuple(
         join
         for join in (store.load(item) for item in store.list())
@@ -157,7 +158,7 @@ def review_logical_join_use_case(
         raise LogicalJoinFailure("logical_join_already_reviewed", "Review decisions are terminal.")
     if not isinstance(decision, str) or decision not in {"approve", "reject"}:
         raise LogicalJoinFailure("invalid_logical_join_review", "Choose approve or reject.")
-    graph = _graphs(runtime).load(join.graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(join.graph_name)
     # Human review of a rule is separate from the review of its dependencies. Approval is
     # allowed for audit, but confirmed retrieval never bypasses unreviewed dependencies.
     _resolve(join, graph, mode="include_candidates", runtime=runtime)
@@ -176,7 +177,7 @@ def review_logical_join_use_case(
         join, state="reviewed" if decision == "approve" else "rejected", review_reason=reason
     )
     LogicalJoin.from_dict(changed.to_dict())
-    _store(runtime).save(changed)
+    resolve_runtime(runtime).logical_join_store().save(changed)
     return changed
 
 
@@ -195,7 +196,7 @@ def find_logical_joins_use_case(
         raise LogicalJoinFailure("invalid_logical_join_limit", "Logical join limit must be 1..200.")
     if endpoint is not None and not isinstance(endpoint, LogicalEndpoint):
         raise LogicalJoinFailure("invalid_logical_join_endpoint", "Expected a typed endpoint.")
-    graph = _graphs(runtime).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     physical_revision = physical_graph_revision(graph)
     matches: list[LogicalJoinMatch] = []
     candidates = list_logical_joins_use_case(graph_name=graph_name, runtime=runtime)
@@ -261,9 +262,3 @@ def _resolve(
     )
 
 
-def _store(runtime: TarelRuntime | None) -> FileLogicalJoinStore:
-    return FileLogicalJoinStore(runtime.root / "logical-joins" if runtime else None)
-
-
-def _graphs(runtime: TarelRuntime | None) -> FileGraphStore:
-    return runtime.graph_store() if runtime else FileGraphStore()

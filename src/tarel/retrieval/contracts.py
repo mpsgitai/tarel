@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, NotRequired, Protocol, TypedDict
+
+from tarel.errors import TarelError
 
 
-class RetrievalFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class RetrievalFailure(TarelError):
+    """Raised when a retrieval operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +45,29 @@ class EmbeddingBackend(Protocol):
 
     def embed_query(self, text: str) -> tuple[float, ...]: ...
 
+    @property
+    def input_strategy(self) -> str:
+        """Names how a text becomes model input; recorded so vectors stay comparable."""
+        ...
+
+    @property
+    def max_input_tokens(self) -> int | None:
+        """The per-text token limit, or None when the provider does not disclose it."""
+        ...
+
+    def token_count(self, text: str) -> int | None:
+        """The tokens this text occupies, or None when only the provider can count them."""
+        ...
+
+    def embed_cut_document(self, text: str) -> tuple[float, ...]:
+        """Embed the part of an overlong document that fits; the caller must record the cut."""
+        ...
+
+    @property
+    def runtime_version(self) -> str:
+        """The embedding library and version, or "" when TAREL cannot know it."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class IndexMetadata:
@@ -59,6 +82,17 @@ class IndexMetadata:
     normalized: bool
     annotation_states: tuple[str, ...] = ()
     documents_sha256: str = ""
+    # Walked through with the maintainer (docs/contracts.md). "" means not recorded:
+    # every format before tarel.retrieval.v0.4, whose real embedding settings cannot be proven.
+    embedding_input: str = ""
+    # Vectors carried over from such an unrecorded index instead of being embedded under
+    # embedding_input.
+    unverified_documents: int = 0
+    # Documents over the token limit whose vector covers only their beginning.
+    truncated_documents: tuple[str, ...] = ()
+    # Library that embedded the newest vectors. It explains shifts between versions; nothing is
+    # reused or rebuilt because of it, since a patch release would otherwise redo every index.
+    embedding_runtime: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -73,6 +107,10 @@ class IndexMetadata:
             "normalized": self.normalized,
             "annotation_states": list(self.annotation_states),
             "documents_sha256": self.documents_sha256,
+            "embedding_input": self.embedding_input,
+            "unverified_documents": self.unverified_documents,
+            "truncated_documents": list(self.truncated_documents),
+            "embedding_runtime": self.embedding_runtime,
         }
 
 
@@ -110,3 +148,112 @@ class IndexChanges:
             "requires_embedding": self.requires_embedding,
             "current": self.current,
         }
+
+
+# JSON status payloads. They stay plain dictionaries because the CLI prints them and the SDK
+# returns them unchanged; the TypedDicts only give their shape a name and a type.
+
+
+class ModelStatus(TypedDict):
+    """Whether the local embedding model file exists and matches its published checksum."""
+
+    exists: bool
+    model: str
+    path: str
+    sha256_valid: bool
+    size: int | None
+    source: str
+
+
+class EmbeddingInputStatus(TypedDict):
+    """What is known about how an index's vectors were produced."""
+
+    state: str
+    strategy: str | None
+    unverified_documents: int
+    truncated_documents: list[str]
+    runtime: str | None
+    detail: str
+
+
+class IndexStatus(TypedDict):
+    """Whether one graph's index is current, complete and built with the selected model."""
+
+    state: str
+    checkpoint: dict[str, object] | None
+    current: bool
+    ready: bool
+    changes: dict[str, Any]
+    index: dict[str, Any] | None
+    model_available: bool | None
+    model_matches: bool | None
+    embedding_input: EmbeddingInputStatus | None
+    path: str
+    vector_backend: str
+
+
+class GraphIndexStatus(IndexStatus):
+    """An :class:`IndexStatus` inside a workspace status, labelled with its graph."""
+
+    graph: str
+
+
+class WorkspaceIndexStatus(TypedDict):
+    """The combined index status of every graph in a workspace scope."""
+
+    workspace: str
+    state: str
+    current: bool
+    ready: bool
+    graph_count: int
+    ready_graphs: int
+    pending_graphs: int
+    missing_graphs: int
+    document_count: int
+    unverified_embedding_graphs: list[str]
+    truncated_embedding_graphs: list[str]
+    vector_backend: str
+    graphs: list[GraphIndexStatus]
+
+
+class IndexBuildSummary(TypedDict):
+    """What one graph's index build embedded, reused and removed."""
+
+    graph: str
+    documents: int
+    embedded_documents: int
+    reused_documents: int
+    removed_documents: int
+    unverified_documents: int
+    truncated_documents: int
+    path: str
+
+
+class WorkspaceIndexBuild(TypedDict):
+    """One bounded batch of a workspace index update and the status after it."""
+
+    workspace: str
+    built: list[IndexBuildSummary]
+    built_graphs: int
+    remaining_graphs: int
+    status: WorkspaceIndexStatus
+
+
+class ModelEntry(TypedDict):
+    """One selectable model; local entries also report installation, size and source."""
+
+    id: str
+    task: str
+    installed: NotRequired[bool]
+    downloadable: NotRequired[bool]
+    size_bytes: NotRequired[int]
+    source: NotRequired[str]
+    adapter: NotRequired[str]
+
+
+class ModelCatalog(TypedDict):
+    """The models a provider offers for one task (embedding or reranker)."""
+
+    provider: str
+    task: str
+    models: list[ModelEntry]

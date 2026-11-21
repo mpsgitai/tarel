@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from tarel.errors import TarelError
 
-class AgentSetupFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+
+class AgentSetupFailure(TarelError):
+    """Raised when an agent setup operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

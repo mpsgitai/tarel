@@ -8,6 +8,9 @@ from tarel.annotations.contracts import AnnotationFailure
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult, SampleResult
 from tarel.sdk import Tarel
 
+# Patch targets: where the use cases look these names up.
+LOAD_PROVIDER = "tarel.annotations.application.load_provider"
+
 _PROTECTED_VALUE = "Private Customer 9472"
 
 
@@ -19,7 +22,7 @@ class CallerSuppliedAnnotationSampleTests(TestCase):
             target_id = _target_id(graph)
             provider = _Provider()
 
-            with patch("tarel.application.load_provider", return_value=provider):
+            with patch(LOAD_PROVIDER, return_value=provider):
                 result = sdk.annotation.run(
                     "composite",
                     provider="test",
@@ -43,7 +46,7 @@ class CallerSuppliedAnnotationSampleTests(TestCase):
             before = imported.path.read_bytes()
 
             with (
-                patch("tarel.application.load_provider", return_value=_Provider(echo_sample=True)),
+                patch(LOAD_PROVIDER, return_value=_Provider(echo_sample=True)),
                 self.assertRaises(AnnotationFailure) as raised,
             ):
                 sdk.annotation.run(
@@ -66,7 +69,7 @@ class CallerSuppliedAnnotationSampleTests(TestCase):
             sample = replace(_sample(), rows=_sample().rows * 11)
 
             with (
-                patch("tarel.application.load_provider") as load_provider,
+                patch(LOAD_PROVIDER) as load_provider,
                 self.assertRaises(AnnotationFailure) as raised,
             ):
                 sdk.annotation.run(
@@ -85,7 +88,7 @@ class CallerSuppliedAnnotationSampleTests(TestCase):
             target_id = _target_id(graph)
 
             with (
-                patch("tarel.application.load_provider") as load_provider,
+                patch(LOAD_PROVIDER) as load_provider,
                 self.assertRaises(AnnotationFailure) as raised,
             ):
                 sdk.annotation.run(

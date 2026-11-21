@@ -15,7 +15,7 @@
     <div class="shell">
       <header class="topbar">
         <div class="brand">
-          <span><strong>TAREL</strong><small>Topology · Annotation · Retrieval · Evidence · Lineage</small></span>
+          <span><strong>TAREL</strong></span>
         </div>
         <nav class="view-tabs" aria-label="Views">
           <button class="tab is-active" data-view="graph">Explore</button>
@@ -28,10 +28,9 @@
       <main id="workspace">
         <section id="graph-view" class="view is-active">
           <aside id="architecture-sidebar" hidden>
-            <p class="eyebrow">Local architecture · experimental</p><h1>Your landscape</h1>
-            <label>Collection<select id="arch-collection"></select></label>
+            <button id="arch-sidebar-close" class="icon-button panel-close mobile-only" aria-label="Close filters">×</button>            <label>Collection<select id="arch-collection"></select></label>
             <p id="arch-collection-description"></p>
-            <div class="arch-buttons"><button id="arch-add-collection" class="quiet-button">+ Collection</button><button id="arch-edit-collection" class="quiet-button">Edit</button></div>
+            <div class="arch-buttons" data-write="architecture"><button id="arch-add-collection" class="quiet-button">+ Collection</button><button id="arch-edit-collection" class="quiet-button">Edit</button></div>
             <label>Detail level<select id="arch-level"><option value="area">Systems / areas</option><option value="graph">Databases / source areas</option><option value="system">Systems, compact</option></select></label>
             <label>Search architecture<input id="arch-search" type="search" placeholder="WWI, SQL Server, CRM…" /></label>
             <label>Highlight system<select id="arch-spotlight"></select></label>
@@ -45,54 +44,65 @@
             <section id="arch-selection" aria-live="polite"></section>
             <details><summary>Select cards</summary><nav id="arch-node-list" aria-label="Architecture cards"></nav></details>
             <details><summary>Select connections</summary><nav id="arch-edge-list" aria-label="Architecture connections"></nav></details>
-            <div class="arch-legend"><strong>Architecture ≠ technical lineage</strong><span>Blue: documented · yellow dashed: planned</span><span>Grey dotted: unverified · green: manually confirmed</span><span>Violet dashed: orchestration</span><span>Documented does not mean currently running.</span></div>
           </aside>
           <aside id="object-sidebar" class="sidebar">
-            <div class="pane-heading"><div><p class="eyebrow">Estate explorer</p><h1>Objects</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button></div>
-            <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Search names, fields, meaning…" autocomplete="off" /></label>
+            <div class="pane-heading"><div><h1>Objects</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button></div>
+            <div class="search-row">
+              <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Names, fields, meaning…" autocomplete="off" /></label>
+              <button id="search-settings-toggle" class="icon-button search-settings-toggle" aria-controls="search-settings" aria-expanded="false" aria-label="Search settings" title="Search settings"><span aria-hidden="true">⚙</span><i id="search-settings-dot" class="attention-dot" title="The selected search mode needs attention" hidden></i></button>
+            </div>
+            <div id="search-blocker" class="search-blocker" role="alert" hidden><span id="search-blocker-text"></span><button id="search-blocker-update" class="quiet-button">Update index</button></div>
+            <small id="external-provider-note" class="search-mode-note caution search-note" hidden></small>
             <div id="project-search-status" class="project-search-status" role="status" aria-live="polite" hidden></div>
-            <div class="retrieval-workspace">
-              <strong id="retrieval-workspace-label">Working scope: project</strong>
-              <div><button id="search-here" class="quiet-button">Search here</button><button id="search-project" class="quiet-button" hidden>Search project</button></div>
+            <button id="run-model-search" class="quiet-button run-model-search" hidden>Search</button>
+            <section id="search-settings" class="search-settings" aria-label="Search settings" hidden>
               <div class="index-health"><span id="index-health-dot" aria-hidden="true"></span><span id="index-health-label" role="status" aria-live="polite">Checking local search…</span><button id="update-index" class="quiet-button" hidden>Update</button></div>
               <small id="retrieval-selection-label"></small>
-              <button id="run-model-search" class="quiet-button" hidden>Search</button>
-            </div>
-            <details id="retrieval-model-panel" class="search-filter-panel"><summary>Search models</summary><div>
-              <label>Search mode<select id="retrieval-mode" aria-describedby="search-mode-note"><option value="lexical">Names</option><option value="bm25">BM25</option><option value="hybrid">Hybrid</option><option value="vector">Vector</option></select></label>
-              <p id="search-mode-note" class="search-mode-note" hidden></p>
-              <label>Embedding<select id="embedding-provider"></select><input id="embedding-model" list="embedding-models" maxlength="256" aria-label="Embedding model" /><datalist id="embedding-models"></datalist></label>
-              <div><button id="embedding-catalog" class="quiet-button">List models</button><button id="embedding-download" class="quiet-button">Download local model</button></div>
-              <label>Reranker<select id="reranker-provider"></select><input id="reranker-model" list="reranker-models" maxlength="256" aria-label="Reranker model" /><datalist id="reranker-models"></datalist></label>
-              <div><button id="reranker-catalog" class="quiet-button">List models</button><button id="reranker-download" class="quiet-button">Download local model</button></div>
-              <label>Rerank candidates<input id="rerank-depth" type="number" min="1" max="100" value="10" /></label>
-              <p>Cloud selections send search questions and selected schema metadata to the provider. Index vectors stay local. Downloads and index updates are separate actions.</p>
-              <button id="apply-retrieval" class="quiet-button">Apply selection</button><p id="retrieval-message" role="status" aria-live="polite"></p>
-            </div></details>
-            <details class="search-filter-panel"><summary>Refine results <small id="search-filter-summary">No filters</small></summary><div>
-              <label>Object type<select id="search-object-type"><option value="">Tables and views</option><option value="table">Tables</option><option value="view">Views</option></select></label>
-              <label>Documented role<input id="search-role" maxlength="100" placeholder="fact" /></label>
-              <label>Required field<input id="search-required-field" maxlength="200" placeholder="SalesAmount" /></label>
-              <label class="checkbox"><input id="search-reviewed" type="checkbox" /><span>Reviewed descriptions and roles only</span></label>
-            </div></details>
-            <div class="filter-row"><button class="chip is-active" data-kind="all">All</button><button class="chip" data-kind="table">Tables</button><button class="chip" data-kind="view">Views</button></div>
-            <details id="scope-panel" class="scope-panel"><summary><span>Source filters</span><small id="scope-count"></small></summary><div id="scope-filters"></div></details>
-            <details id="focus-panel" class="focus-panel" hidden>
-              <summary><span>Report / cube filter</span><small id="focus-count"></small></summary>
-              <div class="focus-tools">
-                <label class="focus-search"><span>⌕</span><input id="focus-search" type="search" placeholder="Find a saved report path" autocomplete="off" /></label>
-                <label class="compact-check"><input id="focus-selected-only" type="checkbox" /><span>Selected only</span></label>
+              <div id="retrieval-model-panel" class="search-models">
+                <h2>Search models</h2>
+                <label>Search mode<select id="retrieval-mode" aria-describedby="search-mode-note"><option value="lexical">Names</option><option value="bm25">BM25</option><option value="hybrid">Hybrid</option><option value="vector">Vector</option></select></label>
+                <p id="search-mode-note" class="search-mode-note" hidden></p>
+                <label>Embedding<select id="embedding-provider"></select><input id="embedding-model" list="embedding-models" maxlength="256" aria-label="Embedding model" /><datalist id="embedding-models"></datalist></label>
+                <div><button id="embedding-catalog" class="quiet-button">List models</button><button id="embedding-download" class="quiet-button">Download local model</button></div>
+                <label>Reranker<select id="reranker-provider"></select><input id="reranker-model" list="reranker-models" maxlength="256" aria-label="Reranker model" /><datalist id="reranker-models"></datalist></label>
+                <div><button id="reranker-catalog" class="quiet-button">List models</button><button id="reranker-download" class="quiet-button">Download local model</button></div>
+                <label>Rerank candidates<input id="rerank-depth" type="number" min="1" max="100" value="10" /></label>
+                <p>Cloud selections send search questions and selected schema metadata to the provider. Index vectors stay local. Downloads and index updates are separate actions.</p>
+                <button id="apply-retrieval" class="quiet-button">Apply selection</button><p id="retrieval-message" role="status" aria-live="polite"></p>
               </div>
-              <nav id="focus-list" class="focus-list" aria-label="Saved report and cube focuses"></nav>
-              <div class="focus-actions"><button id="clear-focuses" class="quiet-button">Clear</button><button id="apply-focuses" class="primary-button">Apply selection</button></div>
-              <div id="focus-summary" class="focus-summary"></div>
-            </details>
-            <div id="active-scope" class="active-scope" hidden></div>
+            </section>
+            <div class="list-controls">
+              <div class="filter-row"><button class="chip is-active" data-kind="all">All</button><button class="chip" data-kind="table">Tables</button><button class="chip" data-kind="view">Views</button></div>
+              <button id="filters-toggle" class="quiet-button filters-toggle" aria-controls="filters-panel" aria-expanded="false">Filters<span id="filters-count" class="filters-count"></span></button>
+            </div>
+            <div id="filters-panel" class="filters-panel" hidden>
+              <details class="search-filter-panel"><summary>Refine search results <small id="search-filter-summary">No filters</small></summary><div>
+                <label>Object type<select id="search-object-type"><option value="">Tables and views</option><option value="table">Tables</option><option value="view">Views</option></select></label>
+                <label>Documented role<input id="search-role" maxlength="100" placeholder="fact" /></label>
+                <label>Required field<input id="search-required-field" maxlength="200" placeholder="SalesAmount" /></label>
+                <label class="checkbox"><input id="search-reviewed" type="checkbox" /><span>Reviewed descriptions and roles only</span></label>
+              </div></details>
+              <details id="scope-panel" class="scope-panel"><summary><span>Source filters</span><small id="scope-count"></small></summary><div id="scope-filters"></div></details>
+              <details id="focus-panel" class="focus-panel" hidden>
+                <summary><span>Report / cube filter</span><small id="focus-count"></small></summary>
+                <div class="focus-tools">
+                  <label class="focus-search"><span>⌕</span><input id="focus-search" type="search" placeholder="Find a saved report path" autocomplete="off" /></label>
+                  <label class="compact-check"><input id="focus-selected-only" type="checkbox" /><span>Selected only</span></label>
+                </div>
+                <nav id="focus-list" class="focus-list" aria-label="Saved report and cube focuses"></nav>
+                <div class="focus-actions"><button id="clear-focuses" class="quiet-button">Clear</button><button id="apply-focuses" class="primary-button">Apply selection</button></div>
+                <div id="focus-summary" class="focus-summary"></div>
+              </details>
+            </div>
+            <div class="scope-line">
+              <span id="active-scope" class="active-scope">Loading objects…</span>
+              <span class="scope-search"><span id="retrieval-workspace-label">Working scope: project</span><button id="search-here" class="quiet-button" hidden>Search here</button><button id="search-project" class="quiet-button" hidden>Search project</button></span>
+            </div>
             <div id="family-notices" class="topology-notices" role="status" hidden></div>
             <div id="logical-topology-notices" class="topology-notices" role="status" hidden></div>
             <div id="object-list" class="object-list" aria-label="Graph objects"></div>
             <details id="zones-panel" class="scope-panel zones-panel"><summary><span>Business zones</span><small id="zone-count"></small></summary>
-            <div class="zone-heading"><button id="new-zone" class="quiet-button" title="Create zone">+ Create zone</button></div>
+            <div class="zone-heading" data-write="graph"><button id="new-zone"class="quiet-button" title="Create zone">+ Create zone</button></div>
             <p class="zone-help">Group related objects without changing their source.</p>
             <div id="zone-list" class="zone-list"></div>
             </details>
@@ -100,27 +110,30 @@
 
           <section class="canvas-pane">
             <div class="canvas-toolbar">
-              <div class="canvas-heading"><strong id="canvas-title">Schema topology</strong><span id="canvas-subtitle"></span></div>
+              <div class="canvas-heading"><strong id="canvas-title">Schema topology</strong><span id="canvas-subtitle"></span><span id="arch-claims" class="arch-claims" hidden>Architecture ≠ technical lineage · Documented does not mean currently running</span></div>
               <div class="toolbar-actions">
                 <button id="open-objects" class="quiet-button mobile-only" aria-controls="object-sidebar" aria-expanded="false">Objects</button>
-                <div class="canvas-mode" role="group" aria-label="Canvas mode"><button id="architecture-mode" class="chip" data-canvas-mode="architecture" hidden>Architecture</button><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
-                <button id="show-systems" class="chip" aria-pressed="false" title="Return to the system overview; preserve other source filters">Systems</button>
+                <div id="canvas-mode-group" class="canvas-mode" role="group" aria-label="Canvas mode"><button id="architecture-mode" class="chip" data-canvas-mode="architecture" hidden>Architecture</button><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
+                <div id="level-switch" class="canvas-mode level-switch" role="group" aria-label="Level"><button id="show-systems" class="chip" aria-pressed="false" title="Return to the system overview; preserve other source filters">Systems</button><button id="show-all" class="chip" title="Show every object in the current filters">All objects</button></div>
                 <select id="system-jump" aria-label="Open a system" hidden></select>
-                <button id="show-all" class="quiet-button" title="Show every object in the current filters">All objects</button><button id="fit-graph" class="quiet-button" title="Show the selected object and its immediate neighbours">Neighbours</button>
+                <button id="fit-graph" class="quiet-button moved-to-inspector" title="Show the selected object and its immediate neighbours" tabindex="-1" aria-hidden="true">Neighbours</button>
+                <button id="lineage-isolate" class="quiet-button" hidden>Isolate path</button><button id="lineage-clear-path" class="quiet-button" hidden>Clear path</button>
                 <details id="view-options" class="view-options"><summary class="quiet-button">View</summary><div class="view-options-menu">
+                  <button id="lineage-process-toggle" class="chip" aria-pressed="false" title="Draw each process as its own node, for looking at orchestration" hidden>Processes as nodes</button>
+                  <p id="lineage-load-hint" class="view-hint" hidden>No lineage loaded. Restart with <code>tarel ui --lineage NAME</code> to see data flows.</p>
                   <label class="family-mode"><span>Object families</span><select id="family-mode"><option value="">Physical objects</option><option value="confirmed_only">Reviewed families</option><option value="include_candidates">Include exploratory families</option></select></label>
                   <label class="compact-check"><input id="toggle-derived-relations" type="checkbox" /><span>Derived relations · may include exploratory metadata</span></label>
                   <label id="entity-layer-option" class="compact-check" hidden><input id="toggle-entity-resolution" type="checkbox" /><span>Show loaded identity / mapping hints</span></label>
-                  <button id="add-lineage" class="quiet-button">+ Manual job / hop</button>
+                  <button id="add-lineage" class="quiet-button" data-write="graph">+ Manual job / hop</button>
                 </div></details>
                 <button id="trace-selected" class="quiet-button">Trace</button><button id="open-inspector" class="quiet-button" aria-controls="inspector" aria-expanded="true">Details</button>
               </div>
             </div>
             <div id="architecture-toolbar" hidden>
-              <button id="arch-add-edge" class="primary-button">+ Connection</button>
+              <button id="arch-add-edge" class="primary-button" data-write="architecture">+ Connection</button>
               <button id="arch-arrange" class="quiet-button">Arrange</button><button id="arch-undo" class="quiet-button" title="Ctrl+Z">Undo</button>
               <button id="arch-fit-selected" class="quiet-button" title="F">Fit selection</button>
-              <button id="arch-save-layout" class="quiet-button">Save layout</button><button id="arch-wide" class="quiet-button" aria-pressed="false">More space</button><span id="arch-layout-state"></span>
+              <button id="arch-save-layout" class="quiet-button" data-write="architecture">Save layout</button><button id="arch-wide" class="quiet-button" aria-pressed="false">More space</button><span id="arch-layout-state"></span>
             </div>
             <div id="graph-canvas" role="application" aria-label="Interactive schema graph"></div>
             <div id="canvas-busy" class="canvas-busy" role="status" aria-live="polite" hidden><span class="canvas-busy-spinner" aria-hidden="true"></span><strong>Drawing objects…</strong><small>Large views take a few seconds; the page responds again when the graph appears.</small></div>
@@ -136,7 +149,7 @@
               <div class="trace-actions"><div id="lineage-status" class="notice"></div><button id="show-trace-canvas" class="primary-button" hidden>Show path on canvas</button></div>
               <div id="lineage-origins" class="origin-list"></div>
               <div id="lineage-hops" class="hop-list"></div>
-              <section class="manual-lineage-section"><div class="drawer-heading"><div><p class="eyebrow">Human-authored overlay</p><h2>Manual jobs &amp; hops</h2></div><button id="add-lineage-drawer" class="quiet-button">+ Add</button></div><div id="manual-lineage-list" class="manual-lineage-list"></div></section>
+              <section class="manual-lineage-section"><div class="drawer-heading"><div><p class="eyebrow">Human-authored overlay</p><h2>Manual jobs &amp; hops</h2></div><button id="add-lineage-drawer" class="quiet-button" data-write="graph">+ Add</button></div><div id="manual-lineage-list" class="manual-lineage-list"></div></section>
             </section>
           </section>
 
@@ -146,7 +159,7 @@
         <section id="review-view" class="view review-layout">
           <div class="review-tools"><button id="open-review-queue" class="quiet-button mobile-only" aria-controls="review-queue" aria-expanded="false">Review queue</button><span>Optional governance: inspect, correct or approve autonomous annotations.</span><button id="open-evidence" class="quiet-button" aria-controls="review-evidence" aria-expanded="false">Evidence</button></div>
           <aside id="review-queue" class="review-queue-pane">
-            <div class="pane-heading"><div><p class="eyebrow">Optional governance</p><h1>Annotations</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="review-queue" aria-label="Close review queue">×</button></div>
+            <div class="pane-heading"><div><h1>Annotations</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="review-queue" aria-label="Close review queue">×</button></div>
             <p class="guidance">Autonomous drafts are usable immediately. Review only where your governance policy requires it.</p>
             <div class="filter-row"><button class="review-filter chip is-active" data-review-filter="pending">To review</button><button class="review-filter chip" data-review-filter="all">All</button></div>
             <div id="review-progress" class="progress-copy"></div><div class="progress-track"><span id="review-progress-bar"></span></div>
@@ -157,7 +170,7 @@
           <aside id="review-evidence" class="evidence-pane"><div class="empty-state"><h2>Evidence</h2><p>Source observations and proposal provenance appear here.</p></div></aside>
         </section>
       </main>
-      <footer><span><i class="local-dot"></i>Local browser session</span><span>No external requests</span><span id="footer-status">Ready</span></footer>
+      <footer><span id="footer-status">Ready</span></footer>
     </div>
 
     <dialog id="zone-dialog" aria-labelledby="zone-title">
@@ -214,7 +227,7 @@
 
     <dialog id="context-dialog" aria-labelledby="context-title">
       <div class="context-dialog-body">
-        <div class="drawer-heading"><div><p class="eyebrow">Context builder</p><h2 id="context-title">Agent context</h2></div><button id="close-context" type="button" class="icon-button" aria-label="Close agent context">×</button></div>
+        <div class="drawer-heading"><div><h2 id="context-title">Agent context</h2></div><button id="close-context" type="button" class="icon-button" aria-label="Close agent context">×</button></div>
         <p class="context-intro">Compile a bounded metadata packet for an agent. No data queries or LLM calls.</p>
         <div class="context-layout">
         <section class="context-setup" aria-label="Context settings">
@@ -233,7 +246,7 @@
         </form>
         </section>
         <section class="context-output" aria-label="Context preview">
-          <div class="context-empty"><span class="preview-symbol" aria-hidden="true">{ }</span><p class="eyebrow">Context preview</p><h3>Your agent's working context</h3><p>Choose a question or a stable base, then build context to inspect the selected objects, fields and sources.</p><small>Scope, review policy and size limits remain visible alongside the result.</small></div>
+          <p class="context-empty">The compiled packet appears here.</p>
           <section id="context-result" hidden></section>
         </section>
         </div>
@@ -255,7 +268,7 @@
           <label class="span-two">Evidence / planning reference<input name="evidence" required maxlength="2000" placeholder="Path to documentation or explicit plan" /></label>
         </div>
         <p class="arch-form-error" hidden role="alert"></p>
-        <div class="dialog-actions"><button type="button" id="arch-connection-delete" class="quiet-button arch-danger" hidden>Delete</button><button type="button" class="quiet-button" data-arch-close="#arch-connection-dialog">Cancel</button><button id="arch-connection-save" class="primary-button">Save</button></div>
+        <div class="dialog-actions"><button type="button" id="arch-connection-delete" class="quiet-button arch-danger" data-write="architecture" hidden>Delete</button><button type="button" class="quiet-button" data-arch-close="#arch-connection-dialog">Cancel</button><button id="arch-connection-save" class="primary-button" data-write="architecture">Save</button></div>
       </form>
     </dialog>
     <dialog id="arch-collection-dialog" class="arch-dialog" aria-labelledby="arch-collection-title">
@@ -266,7 +279,7 @@
         <div class="field-grid"><label>Name<input name="label" required maxlength="100" /></label><label>Description<input name="description" required maxlength="2000" /></label></div>
         <input id="arch-member-search" type="search" aria-label="Search members" placeholder="Search systems, areas, sources…" />
         <div id="arch-collection-members"></div><p class="arch-form-error" hidden role="alert"></p>
-        <div class="dialog-actions"><button type="button" id="arch-collection-delete" class="quiet-button arch-danger" hidden>Delete collection</button><button type="button" class="quiet-button" data-arch-close="#arch-collection-dialog">Cancel</button><button class="primary-button">Save collection</button></div>
+        <div class="dialog-actions"><button type="button" id="arch-collection-delete" class="quiet-button arch-danger" data-write="architecture" hidden>Delete collection</button><button type="button" class="quiet-button" data-arch-close="#arch-collection-dialog">Cancel</button><button class="primary-button" data-write="architecture">Save collection</button></div>
       </form>
     </dialog>
     <script src="/cytoscape.min.js"></script>
@@ -277,6 +290,7 @@
     <script src="/estate_navigation.js"></script>
     <script src="/architecture.js"></script>
     <script src="/architecture_actions.js"></script>
+    <script src="/lineage_flows.js"></script>
     <script src="/app.js"></script>
     <script src="/atlas.js"></script>
   </body>

@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 from tarel.providers.config import REASONING_EFFORTS, HTTPProviderConfig
 from tarel.providers.contracts import ProviderFailure, StructuredRequest
-from tarel.providers.openrouter import _structured_content
+from tarel.providers.openrouter import structured_content
 
 _RESULT_TOOL = "submit_tarel_result"
 
@@ -100,4 +100,4 @@ class OpenAICompatibleProvider:
                 "invalid_provider_response",
                 "Provider returned an unreadable response.",
             ) from exc
-        return _structured_content(response_data, provider_label=self.name)
+        return structured_content(response_data, provider_label=self.name)

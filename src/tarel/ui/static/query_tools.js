@@ -21,6 +21,7 @@ const queryTools = {
   indexStatusScheduled: false,
   indexStatusDirty: false,
   indexBuilding: false,
+  indexError: null,
   requireSubmit: false,
 };
 
@@ -54,6 +55,37 @@ function renderSearchMode() {
   note.hidden = !text;
   note.textContent = text;
   note.className = `search-mode-note${SEMANTIC_MODES.has(mode) ? " caution" : ""}`;
+  renderSearchBlocker();
+}
+
+// Only the applied mode decides whether search needs attention: exact text and
+// BM25 never read the vector index, so a missing index is no reason to warn them.
+function searchIndexBlocker() {
+  const mode = currentSearchMode();
+  if (!SEMANTIC_MODES.has(mode)) return "";
+  const name = SEARCH_MODE_NAMES[mode];
+  if (queryTools.indexError) return `${name} search is blocked: ${queryTools.indexError}`;
+  const status = queryTools.indexStatus;
+  if (!status || status.ready) return "";
+  const total = status.workspace ? status.graph_count : 1;
+  const ready = status.workspace ? status.ready_graphs : 0;
+  return `${name} search needs the local index (${ready}/${total} graph${total === 1 ? "" : "s"} ready).`;
+}
+
+function renderSearchBlocker() {
+  const blocker = searchIndexBlocker();
+  $("#search-blocker").hidden = !blocker;
+  $("#search-blocker-text").textContent = blocker;
+  $("#search-blocker-update").disabled = queryTools.indexBuilding;
+  $("#search-blocker-update").textContent = queryTools.indexBuilding ? "Updating…" : "Update index";
+  $("#search-settings-dot").hidden = !blocker;
+}
+
+function refineFilterCount() {
+  return [
+    $("#search-object-type").value, $("#search-role").value.trim(),
+    $("#search-required-field").value.trim(), $("#search-reviewed").checked,
+  ].filter(Boolean).length;
 }
 
 async function loadIndexStatus() {
@@ -64,12 +96,15 @@ async function loadIndexStatus() {
     try {
       const status = await api("/api/index/status");
       if (request !== queryTools.indexStatusRequest) return;
+      queryTools.indexError = null;
       queryTools.indexStatus = status;
       renderIndexStatus();
     } catch (error) {
       if (request !== queryTools.indexStatusRequest) return;
-      $("#index-health-label").textContent = `Local search status unavailable: ${error.message}`;
+      queryTools.indexError = `Local search status unavailable: ${error.message}`;
+      $("#index-health-label").textContent = queryTools.indexError;
       $("#index-health-dot").className = "is-error";
+      renderSearchBlocker();
     }
   })();
   queryTools.indexStatusPending = pending;
@@ -125,6 +160,7 @@ async function updateIndex() {
     const result = await api("/api/index/build", {});
     const status = result.status || await api("/api/index/status");
     queryTools.indexStatusRequest += 1;
+    queryTools.indexError = null;
     queryTools.indexStatus = status;
     renderIndexStatus();
     const changed = result.built_graphs ?? 1;
@@ -135,6 +171,7 @@ async function updateIndex() {
     toast(`Local search updated for ${changed} graph${changed === 1 ? "" : "s"}.${suffix}`);
   } catch (error) {
     failed = true;
+    queryTools.indexError = error.message;
     $("#index-health-label").textContent = error.message;
     $("#index-health-dot").className = "is-error";
   } finally {
@@ -143,6 +180,7 @@ async function updateIndex() {
     else {
       $("#update-index").disabled = false;
       $("#update-index").textContent = "Update";
+      renderSearchBlocker();
     }
   }
 }
@@ -402,6 +440,8 @@ function updateContextKind() {
   const query = $("#context-query");
   query.required = kind !== "prefix";
   query.disabled = kind === "prefix";
+  // Selections only matter to the "Selected search results" source; elsewhere the line stays silent.
+  $("#context-selection-summary").hidden = kind !== "selected" && !queryTools.selectedObjects.size;
   $("#context-selection-summary").textContent = queryTools.selectedObjects.size
     ? `${queryTools.selectedObjects.size} exact object${queryTools.selectedObjects.size === 1 ? "" : "s"} selected.`
     : "No search results selected.";
@@ -449,24 +489,49 @@ function renderContextPreview(packet, brief, delta) {
   const selections = new Map((dynamic.selection || []).map(item => [item.id, item]));
   const briefGaps = brief?.gaps || [];
   const scopeLabel = brief?.scope?.label || stable.graph?.name || "Current context";
+  const issueCount = omitted.length + hintOmissions.length + hintWarnings.length;
+  const budget = budgetFacts(packet, brief);
+  const budgetUp = packetIsTight(dynamic.budgets, omitted.length);
   const container = $("#context-result");
   container.hidden = false;
   container.innerHTML = `<div class="context-result-heading"><h3>Compiled context</h3><div><button id="copy-context" class="quiet-button">Copy JSON</button><button id="download-context" class="quiet-button">Download JSON</button></div></div>
-    <section class="context-brief"><p class="eyebrow">Current working context</p><h4>${escapeHtml(scopeLabel)}</h4><p><strong>Focus:</strong> ${(brief?.focus || []).length ? brief.focus.map(escapeHtml).join(", ") : "query-independent"}</p><p><strong>Coverage:</strong> ${brief?.coverage ? `${brief.coverage.described_objects}/${brief.coverage.objects} ${contextNoun(brief.coverage.objects, "object")} and ${brief.coverage.described_fields}/${brief.coverage.fields} ${contextNoun(brief.coverage.fields, "field")} described` : "not available"}</p><p><strong>Continuity:</strong> ${escapeHtml(String(brief?.continuity?.packet_hash || packet.identity.packet_hash || "unknown").slice(0, 12))} · stable ${escapeHtml(String(brief?.continuity?.stable_hash || packet.identity.stable_hash || "unknown").slice(0, 12))}</p></section>
+    <section class="context-brief"><p class="eyebrow">Current working context</p><h4>${escapeHtml(scopeLabel)}</h4><p><strong>Focus:</strong> ${(brief?.focus || []).length ? brief.focus.map(escapeHtml).join(", ") : "query-independent"}</p><p><strong>Coverage:</strong> ${brief?.coverage ? `${brief.coverage.described_objects}/${brief.coverage.objects} ${contextNoun(brief.coverage.objects, "object")} and ${brief.coverage.described_fields}/${brief.coverage.fields} ${contextNoun(brief.coverage.fields, "field")} described` : "not available"}</p></section>
     ${delta ? renderContextDelta(delta) : ""}
-    <div class="context-counts">${fact("Objects", stable.objects.length)}${fact("Fields", fieldCount)}${fact("Joins", stable.joins.length)}${fact("Characters", `${dynamic.budgets.context_characters} / ${dynamic.budgets.max_characters}`)}${fact("Estimated tokens", `≈ ${brief?.loaded?.estimated_tokens || Math.ceil(Number(dynamic.budgets.context_characters || 0) / 4)}`)}${fact("Stable tokens", `≈ ${brief?.loaded?.stable_estimated_tokens || Math.ceil(Number(dynamic.budgets.stable_characters || 0) / 4)}`)}</div>
-    <p class="semantic-origin">Annotations: ${stable.annotation_states.map(escapeHtml).join(", ") || "none"}. Physical structure is independent of annotation approval. Packet ${escapeHtml(packet.identity.packet_hash.slice(0, 12))}.</p>
+    <div class="context-counts">${fact("Objects", stable.objects.length)}${fact("Fields", fieldCount)}${fact("Joins", stable.joins.length)}${budgetUp ? budget : ""}</div>
+    ${budgetUp ? '<p class="logical-warning">This packet was cut or is close to its size limit; raise the limits or narrow the question if something is missing.</p>' : ""}
+    <p class="semantic-origin">Annotations: ${stable.annotation_states.map(escapeHtml).join(", ") || "none"}. Physical structure is independent of annotation approval.</p>
     ${stable.logical_hints ? `<p class="semantic-origin">Logical hints: ${hints.length} · ${escapeHtml(stable.logical_hints.mode)}. Metadata only; no entity-resolution candidates or executable family expansion.</p>` : ""}
     ${hints.some(item => item.usage === "exploratory_only") ? '<p class="logical-warning">This packet contains exploratory logical hints. Validate them before analytical use.</p>' : ""}
     ${!stable.objects.length ? '<p class="logical-warning">No physical objects were selected. This packet is not a sufficient basis for a data query.</p>' : ""}
-    <section class="context-omissions"><strong>${briefGaps.length ? `${briefGaps.length} context gap${briefGaps.length === 1 ? "" : "s"}` : "No context gaps detected"}</strong>${briefGaps.map(gap => `<article class="context-gap"><span>${escapeHtml(gap.category)} · ${gap.count}</span><p>${escapeHtml(gap.message)}</p><small>Next: ${escapeHtml(gap.action)}</small></article>`).join("")}<details class="optional-details"><summary><span>Compiler omissions and warnings</span></summary><div class="optional-body"><p>${omitted.map(([name, count]) => `${escapeHtml(name)}: ${count}`).join(" · ") || "No bounded metadata omissions."}</p>${omissions.reasons.length ? `<ul>${omissions.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${hintOmissions.length ? `<p>Logical hints omitted: ${hintOmissions.map(([reason, count]) => `${escapeHtml(reason)}: ${count}`).join(" · ")}</p>` : ""}${hintWarnings.map(warning => `<p class="logical-warning">${escapeHtml(warning)}</p>`).join("")}</div></details></section>
-    <details class="optional-details" open><summary><span>Selected objects · ${stable.objects.length}</span></summary><div class="optional-body context-object-list">${stable.objects.map(item => { const omittedFields = selections.get(item.id)?.omitted_fields || 0; return `<article><strong>${escapeHtml(item.label)}</strong><small>${item.fields.length} fields · Source review state: ${escapeHtml(item.annotation_state || "not recorded")}</small>${item.description ? `<p>${escapeHtml(item.description)}</p>` : '<p>Semantic text not included.</p>'}${omittedFields ? `<button class="quiet-button" data-expand-context-object="${escapeHtml(item.id)}">Load fuller field list · ${omittedFields} omitted</button>` : ""}</article>`; }).join("")}</div></details>
+    <section class="context-omissions"><strong>${briefGaps.length ? `${briefGaps.length} context gap${briefGaps.length === 1 ? "" : "s"}` : "No context gaps detected"}</strong>${briefGaps.map(gap => `<article class="context-gap"><span>${escapeHtml(gap.category)} · ${gap.count}</span><p>${escapeHtml(gap.message)}</p><small>Next: ${escapeHtml(gap.action)}</small></article>`).join("")}<details class="optional-details${issueCount ? " has-issues" : ""}"><summary><span>Compiler omissions and warnings · ${issueCount}</span>${issueCount ? "<small class=\"caution\">Check before use</small>" : ""}</summary><div class="optional-body"><p>${omitted.map(([name, count]) => `${escapeHtml(name)}: ${count}`).join(" · ") || "No bounded metadata omissions."}</p>${omissions.reasons.length ? `<ul>${omissions.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}${hintOmissions.length ? `<p>Logical hints omitted: ${hintOmissions.map(([reason, count]) => `${escapeHtml(reason)}: ${count}`).join(" · ")}</p>` : ""}${hintWarnings.map(warning => `<p class="logical-warning">${escapeHtml(warning)}</p>`).join("")}</div></details></section>
+    <details class="optional-details" open><summary><span>Selected objects · ${stable.objects.length}</span></summary><div class="optional-body context-object-list">${stable.objects.map(item => { const omittedFields = selections.get(item.id)?.omitted_fields || 0; const why = selectionLabel(selections.get(item.id)); return `<article class="${why.anchor ? "is-anchor" : "is-added"}"><strong>${escapeHtml(item.label)}</strong><span class="context-why">${escapeHtml(why.text)}</span><small>${item.fields.length} fields · Source review state: ${escapeHtml(item.annotation_state || "not recorded")}</small>${item.description ? `<p>${escapeHtml(item.description)}</p>` : '<p>Semantic text not included.</p>'}${omittedFields ? `<button class="quiet-button" data-expand-context-object="${escapeHtml(item.id)}">Load fuller field list · ${omittedFields} omitted</button>` : ""}</article>`; }).join("")}</div></details>
     <section id="context-expansion" hidden></section>
-    <details class="optional-details"><summary><span>Exact CLI / SDK packet</span><small>${escapeHtml(packet.contract_version)}</small></summary><div class="optional-body"><pre id="context-json" tabindex="0"></pre></div></details>`;
+    <details class="optional-details"><summary><span>Exact CLI / SDK packet</span><small>${escapeHtml(packet.contract_version)}</small></summary><div class="optional-body">${budgetUp ? "" : `<div class="context-counts">${budget}</div>`}<p class="semantic-origin">Packet ${escapeHtml(String(brief?.continuity?.packet_hash || packet.identity.packet_hash || "unknown").slice(0, 12))} · stable ${escapeHtml(String(brief?.continuity?.stable_hash || packet.identity.stable_hash || "unknown").slice(0, 12))}</p><pre id="context-json" tabindex="0"></pre></div></details>`;
   $("#context-json").textContent = JSON.stringify(packet, null, 2);
   $("#copy-context").addEventListener("click", copyContextPacket);
   $("#download-context").addEventListener("click", downloadContextPacket);
   $$('[data-expand-context-object]').forEach(button => button.addEventListener("click", () => expandContextObject(button.dataset.expandContextObject, button)));
+}
+
+function budgetFacts(packet, brief) {
+  const budgets = packet.dynamic.budgets;
+  return `${fact("Characters", `${budgets.context_characters} / ${budgets.max_characters}`)}${fact("Estimated tokens", `≈ ${brief?.loaded?.estimated_tokens || Math.ceil(Number(budgets.context_characters || 0) / 4)}`)}${fact("Stable tokens", `≈ ${brief?.loaded?.stable_estimated_tokens || Math.ceil(Number(budgets.stable_characters || 0) / 4)}`)}`;
+}
+
+// The size budget is technical detail, unless the packet was cut or nearly hit its limit.
+function packetIsTight(budgets, omittedKinds) {
+  const used = Number(budgets.context_characters || 0), limit = Number(budgets.max_characters || 0);
+  return omittedKinds > 0 || (limit > 0 && used >= limit * 0.9);
+}
+
+// Anchors came from the question or an explicit choice; everything else was added around them.
+function selectionLabel(selection) {
+  const kind = selection?.selection;
+  if (kind === "selected") return {anchor: true, text: "Anchor · your selection"};
+  if (kind === "search") return {anchor: true, text: "Anchor · matched the question"};
+  if (kind === "relationship") return {anchor: false, text: `Added · ${selection.distance || 1} relationship${selection.distance === 1 || !selection.distance ? "" : "s"} from an anchor`};
+  if (kind === "scope") return {anchor: false, text: "Added · stable base of the scope"};
+  return {anchor: false, text: "Selection not recorded"};
 }
 
 function renderContextDelta(delta) {
@@ -578,10 +643,12 @@ function initializeQueryTools() {
   $("#search-project").addEventListener("click", searchWholeProject);
   $("#update-index").addEventListener("click", updateIndex);
   $("#context-kind").addEventListener("change", updateContextKind);
+  $("#search-blocker-update").addEventListener("click", updateIndex);
   for (const id of ["#search-object-type", "#search-role", "#search-required-field", "#search-reviewed"]) {
     $(id).addEventListener("change", () => {
-      const values = [$("#search-object-type").value, $("#search-role").value.trim(), $("#search-required-field").value.trim()].filter(Boolean);
-      $("#search-filter-summary").textContent = values.length ? `${values.length} active` : "No filters";
+      const count = refineFilterCount();
+      $("#search-filter-summary").textContent = count ? `${count} active` : "No filters";
+      if (typeof renderFiltersCount === "function") renderFiltersCount();
       if (projectSearchActive()) scheduleProjectSearch();
     });
   }

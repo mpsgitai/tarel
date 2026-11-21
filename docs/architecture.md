@@ -36,6 +36,14 @@ Dependencies point inward. Domain code does not import the entry adapters. Adapt
 inputs and outputs rather than implementing separate review or retrieval behavior. Importing
 `tarel` is side-effect free; optional drivers and embedding runtimes load in their adapters.
 
+| Layer | Source |
+| --- | --- |
+| CLI | [`cli/`](../src/tarel/cli/__init__.py): one module per command group with `register` and `dispatch` |
+| SDK | [`sdk/`](../src/tarel/sdk/client.py): the `Tarel` client and one facade module per domain |
+| Use cases | `<domain>/application.py`, for example [graph](../src/tarel/graph/application.py) |
+| State | [`runtime.py`](../src/tarel/runtime.py) and the `store.py` of each domain, written through [`atomic.py`](../src/tarel/atomic.py) |
+| Errors | [`errors.py`](../src/tarel/errors.py): every domain failure is a `TarelError` with a stable code |
+
 ## From source to knowledge
 
 1. A connector or caller supplies a canonical catalog.

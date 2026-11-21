@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
+
 KNOWLEDGE_CONTRACT_VERSION = "tarel.knowledge.v0.1"
 KNOWLEDGE_STATES = frozenset({"draft", "validated"})
 KNOWLEDGE_SCOPE_KINDS = frozenset({"global", "system", "graph", "schema", "object"})
@@ -17,10 +19,8 @@ MAX_KNOWLEDGE_DOCUMENT_BYTES = 256 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
-class KnowledgeFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class KnowledgeFailure(TarelError):
+    """Raised when a knowledge operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

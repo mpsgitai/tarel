@@ -3,8 +3,8 @@ from dataclasses import replace
 from io import StringIO
 from unittest import TestCase
 
+from tarel.cli.lineage import _render_upstream_trace
 from tarel.graph.contracts import GraphDocument, GraphNode
-from tarel.lineage.cli import _render_upstream_trace
 from tarel.lineage.contracts import (
     LineageClaim,
     LineageDefinition,

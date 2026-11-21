@@ -1,4 +1,4 @@
-"""Rebuildable SQLite vector cache and transparent hybrid retrieval."""
+"""The local SQLite retrieval index: one per graph and embedding model."""
 
 from __future__ import annotations
 
@@ -9,19 +9,22 @@ import math
 import os
 import re
 import sqlite3
-import sys
 import tempfile
-from array import array
-from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from tarel.annotations.states import DEFAULT_CONTEXT_ANNOTATION_STATES
 from tarel.graph.contracts import GraphDocument
 from tarel.graph.revision import graph_revision
-from tarel.retrieval.bm25 import rank_bm25, tokenize
+from tarel.retrieval.checkpoint import (
+    copy_index_checkpoint_vectors,
+    prepare_index_checkpoint,
+    save_index_checkpoint_batch,
+)
 from tarel.retrieval.contracts import (
     EmbeddingBackend,
+    EmbeddingInputStatus,
     IndexBuildResult,
     IndexChanges,
     IndexMetadata,
@@ -31,17 +34,43 @@ from tarel.retrieval.contracts import (
 )
 from tarel.retrieval.documents import build_retrieval_documents
 from tarel.retrieval.local import sha256_file
-from tarel.search import FieldSearchHit, SearchHit, SearchResults
+from tarel.retrieval.remote import HTTP_EMBEDDING_INPUT
+from tarel.retrieval.vectors import (
+    merge_vector_dimensions,
+    pack_vector,
+    rank_vectors,
+    read_vector_rows,
+    unpack_vector,
+    validate_vector_rows,
+    validate_vectors,
+)
 
-_CONTRACT_VERSION = "tarel.retrieval.v0.3"
+_CONTRACT_VERSION = "tarel.retrieval.v0.4"
+
+
+_UNRECORDED_INPUT_CONTRACT_VERSION = "tarel.retrieval.v0.3"
+
+
 _PREVIOUS_CONTRACT_VERSION = "tarel.retrieval.v0.2"
+
+
 _LEGACY_CONTRACT_VERSION = "tarel.retrieval.v0.1"
+
+
+# Every released index builder gave llama.cpp n_batch=256, which cut each text there. Texts within
+# this limit were embedded whole, whatever else about those builds is no longer known.
+_UNRECORDED_INPUT_WHOLE_TOKENS = 256
+
+
+_SUPPORTED_CONTRACT_VERSIONS = frozenset({
+    _CONTRACT_VERSION,
+    _UNRECORDED_INPUT_CONTRACT_VERSION,
+    _PREVIOUS_CONTRACT_VERSION,
+    _LEGACY_CONTRACT_VERSION,
+})
+
+
 _GRAPH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_RRF_K = 60
-_RESULT_SCORE_SCALE = 1_000_000
-_MAX_SAFE_BM25_WEIGHT = sys.float_info.max / _RESULT_SCORE_SCALE
-DEFAULT_BM25_WEIGHT = 1.0
-_MAX_FIELDS = 8
 
 
 def _model_identity(path: Path | None, identity: str | None) -> str:
@@ -57,6 +86,90 @@ def _annotation_policy_suffix(annotation_states: frozenset[str]) -> str:
         return ""
     payload = json.dumps(sorted(annotation_states), separators=(",", ":")).encode("utf-8")
     return f"-{hashlib.sha256(payload).hexdigest()[:12]}"
+
+
+@dataclass(frozen=True, slots=True)
+class _Reuse:
+    """What a new build may keep from the index it replaces."""
+
+    document_ids: set[str] = field(default_factory=set)
+    previous_ids: set[str] = field(default_factory=set)
+    dimensions: int | None = None
+    unverified_documents: int = 0
+    stored_input: str = ""
+    truncated_documents: frozenset[str] = frozenset()
+    stored_runtime: str = ""
+
+
+def vector_reuse_rule(stored_input: str, current_input: str | None, *, countable: bool) -> str:
+    """Decide which stored vectors a build keeps when the text itself is unchanged.
+
+    Returns ``all``, ``whole_only`` (texts that provably fitted the old limit) or ``none``.
+    """
+    if current_input is None or stored_input == current_input:
+        return "all"
+    if stored_input:
+        return "none"
+    # Remote embedding did not change with this fix and cannot be counted locally.
+    return "whole_only" if countable else "all"
+
+
+def embedding_input_status(metadata: IndexMetadata) -> EmbeddingInputStatus:
+    """Report what the index can show about its vectors, without implying more."""
+    state, detail = _embedding_input_state(metadata)
+    truncated = metadata.truncated_documents
+    if truncated:
+        detail += (
+            f" {len(truncated)} documents exceeded the token limit, so their vectors cover only "
+            f"their beginning, starting with {truncated[0]}."
+        )
+    return {
+        "state": state,
+        "strategy": metadata.embedding_input or None,
+        "unverified_documents": (
+            metadata.unverified_documents if metadata.embedding_input else metadata.document_count
+        ),
+        "truncated_documents": list(truncated),
+        "runtime": metadata.embedding_runtime or None,
+        "detail": detail,
+    }
+
+
+def _embedding_input_state(metadata: IndexMetadata) -> tuple[str, str]:
+    if not metadata.embedding_input:
+        return "unverified", (
+            "This index format did not record its embedding settings. Documents over "
+            f"{_UNRECORDED_INPUT_WHOLE_TOKENS} tokens may have been embedded only in part."
+        )
+    if metadata.embedding_input == HTTP_EMBEDDING_INPUT:
+        return "provider_defined", "The embedding provider decides how long texts are handled."
+    if metadata.unverified_documents:
+        return "partially_verified", (
+            f"{metadata.unverified_documents} vectors come from an index without recorded "
+            f"settings. They were kept because their documents fit within "
+            f"{_UNRECORDED_INPUT_WHOLE_TOKENS} tokens, not because they were re-embedded."
+        )
+    if metadata.truncated_documents:
+        return "verified_with_truncation", "All other vectors cover their whole document."
+    return "verified", "Every vector was embedded from its whole document."
+
+
+def embedding_input_warning(metadata: IndexMetadata) -> str | None:
+    """A search warning, only when vectors may not represent their whole document."""
+    if metadata.truncated_documents:
+        return (
+            f"Retrieval index for graph {metadata.graph} shortened "
+            f"{len(metadata.truncated_documents)} documents over the embedding limit, starting "
+            f"with {metadata.truncated_documents[0]}. Their fields keep their own vectors."
+        )
+    if metadata.embedding_input:
+        return None
+    return (
+        f"Retrieval index for graph {metadata.graph} has no recorded embedding settings; "
+        f"documents over {_UNRECORDED_INPUT_WHOLE_TOKENS} tokens may have been embedded only in "
+        "part. Run "
+        f"`tarel index build {metadata.graph}` to re-embed only those."
+    )
 
 
 class FileRetrievalIndex:
@@ -89,11 +202,19 @@ class FileRetrievalIndex:
                 "missing_embedding_backend", "Index build needs a model identity.",
             )
         selected_model_sha256 = _model_identity(model_path, model_sha256)
-        reusable, previous_ids, reusable_dimensions = self._reusable_document_ids(
+        reuse = self._reusable_documents(
             graph.name,
             documents=documents,
             model_sha256=selected_model_sha256,
             annotation_states=annotation_states,
+            embedder=embedder,
+        )
+        reusable, previous_ids = reuse.document_ids, reuse.previous_ids
+        reusable_dimensions = reuse.dimensions
+        selected_input = embedder.input_strategy if embedder is not None else reuse.stored_input
+        overlong = (
+            _overlong_documents(documents, reusable, embedder) if embedder is not None
+            else frozenset()
         )
         checkpoint = self.checkpoint_path(graph.name, annotation_states=annotation_states)
         resumed_documents = 0
@@ -101,15 +222,16 @@ class FileRetrievalIndex:
         embedded_documents = 0
         dimensions = reusable_dimensions
         if resume:
-            resumed_documents, checkpoint_dimensions = _prepare_index_checkpoint(
+            resumed_documents, checkpoint_dimensions = prepare_index_checkpoint(
                 checkpoint,
                 graph=graph,
                 documents=documents,
                 model_id=selected_model_id,
                 model_sha256=selected_model_sha256,
                 annotation_states=annotation_states,
+                embedding_input=selected_input,
             )
-            dimensions = _merge_vector_dimensions(
+            dimensions = merge_vector_dimensions(
                 dimensions, checkpoint_dimensions, code="invalid_index_checkpoint",
             )
             if progress is not None:
@@ -150,7 +272,7 @@ class FileRetrievalIndex:
                     ),
                 )
                 if resumed_documents:
-                    _copy_index_checkpoint_vectors(checkpoint, destination)
+                    copy_index_checkpoint_vectors(checkpoint, destination)
                 source = (
                     sqlite3.connect(f"file:{path}?mode=ro", uri=True)
                     if reusable else None
@@ -176,21 +298,20 @@ class FileRetrievalIndex:
                                     "invalid_index", "Reusable retrieval vectors are unavailable.",
                                 )
                             rows_by_id.update(
-                                _read_vector_rows(
+                                read_vector_rows(
                                     source,
                                     reusable_batch,
                                     dimensions=dimensions,
                                 )
                             )
                         if missing and embedder is not None:
-                            embedded = embedder.embed_documents(
-                                tuple(document.text for document in missing),
-                                batch_size=batch_size,
+                            embedded = _embed_missing(
+                                embedder, missing, overlong, batch_size=batch_size,
                             )
-                            embedded_dimensions = _validate_vectors(
+                            embedded_dimensions = validate_vectors(
                                 embedded, expected_count=len(missing),
                             )
-                            dimensions = _merge_vector_dimensions(
+                            dimensions = merge_vector_dimensions(
                                 dimensions, embedded_dimensions, code="embedding_failed",
                             )
                             rows_by_id.update(
@@ -199,13 +320,13 @@ class FileRetrievalIndex:
                                     (
                                         document.id,
                                         embedded_dimensions,
-                                        _pack_vector(vector),
+                                        pack_vector(vector),
                                     ),
                                 )
                                 for document, vector in zip(missing, embedded, strict=True)
                             )
                         rows = tuple(rows_by_id[document.id] for document in batch)
-                        dimensions = _validate_vector_rows(rows, dimensions=dimensions)
+                        dimensions = validate_vector_rows(rows, dimensions=dimensions)
                         destination.executemany(
                             "INSERT INTO vectors(document_id, dimensions, value) VALUES (?, ?, ?)",
                             rows,
@@ -213,7 +334,7 @@ class FileRetrievalIndex:
                         reused_documents += len(reusable_batch)
                         embedded_documents += len(missing)
                         if resume:
-                            _save_index_checkpoint_batch(
+                            save_index_checkpoint_batch(
                                 checkpoint, start=start, rows=rows,
                             )
                         if progress is not None and missing:
@@ -244,6 +365,15 @@ class FileRetrievalIndex:
                     normalized=True,
                     annotation_states=tuple(sorted(annotation_states)),
                     documents_sha256=_documents_sha256(documents),
+                    embedding_input=selected_input,
+                    unverified_documents=reuse.unverified_documents,
+                    truncated_documents=tuple(sorted(
+                        overlong | (reuse.truncated_documents & reusable)
+                    )),
+                    embedding_runtime=(
+                        embedder.runtime_version if embedder is not None and embedded_documents
+                        else reuse.stored_runtime
+                    ),
                 )
                 destination.executemany(
                     "INSERT INTO metadata(key, value) VALUES (?, ?)",
@@ -252,7 +382,7 @@ class FileRetrievalIndex:
                 if progress is not None:
                     progress(total, total, "writing")
                 destination.commit()
-            os.replace(temporary_path, path)
+            temporary_path.replace(path)
             installed = True
             checkpoint.unlink(missing_ok=True)
             if progress is not None:
@@ -286,6 +416,8 @@ class FileRetrievalIndex:
         path = self.path(graph.name, annotation_states=annotation_states)
         if not path.is_file():
             return IndexChanges(len(documents), 0, 0, 0)
+        # Report a file that is not a usable index as that, not as a problem with its documents.
+        self.metadata(graph.name, annotation_states=annotation_states)
         stored = self._stored_document_hashes(path)
         current = {document.id: _text_sha256(document.text) for document in documents}
         shared = stored.keys() & current.keys()
@@ -313,17 +445,18 @@ class FileRetrievalIndex:
         except sqlite3.Error as exc:
             raise RetrievalFailure("invalid_index", "Could not read indexed documents.") from exc
 
-    def _reusable_document_ids(
+    def _reusable_documents(
         self,
         name: str,
         *,
         documents: tuple[RetrievalDocument, ...],
         model_sha256: str,
         annotation_states: frozenset[str],
-    ) -> tuple[set[str], set[str], int | None]:
+        embedder: EmbeddingBackend | None,
+    ) -> _Reuse:
         path = self.path(name, annotation_states=annotation_states)
         if not path.is_file():
-            return set(), set(), None
+            return _Reuse()
         previous_ids: set[str] = set()
         try:
             metadata = self.metadata(name, annotation_states=annotation_states)
@@ -333,7 +466,14 @@ class FileRetrievalIndex:
                 }
                 _validate_index_storage(connection, metadata)
                 if metadata.model_sha256 != model_sha256:
-                    return set(), previous_ids, None
+                    return _Reuse(previous_ids=previous_ids)
+                rule = vector_reuse_rule(
+                    metadata.embedding_input,
+                    embedder.input_strategy if embedder is not None else None,
+                    countable=embedder is not None and embedder.max_input_tokens is not None,
+                )
+                if rule == "none":
+                    return _Reuse(previous_ids=previous_ids)
                 columns = {
                     str(row[1]) for row in connection.execute("PRAGMA table_info(documents)")
                 }
@@ -349,13 +489,32 @@ class FileRetrievalIndex:
                     actual_digest = str(stored_digest) if stored_digest else _text_sha256(str(text))
                     if current.get(identifier) == actual_digest:
                         reusable.add(identifier)
-                return reusable, previous_ids, metadata.dimensions if reusable else None
+                if rule == "whole_only":
+                    assert embedder is not None
+                    reusable = {
+                        document.id for document in documents
+                        if document.id in reusable
+                        and (embedder.token_count(document.text) or 0)
+                        <= _UNRECORDED_INPUT_WHOLE_TOKENS
+                    }
+                return _Reuse(
+                    reusable,
+                    previous_ids,
+                    metadata.dimensions if reusable else None,
+                    (
+                        len(reusable) if rule == "whole_only"
+                        else min(metadata.unverified_documents, len(reusable))
+                    ),
+                    metadata.embedding_input,
+                    frozenset(metadata.truncated_documents),
+                    metadata.embedding_runtime,
+                )
         except RetrievalFailure as exc:
             if exc.code in {"invalid_index", "unsupported_index"}:
-                return set(), previous_ids, None
+                return _Reuse(previous_ids=previous_ids)
             raise
         except sqlite3.Error:
-            return set(), previous_ids, None
+            return _Reuse(previous_ids=previous_ids)
 
     def metadata(
         self, name: str, *,
@@ -373,8 +532,17 @@ class FileRetrievalIndex:
         except (OSError, sqlite3.Error, json.JSONDecodeError) as exc:
             raise RetrievalFailure(
                 "invalid_index",
-                f"Could not read retrieval index: {name}",
+                f"Could not read retrieval index: {name}. It is not a TAREL index, or it is "
+                "damaged.",
             ) from exc
+        contract_version = values.get("contract_version")
+        if contract_version not in _SUPPORTED_CONTRACT_VERSIONS:
+            raise RetrievalFailure(
+                "unsupported_index",
+                f"Retrieval index for graph {name} has unsupported format {contract_version!r}. "
+                "TAREL does not convert other formats; `tarel index build` needs this file "
+                "removed first.",
+            )
         try:
             if values.get("contract_version") == _LEGACY_CONTRACT_VERSION:
                 if annotation_states != DEFAULT_CONTEXT_ANNOTATION_STATES:
@@ -388,13 +556,13 @@ class FileRetrievalIndex:
                 values["documents_sha256"] = ""
             if isinstance(values.get("annotation_states"), list):
                 values["annotation_states"] = tuple(values["annotation_states"])
+            if isinstance(values.get("truncated_documents"), list):
+                values["truncated_documents"] = tuple(values["truncated_documents"])
             metadata = IndexMetadata(**values)
         except (TypeError, ValueError) as exc:
-            raise RetrievalFailure("invalid_index", "Retrieval index metadata is invalid.") from exc
-        if metadata.contract_version not in {
-            _CONTRACT_VERSION, _PREVIOUS_CONTRACT_VERSION, _LEGACY_CONTRACT_VERSION,
-        }:
-            raise RetrievalFailure("unsupported_index", "Retrieval index must be rebuilt.")
+            raise RetrievalFailure(
+                "invalid_index", f"Retrieval index metadata is invalid for graph {name}.",
+            ) from exc
         if frozenset(metadata.annotation_states) != annotation_states:
             raise RetrievalFailure(
                 "index_policy_mismatch", "Retrieval index annotation policy differs."
@@ -435,7 +603,8 @@ class FileRetrievalIndex:
         if metadata.model_sha256 != _model_identity(model_path, model_sha256):
             raise RetrievalFailure(
                 "model_index_mismatch",
-                "The selected embedding model differs from the indexed model. Rebuild the index.",
+                "The selected embedding model differs from the one indexed for graph "
+                f"{graph.name}. Rebuild that index.",
             )
         return metadata
 
@@ -477,7 +646,7 @@ class FileRetrievalIndex:
             )
             for row in rows
         )
-        vectors = tuple(_unpack_vector(row[7], int(row[6])) for row in rows)
+        vectors = tuple(unpack_vector(row[7], int(row[6])) for row in rows)
         if len(documents) != metadata.document_count:
             raise RetrievalFailure("invalid_index", "Retrieval index document count is invalid.")
         return metadata, documents, vectors
@@ -513,7 +682,7 @@ class FileRetrievalIndex:
                 if namespace is None or document.namespace.casefold() == namespace.casefold()
                 if object_ids is None or document.object_id in object_ids
             )
-            return _rank_vectors(indexed, query_vector, limit=limit)
+            return rank_vectors(indexed, query_vector, limit=limit)
         return self._rank_sqlite_vec(
             graph,
             model_path=model_path,
@@ -549,7 +718,8 @@ class FileRetrievalIndex:
         if metadata.model_sha256 != _model_identity(model_path, model_sha256):
             raise RetrievalFailure(
                 "model_index_mismatch",
-                "The selected embedding model differs from the indexed model. Rebuild the index.",
+                "The selected embedding model differs from the one indexed for graph "
+                f"{graph.name}. Rebuild that index.",
             )
         if len(query_vector) != metadata.dimensions:
             raise RetrievalFailure("model_index_mismatch", "Query and index dimensions differ.")
@@ -562,7 +732,7 @@ class FileRetrievalIndex:
                 "sqlite-vec is unavailable. Install `tarel[vector]` or use the Python backend.",
             ) from exc
         parameters: dict[str, object] = {
-            "query": _pack_vector(query_vector), "limit": limit,
+            "query": pack_vector(query_vector), "limit": limit,
         }
         clauses = []
         if namespace is not None:
@@ -653,7 +823,7 @@ class FileRetrievalIndex:
         }
         document_count = identity.get("document_count")
         if (
-            set(identity) != required
+            set(identity) - {"embedding_input"} != required
             or not isinstance(document_count, int)
             or not 0 <= completed <= document_count
         ):
@@ -670,436 +840,48 @@ class FileRetrievalIndex:
             "model_id": identity["model_id"],
             "model_sha256": identity["model_sha256"],
             "annotation_states": identity["annotation_states"],
+            "embedding_input": identity.get("embedding_input"),
             "path": str(path),
         }
 
 
-def search_retrieval(
-    graph: GraphDocument,
-    query: str,
-    *,
-    mode: str,
-    limit: int,
-    namespace: str | None = None,
-    object_ids: frozenset[str] | None = None,
-    embedder: EmbeddingBackend | None = None,
-    model_path: Path | None = None,
-    store: FileRetrievalIndex | None = None,
-    annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES,
-    bm25_weight: float | None = None,
-    query_vector: tuple[float, ...] | None = None,
-    vector_backend: str = "auto",
-    model_sha256: str | None = None,
-) -> SearchResults:
-    if mode not in {"bm25", "vector", "hybrid"}:
-        raise RetrievalFailure("invalid_retrieval_mode", "Mode must be bm25, vector, or hybrid.")
-    if not 1 <= limit <= 100:
-        raise RetrievalFailure("invalid_limit", "Search limit must be between 1 and 100.")
-    weight = validate_bm25_weight(mode, bm25_weight)
-    all_documents = build_retrieval_documents(graph, annotation_states=annotation_states)
-    documents = tuple(
-        document
-        for document in all_documents
-        if namespace is None or document.namespace.casefold() == namespace.casefold()
-        if object_ids is None or document.object_id in object_ids
+def _overlong_documents(
+    documents: tuple[RetrievalDocument, ...],
+    reusable: set[str],
+    embedder: EmbeddingBackend,
+) -> frozenset[str]:
+    """The documents this build must shorten, known before any embedding work starts."""
+    limit = embedder.max_input_tokens
+    if limit is None:
+        return frozenset()
+    return frozenset(
+        document.id
+        for document in documents if document.id not in reusable
+        if (tokens := embedder.token_count(document.text)) is not None and tokens > limit
     )
-    candidate_limit = max(20, min(len(documents), limit * 5))
-    bm25_results = (
-        rank_bm25(documents, query, limit=candidate_limit) if mode in {"bm25", "hybrid"} else ()
-    )
-    vector_results: tuple[RankedDocument, ...] = ()
-    if mode in {"vector", "hybrid"}:
-        if embedder is None or (model_path is None and model_sha256 is None):
-            raise RetrievalFailure("missing_embedding_backend", "Vector retrieval needs a model.")
-        if query_vector is None:
-            # Reject missing/stale indexes before a potentially paid embedding request.
-            (store or FileRetrievalIndex()).validate_selection(
-                graph, model_path=model_path, model_sha256=model_sha256,
-                annotation_states=annotation_states,
-            )
-        selected_query_vector = query_vector or embedder.embed_query(query)
-        vector_results = (store or FileRetrievalIndex()).rank(
-            graph,
-            model_path=model_path,
-            model_sha256=model_sha256,
-            query_vector=selected_query_vector,
-            limit=candidate_limit,
-            namespace=namespace,
-            object_ids=object_ids,
-            annotation_states=annotation_states,
-            backend=vector_backend,
-        )
-
-    if mode == "bm25":
-        ranked = bm25_results
-    elif mode == "vector":
-        ranked = vector_results
-    else:
-        ranked = _reciprocal_rank_fusion(
-            bm25_results, vector_results, limit=candidate_limit, bm25_weight=weight,
-        )
-    return _object_results(graph, query, mode=mode, ranked=ranked, limit=limit)
 
 
-def validate_bm25_weight(mode: str, weight: float | None) -> float:
-    if weight is None:
-        return DEFAULT_BM25_WEIGHT
-    if mode != "hybrid":
-        raise RetrievalFailure(
-            "invalid_bm25_weight", "BM25 weight is only available in hybrid mode."
-        )
-    if (
-        isinstance(weight, bool)
-        or not isinstance(weight, (int, float))
-        or weight < 0
-        or weight > _MAX_SAFE_BM25_WEIGHT
-        or not math.isfinite(weight)
-    ):
-        raise RetrievalFailure(
-            "invalid_bm25_weight",
-            "BM25 weight must be a finite nonnegative number within the supported score range.",
-        )
-    return float(weight)
-
-
-def _rank_vectors(
-    indexed: tuple[tuple[RetrievalDocument, tuple[float, ...]], ...],
-    query_vector: tuple[float, ...],
+def _embed_missing(
+    embedder: EmbeddingBackend,
+    missing: tuple[RetrievalDocument, ...],
+    overlong: frozenset[str],
     *,
-    limit: int,
-) -> tuple[RankedDocument, ...]:
-    ranked: list[RankedDocument] = []
-    for document, vector in indexed:
-        if len(vector) != len(query_vector):
-            raise RetrievalFailure("model_index_mismatch", "Query and index dimensions differ.")
-        score = sum(left * right for left, right in zip(vector, query_vector, strict=True))
-        if math.isfinite(score):
-            ranked.append(RankedDocument(document=document, score=score, sources=("vector",)))
+    batch_size: int,
+) -> tuple[tuple[float, ...], ...]:
+    whole = tuple(document for document in missing if document.id not in overlong)
+    embedded = (
+        embedder.embed_documents(tuple(item.text for item in whole), batch_size=batch_size)
+        if whole else ()
+    )
+    if len(whole) == len(missing):
+        return embedded
+    if len(embedded) != len(whole):
+        raise RetrievalFailure("embedding_failed", "Embedding count does not match documents.")
+    remaining = iter(embedded)
     return tuple(
-        sorted(
-            ranked,
-            key=lambda item: (-item.score, item.document.label.casefold(), item.document.id),
-        )[:limit]
+        embedder.embed_cut_document(document.text) if document.id in overlong else next(remaining)
+        for document in missing
     )
-
-
-def _reciprocal_rank_fusion(
-    left: tuple[RankedDocument, ...],
-    right: tuple[RankedDocument, ...],
-    *,
-    limit: int,
-    bm25_weight: float = DEFAULT_BM25_WEIGHT,
-) -> tuple[RankedDocument, ...]:
-    scores: defaultdict[str, float] = defaultdict(float)
-    sources: defaultdict[str, set[str]] = defaultdict(set)
-    documents: dict[str, RetrievalDocument] = {}
-    for results, weight in ((left, bm25_weight), (right, 1.0)):
-        if weight == 0:
-            continue
-        for rank, result in enumerate(results, start=1):
-            document_id = result.document.id
-            documents[document_id] = result.document
-            scores[document_id] += weight / (_RRF_K + rank)
-            sources[document_id].update(result.sources)
-    return tuple(
-        sorted(
-            (
-                RankedDocument(
-                    document=documents[document_id],
-                    score=score,
-                    sources=tuple(sorted(sources[document_id])),
-                )
-                for document_id, score in scores.items()
-            ),
-            key=lambda item: (-item.score, item.document.label.casefold(), item.document.id),
-        )[:limit]
-    )
-
-
-def _object_results(
-    graph: GraphDocument,
-    query: str,
-    *,
-    mode: str,
-    ranked: tuple[RankedDocument, ...],
-    limit: int,
-) -> SearchResults:
-    node_by_id = graph.node_by_id()
-    by_object: defaultdict[str, list[RankedDocument]] = defaultdict(list)
-    for result in ranked:
-        by_object[result.document.object_id].append(result)
-    query_terms = tuple(sorted(set(tokenize(query))))
-    hits: list[SearchHit] = []
-    for object_id, results in by_object.items():
-        node = node_by_id.get(object_id)
-        if node is None or node.type not in {"table", "view"}:
-            continue
-        ordered = sorted(results, key=lambda item: (-item.score, item.document.id))
-        best = ordered[0]
-        fields = tuple(
-            FieldSearchHit(
-                id=result.document.field_id or "",
-                label=result.document.label.rsplit(".", 1)[-1],
-                score=max(1, round(result.score * _RESULT_SCORE_SCALE)),
-                reasons=tuple(f"retrieval:{source}" for source in result.sources),
-            )
-            for result in ordered
-            if result.document.field_id is not None
-        )[:_MAX_FIELDS]
-        document_terms = set().union(*(set(tokenize(result.document.text)) for result in ordered))
-        matched_terms = tuple(term for term in query_terms if term in document_terms)
-        source_names = tuple(sorted(set().union(*(set(result.sources) for result in ordered))))
-        hits.append(
-            SearchHit(
-                id=object_id,
-                label=node.label,
-                type=node.type,
-                score=max(1, round(best.score * _RESULT_SCORE_SCALE)),
-                matched_terms=matched_terms,
-                reasons=tuple(f"retrieval:{source}" for source in source_names),
-                fields=fields,
-            )
-        )
-    ordered_hits = tuple(
-        sorted(hits, key=lambda hit: (-hit.score, hit.label.casefold(), hit.id))[:limit]
-    )
-    return SearchResults(
-        graph=graph.name,
-        query=query,
-        terms=query_terms,
-        hits=ordered_hits,
-        mode=mode,
-    )
-
-
-def _prepare_index_checkpoint(
-    path: Path,
-    *,
-    graph: GraphDocument,
-    documents: tuple[RetrievalDocument, ...],
-    model_id: str,
-    model_sha256: str,
-    annotation_states: frozenset[str],
-) -> tuple[int, int | None]:
-    identity = _checkpoint_identity(
-        graph,
-        documents,
-        model_id=model_id,
-        model_sha256=model_sha256,
-        annotation_states=annotation_states,
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".index-checkpoint-",
-            suffix=".sqlite",
-        )
-        os.close(descriptor)
-        temporary_path = Path(temporary_name)
-        try:
-            with sqlite3.connect(temporary_path) as connection:
-                _create_checkpoint_schema(connection)
-                connection.executemany(
-                    "INSERT INTO metadata(key, value) VALUES (?, ?)",
-                    ((key, json.dumps(value)) for key, value in identity.items()),
-                )
-                connection.commit()
-            os.replace(temporary_path, path)
-        except (OSError, sqlite3.Error) as exc:
-            temporary_path.unlink(missing_ok=True)
-            raise RetrievalFailure(
-                "index_checkpoint_failed",
-                "Could not create retrieval index checkpoint.",
-            ) from exc
-    try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
-            stored_identity = {
-                str(key): json.loads(value)
-                for key, value in connection.execute("SELECT key, value FROM metadata")
-            }
-            if stored_identity != identity:
-                raise RetrievalFailure(
-                    "stale_index_checkpoint",
-                    "The retrieval index checkpoint belongs to different graph documents or "
-                    "model. Run index build without --resume to rebuild and clear it.",
-                )
-            completed = 0
-            vector_dimensions: int | None = None
-            rows = connection.execute(
-                "SELECT position,document_id,dimensions,value "
-                "FROM vectors ORDER BY position"
-            )
-            for expected_position, row in enumerate(rows):
-                position, document_id, dimensions, value = row
-                if (
-                    position != expected_position
-                    or expected_position >= len(documents)
-                    or document_id != documents[expected_position].id
-                ):
-                    raise RetrievalFailure(
-                        "invalid_index_checkpoint",
-                        "Retrieval index checkpoint coverage is not a contiguous document "
-                        "prefix.",
-                    )
-                row_dimensions = int(dimensions)
-                _validated_vector_array(
-                    value, row_dimensions, code="invalid_index_checkpoint",
-                )
-                vector_dimensions = _merge_vector_dimensions(
-                    vector_dimensions,
-                    row_dimensions,
-                    code="invalid_index_checkpoint",
-                )
-                completed += 1
-    except RetrievalFailure:
-        raise
-    except (OSError, sqlite3.Error, json.JSONDecodeError, TypeError, ValueError) as exc:
-        raise RetrievalFailure(
-            "invalid_index_checkpoint",
-            "Could not read retrieval index checkpoint.",
-        ) from exc
-    return completed, vector_dimensions
-
-
-def _copy_index_checkpoint_vectors(
-    path: Path,
-    destination: sqlite3.Connection,
-) -> None:
-    try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as source:
-            destination.executemany(
-                "INSERT INTO vectors(document_id, dimensions, value) VALUES (?, ?, ?)",
-                source.execute(
-                    "SELECT document_id,dimensions,value FROM vectors ORDER BY position"
-                ),
-            )
-    except sqlite3.Error as exc:
-        raise RetrievalFailure(
-            "invalid_index_checkpoint",
-            "Could not copy retrieval index checkpoint vectors.",
-        ) from exc
-
-
-def _read_vector_rows(
-    connection: sqlite3.Connection,
-    documents: tuple[RetrievalDocument, ...],
-    *,
-    dimensions: int | None,
-) -> dict[str, tuple[str, int, bytes]]:
-    identifiers = [document.id for document in documents]
-    try:
-        rows = {
-            str(identifier): (str(identifier), int(dimensions), bytes(value))
-            for identifier, dimensions, value in connection.execute(
-                "SELECT document_id,dimensions,value FROM vectors "
-                "WHERE document_id IN (SELECT value FROM json_each(?))",
-                (json.dumps(identifiers),),
-            )
-        }
-    except (sqlite3.Error, TypeError, ValueError) as exc:
-        raise RetrievalFailure("invalid_index", "Could not reuse retrieval vectors.") from exc
-    if set(rows) != set(identifiers):
-        raise RetrievalFailure("invalid_index", "Reusable retrieval vectors are incomplete.")
-    _validate_vector_rows(
-        tuple(rows.values()),
-        dimensions=dimensions,
-        code="invalid_index",
-    )
-    return rows
-
-
-def _merge_vector_dimensions(
-    current: int | None,
-    candidate: int | None,
-    *,
-    code: str,
-) -> int | None:
-    if candidate is None:
-        return current
-    if current is not None and current != candidate:
-        raise RetrievalFailure(code, "Embedding dimensions are inconsistent.")
-    return candidate
-
-
-def _validate_vector_rows(
-    rows: tuple[tuple[str, int, bytes], ...],
-    *,
-    dimensions: int | None,
-    code: str = "embedding_failed",
-) -> int:
-    if not rows:
-        raise RetrievalFailure(code, "Embedding count does not match documents.")
-    selected_dimensions = dimensions
-    for _document_id, row_dimensions, value in rows:
-        _validated_vector_array(value, row_dimensions, code=code)
-        selected_dimensions = _merge_vector_dimensions(
-            selected_dimensions,
-            row_dimensions,
-            code=code,
-        )
-    if selected_dimensions is None:
-        raise RetrievalFailure(code, "Retrieval index contains no vectors.")
-    return selected_dimensions
-
-
-def _save_index_checkpoint_batch(
-    path: Path,
-    *,
-    start: int,
-    rows: tuple[tuple[str, int, bytes], ...],
-) -> None:
-    try:
-        with sqlite3.connect(path) as connection:
-            connection.executemany(
-                "INSERT INTO vectors(position, document_id, dimensions, value) "
-                "VALUES (?, ?, ?, ?)",
-                (
-                    (start + offset, document_id, dimensions, value)
-                    for offset, (document_id, dimensions, value) in enumerate(rows)
-                ),
-            )
-            connection.commit()
-    except (OSError, sqlite3.Error) as exc:
-        raise RetrievalFailure(
-            "index_checkpoint_failed",
-            "Could not persist retrieval index checkpoint.",
-        ) from exc
-
-
-def _checkpoint_identity(
-    graph: GraphDocument,
-    documents: tuple[RetrievalDocument, ...],
-    *,
-    model_id: str,
-    model_sha256: str,
-    annotation_states: frozenset[str],
-) -> dict[str, object]:
-    payload = json.dumps(
-        [
-            [
-                document.id,
-                document.object_id,
-                document.field_id,
-                document.namespace,
-                document.label,
-                document.text,
-            ]
-            for document in documents
-        ],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return {
-        "checkpoint_version": "tarel.retrieval-checkpoint.v0.2",
-        "annotation_states": sorted(annotation_states),
-        "document_count": len(documents),
-        "documents_sha256": hashlib.sha256(payload).hexdigest(),
-        "graph": graph.name,
-        "graph_hash": graph_revision(graph),
-        "model_id": model_id,
-        "model_sha256": model_sha256,
-    }
 
 
 def _create_schema(connection: sqlite3.Connection) -> None:
@@ -1127,66 +909,6 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         );
         """
     )
-
-
-def _create_checkpoint_schema(connection: sqlite3.Connection) -> None:
-    connection.executescript(
-        """
-        CREATE TABLE metadata (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-        CREATE TABLE vectors (
-            position INTEGER PRIMARY KEY,
-            document_id TEXT NOT NULL UNIQUE,
-            dimensions INTEGER NOT NULL,
-            value BLOB NOT NULL
-        );
-        """
-    )
-
-
-def _validate_vectors(
-    vectors: tuple[tuple[float, ...], ...],
-    *,
-    expected_count: int,
-) -> int:
-    if len(vectors) != expected_count or not vectors:
-        raise RetrievalFailure("embedding_failed", "Embedding count does not match documents.")
-    dimensions = len(vectors[0])
-    if dimensions < 1 or any(len(vector) != dimensions for vector in vectors):
-        raise RetrievalFailure("embedding_failed", "Embedding dimensions are inconsistent.")
-    if any(not math.isfinite(value) for vector in vectors for value in vector):
-        raise RetrievalFailure("embedding_failed", "Embedding contains a non-finite number.")
-    return dimensions
-
-
-def _pack_vector(vector: tuple[float, ...]) -> bytes:
-    values = array("f", vector)
-    if sys.byteorder != "little":
-        values.byteswap()
-    return values.tobytes()
-
-
-def _unpack_vector(value: bytes, dimensions: int) -> tuple[float, ...]:
-    return tuple(_validated_vector_array(value, dimensions, code="invalid_index"))
-
-
-def _validated_vector_array(value: bytes, dimensions: int, *, code: str) -> array:
-    if dimensions < 1 or len(value) != dimensions * 4:
-        raise RetrievalFailure(code, "Stored vector dimensions are invalid.")
-    values = array("f")
-    try:
-        values.frombytes(value)
-    except (TypeError, ValueError) as exc:
-        raise RetrievalFailure(code, "Stored vector data is invalid.") from exc
-    if sys.byteorder != "little":
-        values.byteswap()
-    if len(values) != dimensions:
-        raise RetrievalFailure(code, "Stored vector dimensions are invalid.")
-    if any(not math.isfinite(item) for item in values):
-        raise RetrievalFailure(code, "Stored vector contains a non-finite number.")
-    return values
 
 
 def _validate_index_storage(

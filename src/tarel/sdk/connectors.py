@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tarel.application import (
+from tarel.connectors.application import (
     check_connector_use_case,
     discover_catalog_use_case,
     probe_connector_use_case,

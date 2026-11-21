@@ -7,8 +7,7 @@ import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from tarel.graph.store import FileGraphStore
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.semantics.contracts import (
     SemanticFailure,
     SemanticImportDocument,
@@ -22,7 +21,6 @@ from tarel.semantics.readers import (
     semantic_source_suffixes,
 )
 from tarel.semantics.source import read_semantic_source
-from tarel.semantics.store import FileSemanticImportStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,14 +44,14 @@ def import_semantic_use_case(
         source_path,
         suffixes=semantic_source_suffixes(normalized_format),
     )
-    graph = _graph_store(runtime).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     document = read_semantic_import(
         name,
         graph=graph,
         source=source,
         format_name=normalized_format,
     )
-    store = _semantic_store(runtime)
+    store = resolve_runtime(runtime).semantic_import_store()
     if store.exists(name):
         current = store.load(name)
         if current.graph_name != graph_name:
@@ -94,7 +92,7 @@ def list_semantic_imports_use_case(
     graph_name: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> tuple[SemanticImportDocument, ...]:
-    store = _semantic_store(runtime)
+    store = resolve_runtime(runtime).semantic_import_store()
     documents = tuple(store.load(name) for name in store.list())
     if graph_name is not None:
         documents = tuple(item for item in documents if item.graph_name == graph_name)
@@ -106,7 +104,7 @@ def load_semantic_import_use_case(
     *,
     runtime: TarelRuntime | None = None,
 ) -> SemanticImportDocument:
-    return _semantic_store(runtime).load(name)
+    return resolve_runtime(runtime).semantic_import_store().load(name)
 
 
 def edit_semantic_source_use_case(
@@ -118,7 +116,7 @@ def edit_semantic_source_use_case(
     expected_revision: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> SemanticImportResult:
-    store = _semantic_store(runtime)
+    store = resolve_runtime(runtime).semantic_import_store()
     document = store.load(name)
     if expected_revision is not None and expected_revision != document.revision:
         raise SemanticFailure(
@@ -206,9 +204,3 @@ def _synonyms(value: object) -> tuple[str, ...]:
     return result
 
 
-def _graph_store(runtime: TarelRuntime | None) -> FileGraphStore:
-    return FileGraphStore() if runtime is None else runtime.graph_store()
-
-
-def _semantic_store(runtime: TarelRuntime | None) -> FileSemanticImportStore:
-    return FileSemanticImportStore() if runtime is None else runtime.semantic_import_store()

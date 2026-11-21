@@ -7,7 +7,7 @@ from dataclasses import replace
 from tarel.graph.contracts import GraphDocument, GraphNode
 from tarel.object_families.application import project_families_for_graphs_use_case
 from tarel.runtime import TarelRuntime
-from tarel.search import FamilySearchReference, SearchHit, SearchResults, _score_object
+from tarel.search import FamilySearchReference, SearchHit, SearchResults, score_object
 from tarel.workspaces.projection import scoped_node_id
 
 
@@ -45,7 +45,7 @@ def family_name_hits(
             label=family.name,
             metadata={"name": family.name},
         )
-        hit = _score_object(node, [], results.terms, annotation_states=frozenset())
+        hit = score_object(node, [], results.terms, annotation_states=frozenset())
         if hit is not None:
             hits.append(
                 replace(

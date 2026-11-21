@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol, TypedDict
+
+from tarel.errors import TarelError
 
 
-class ProviderFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class ProviderFailure(TarelError):
+    """Raised when a provider operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +53,16 @@ class ProviderCheck:
 
 
 class StructuredProvider(Protocol):
-    name: str
-    default_model: str | None
+    @property
+    def name(self) -> str: ...
+    @property
+    def default_model(self) -> str | None: ...
 
     def generate_structured(self, request: StructuredRequest) -> dict[str, object]: ...
+
+
+class ProviderTestResult(TypedDict):
+    """A provider answered one structured-generation round trip correctly."""
+
+    name: str
+    status: Literal["ok"]

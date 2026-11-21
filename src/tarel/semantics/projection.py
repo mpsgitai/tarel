@@ -20,11 +20,18 @@ TargetValues = tuple[
 
 
 class SemanticTarget(Protocol):
-    id: str
-    name: str
-    source_reference: str
-    description: str | None
-    synonyms: tuple[str, ...]
+    """Any imported semantic object that can be projected onto graph objects."""
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def name(self) -> str: ...
+    @property
+    def source_reference(self) -> str: ...
+    @property
+    def description(self) -> str | None: ...
+    @property
+    def synonyms(self) -> tuple[str, ...]: ...
 
 
 def semantic_import_catalog(
@@ -157,8 +164,8 @@ def semantic_node_bindings(
                                 "is_time": field.is_time,
                             }
                         )
-    for values in bindings.values():
-        values.sort(key=lambda item: (str(item["import_name"]), str(item["target_id"])))
+    for records in bindings.values():
+        records.sort(key=lambda item: (str(item["import_name"]), str(item["target_id"])))
     return bindings
 
 
@@ -190,8 +197,8 @@ def semantic_edge_bindings(
                         "to_fields": list(relationship.to_fields),
                     }
                 )
-    for values in bindings.values():
-        values.sort(key=lambda item: (str(item["import_name"]), str(item["target_id"])))
+    for records in bindings.values():
+        records.sort(key=lambda item: (str(item["import_name"]), str(item["target_id"])))
     return bindings
 
 

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import Any
 
+from tarel.errors import TarelError
 from tarel.graph.contracts import GraphDocument
 from tarel.graph.revision import physical_graph_revision
-from tarel.graph.store import FileGraphStore
 from tarel.logical_joins.application import (
     find_logical_joins_use_case,
     list_logical_joins_use_case,
@@ -19,7 +20,7 @@ from tarel.object_families.application import (
     load_object_family_use_case,
     validate_object_family_against_graph,
 )
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.semantic_concepts.application import find_semantic_concepts_use_case
 from tarel.topology.application import load_logical_topology_use_case
 from tarel.topology.endpoint_contracts import LogicalEndpoint, ResolvedLogicalEndpoint
@@ -28,10 +29,8 @@ from tarel.topology.endpoints import resolve_logical_endpoint_for_graph_use_case
 _LIMIT = 20
 
 
-class LogicalMetadataFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class LogicalMetadataFailure(TarelError):
+    """Raised when a logical metadata operation is rejected."""
 
 
 def logical_metadata_use_case(
@@ -41,7 +40,7 @@ def logical_metadata_use_case(
     allowed_object_ids: frozenset[str] | None = None,
     mode: str = "include_candidates",
     runtime: TarelRuntime | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     if (
         not isinstance(object_ids, tuple)
         or not 1 <= len(object_ids) <= 100
@@ -57,13 +56,13 @@ def logical_metadata_use_case(
         )
     ):
         raise LogicalMetadataFailure("invalid_logical_metadata_scope", "Invalid inspector scope.")
-    graph = (runtime.graph_store() if runtime else FileGraphStore()).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     allowed = frozenset(node.id for node in graph.nodes if node.type in {"table", "view"})
     if allowed_object_ids is not None:
         allowed &= allowed_object_ids
     selected = _selected_objects(graph, object_ids, allowed, mode, runtime)
     omissions: Counter[tuple[str, str]] = Counter()
-    concepts: list[dict[str, object]] = []
+    concepts: list[dict[str, Any]] = []
     try:
         concepts = [
             item.to_dict()
@@ -79,7 +78,7 @@ def logical_metadata_use_case(
     except RuntimeError as exc:
         _omit_or_raise(omissions, "semantic_concepts", exc)
     cache: dict[LogicalEndpoint, ResolvedLogicalEndpoint] = {}
-    joins: list[dict[str, object]] = []
+    joins: list[dict[str, Any]] = []
     for join in list_logical_joins_use_case(graph_name=graph_name, runtime=runtime):
         if join.state == "rejected" or (mode == "confirmed_only" and join.state != "reviewed"):
             continue
@@ -109,7 +108,7 @@ def logical_metadata_use_case(
             _omit_or_raise(omissions, "logical_joins", exc)
         if len(joins) > _LIMIT:
             break
-    bindings: list[dict[str, object]] = []
+    bindings: list[dict[str, Any]] = []
     for item in find_object_bindings_use_case(graph_name, mode=mode, runtime=runtime):
         if not item["usable"]:
             omissions[("object_bindings", str(item["error_code"]))] += 1

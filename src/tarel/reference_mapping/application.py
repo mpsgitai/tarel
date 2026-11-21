@@ -7,15 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tarel.discovery.contracts import (
-    DiscoveryCandidate,
     DiscoveryFailure,
+)
+from tarel.discovery.programs import (
+    ReferenceMappingProgram,
+)
+from tarel.discovery.runs import (
+    DiscoveryCandidate,
     DiscoveryObservation,
     DiscoveryRun,
-    ReferenceMappingProgram,
 )
 from tarel.graph.contracts import GraphDocument, GraphNode
 from tarel.graph.revision import graph_revision, physical_graph_revision
-from tarel.graph.store import FileGraphStore
 from tarel.reference_mapping.contracts import (
     REFERENCE_MAPPING_MODES,
     ReferenceMappingCandidate,
@@ -28,7 +31,7 @@ from tarel.reference_mapping.contracts import (
 )
 from tarel.reference_mapping.store import FileReferenceMappingStore
 from tarel.relationships.core import RelationshipFailure, resolve_field
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +141,7 @@ def import_reference_mapping_candidate_use_case(
             "invalid_reference_mapping_import",
             "New reference-mapping imports must be unreviewed candidates.",
         )
-    graph = _graph_store(runtime).load(candidate.graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(candidate.graph_name)
     _validate_candidate_binding(candidate, graph)
     store = _mapping_store(runtime)
     if store.exists(candidate.id):
@@ -188,7 +191,7 @@ def find_reference_mapping_candidates_use_case(
     mode: str = "confirmed_then_candidates",
     runtime: TarelRuntime | None = None,
 ) -> tuple[ReferenceMappingMatch, ...]:
-    graph = _graph_store(runtime).load(graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(graph_name)
     return find_reference_mapping_candidates_for_graph_use_case(
         graph,
         source=source,
@@ -273,7 +276,7 @@ def decide_reference_mapping_candidate_use_case(
             "stale_reference_mapping_candidate",
             "The reference-mapping candidate changed after it was loaded. Reload it first.",
         )
-    graph = _graph_store(runtime).load(candidate.graph_name)
+    graph = resolve_runtime(runtime).graph_store().load(candidate.graph_name)
     _validate_candidate_binding(candidate, graph)
     if decision == "approve" and any(
         item.id != candidate.id
@@ -413,9 +416,6 @@ def _promoted_id(run_id: str, candidate_id: str) -> str:
     digest = hashlib.sha256(f"{run_id}:{candidate_id}".encode()).hexdigest()
     return f"discovery.{digest[:32]}"
 
-
-def _graph_store(runtime: TarelRuntime | None) -> FileGraphStore:
-    return FileGraphStore() if runtime is None else runtime.graph_store()
 
 
 def _mapping_store(runtime: TarelRuntime | None) -> FileReferenceMappingStore:

@@ -7,6 +7,7 @@ import json
 import math
 import urllib.error
 import urllib.request
+from typing import TypeGuard
 
 from tarel.providers.config import load_http_provider_config
 from tarel.retrieval.contracts import RetrievalFailure
@@ -15,6 +16,7 @@ from tarel.retrieval.settings import ModelChoice
 
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
+HTTP_EMBEDDING_INPUT = "http:provider-defined"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -101,9 +103,13 @@ def indexed_rows(response: dict[str, object], key: str, count: int) -> list[dict
     return [mapping[index] for index in range(count)]
 
 
-def _finite_number(value: object) -> bool:
+def _finite_number(value: object) -> TypeGuard[int | float]:
     try:
-        return type(value) in {int, float} and math.isfinite(value)
+        return (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        )
     except OverflowError:
         return False
 
@@ -122,6 +128,28 @@ class HTTPEmbedding:
         self.client = HTTPRetrievalClient(choice.provider)
         self.model_id = f"{choice.provider}:{choice.model}"
         self.dimensions: int | None = None
+
+    @property
+    def input_strategy(self) -> str:
+        return HTTP_EMBEDDING_INPUT
+
+    @property
+    def max_input_tokens(self) -> None:
+        return None
+
+    @property
+    def runtime_version(self) -> str:
+        return ""
+
+    def token_count(self, text: str) -> None:
+        del text
+
+    def embed_cut_document(self, text: str) -> tuple[float, ...]:
+        """Never reached: without a known limit no document is marked for shortening."""
+        del text
+        raise RetrievalFailure(
+            "embedding_input_too_long", "Remote embedding input cannot be shortened by TAREL.",
+        )
 
     def embed_documents(
         self, texts: tuple[str, ...], *, batch_size: int

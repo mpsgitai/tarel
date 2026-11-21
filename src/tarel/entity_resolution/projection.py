@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from tarel.entity_resolution.contracts import EntityResolutionFailure, EntityResolutionMatch
+from tarel.entity_resolution.candidates import (
+    EntityResolutionMatch,
+)
+from tarel.entity_resolution.contracts import (
+    EntityResolutionFailure,
+)
 from tarel.graph.contracts import GraphDocument, GraphEdge
 
 

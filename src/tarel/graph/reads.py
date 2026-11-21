@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from tarel.graph.build import object_node_id
+from tarel.graph.contracts import GraphFailure
 from tarel.graph.selective import GraphHeader, GraphObjectPage, GraphSlice
 from tarel.graph.store import FileGraphStore
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 
 
 def graph_header_use_case(name: str, *, runtime: TarelRuntime | None = None) -> GraphHeader:
-    return _store(runtime).header(name)
+    return resolve_runtime(runtime).graph_store().header(name)
 
 
 def graph_objects_use_case(
@@ -21,9 +23,10 @@ def graph_objects_use_case(
     expected_revision: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> GraphObjectPage:
-    return _store(runtime).list_objects(
+    store = resolve_runtime(runtime).graph_store()
+    return store.list_objects(
         name,
-        object_ids=object_ids,
+        object_ids=_object_ids(store, name, object_ids) if object_ids else object_ids,
         namespace=namespace,
         offset=offset,
         limit=limit,
@@ -39,9 +42,10 @@ def graph_slice_use_case(
     expected_revision: str | None = None,
     runtime: TarelRuntime | None = None,
 ) -> GraphSlice:
-    return _store(runtime).read_slice(
+    store = resolve_runtime(runtime).graph_store()
+    return store.read_slice(
         name,
-        object_ids,
+        _object_ids(store, name, object_ids),
         namespace=namespace,
         expected_revision=expected_revision,
     )
@@ -52,8 +56,25 @@ def rebuild_graph_index_use_case(
     *,
     runtime: TarelRuntime | None = None,
 ) -> GraphHeader:
-    return _store(runtime).rebuild_index(name)
+    return resolve_runtime(runtime).graph_store().rebuild_index(name)
 
 
-def _store(runtime: TarelRuntime | None) -> FileGraphStore:
-    return runtime.graph_store() if runtime else FileGraphStore()
+def _object_ids(store: FileGraphStore, name: str, references: tuple[str, ...]) -> tuple[str, ...]:
+    """Accept stable IDs (``object:catalog/main/orders``) and labels (``main.orders``)."""
+    if all(reference.startswith("object:") for reference in references):
+        return references
+    catalog = store.header(name).catalog
+    object_ids = []
+    for reference in references:
+        if reference.startswith("object:"):
+            object_ids.append(reference)
+            continue
+        namespace, separator, object_name = reference.partition(".")
+        if not separator or not namespace or not object_name:
+            raise GraphFailure(
+                "invalid_object_reference",
+                f"Use an object label such as main.orders or a stable object ID: {reference}",
+            )
+        object_ids.append(object_node_id(catalog, namespace, object_name))
+    return tuple(object_ids)
+

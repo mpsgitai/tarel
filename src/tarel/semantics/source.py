@@ -69,7 +69,7 @@ def read_semantic_source(
                 "Semantic source paths must not be symbolic links.",
             )
         if path.is_file():
-            paths = (path,)
+            paths: tuple[Path, ...] = (path,)
             root = path.parent
         elif path.is_dir():
             root = path

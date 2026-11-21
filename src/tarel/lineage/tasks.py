@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from tarel.lineage.contracts import LineageDocument, LineageFailure
 from tarel.lineage.coverage import write_markers
@@ -24,7 +25,7 @@ class LineageTask:
     definition_name: str
     request: StructuredRequest
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "definition_id": self.definition_id,
             "definition_name": self.definition_name,
@@ -140,8 +141,8 @@ def lineage_task(
     )
 
 
-def lineage_analysis_schema() -> dict[str, object]:
-    evidence = {
+def lineage_analysis_schema() -> dict[str, Any]:
+    evidence: dict[str, Any] = {
         "additionalProperties": False,
         "properties": {
             "line_end": {"minimum": 1, "type": "integer"},

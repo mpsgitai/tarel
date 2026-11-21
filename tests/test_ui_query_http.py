@@ -12,7 +12,15 @@ from urllib.request import Request, urlopen
 
 from tarel.graph.contracts import GraphAnnotation
 from tarel.sdk import Tarel
-from tarel.ui.server import TarelUIBackend, UIConfig, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tests.test_ui import _graph
 
 

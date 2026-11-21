@@ -30,7 +30,9 @@ def list_lineage_items(
     unknown = selected - {"draft", "rejected", "review_required", "validated"}
     if unknown or not selected:
         raise LineageFailure("invalid_lineage_review", "Invalid lineage review-state filter.")
-    items = (*document.claims, *document.materializations, *document.write_units)
+    items: tuple[LineageClaim | LineageMaterialization | LineageWriteUnit, ...] = (
+        *document.claims, *document.materializations, *document.write_units
+    )
     return tuple(
         sorted(
             (item for item in items if item.state in selected),

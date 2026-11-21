@@ -265,6 +265,7 @@ def apply_lineage_proposal(
         and item.reviews
         and item.state != "review_required"
         for item in (*replaceable_claims, *document.write_units)
+        if isinstance(item, LineageClaim | LineageWriteUnit)
     ):
         raise LineageFailure(
             "reviewed_lineage_item",
@@ -643,7 +644,8 @@ def _validate_write_coverage(
 ) -> None:
     coverage = [
         (item.operation, item.evidence.line_start, item.evidence.line_end)
-        for item in (*units, *excluded)
+        for items in (units, excluded)
+        for item in items
     ]
     markers = write_markers(definition.content)
     uncovered = [
@@ -702,7 +704,7 @@ def _ordered_steps(steps: tuple[LineageStep, ...]) -> tuple[LineageStep, ...]:
     order = {item.id: index for index, item in enumerate(steps)}
     remaining = {item.id: set(item.depends_on) for item in steps}
     by_id = {item.id: item for item in steps}
-    result = []
+    result: list[LineageStep] = []
     while remaining:
         ready = sorted(
             (key for key, dependencies in remaining.items() if not dependencies),

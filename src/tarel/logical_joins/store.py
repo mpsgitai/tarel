@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
+from tarel.atomic import write_atomic
 from tarel.logical_joins.contracts import LogicalJoin, LogicalJoinFailure, identifier
 
 
@@ -45,21 +44,10 @@ class FileLogicalJoinStore:
     def save(self, join: LogicalJoin) -> Path:
         LogicalJoin.from_dict(join.to_dict())
         path = self.path(join.id)
-        temporary: Path | None = None
+        payload = json.dumps(join.to_dict(), ensure_ascii=False, sort_keys=True, indent=2)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=".logical-join-", text=True)
-            temporary = Path(name)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                os.fchmod(handle.fileno(), 0o600)
-                json.dump(join.to_dict(), handle, ensure_ascii=False, sort_keys=True, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".logical-join-", durable=True)
         except OSError as exc:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
             raise LogicalJoinFailure(
                 "logical_join_save_failed", "Cannot save logical join."
             ) from exc

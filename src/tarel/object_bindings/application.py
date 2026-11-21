@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
+from tarel.atomic import write_atomic
 from tarel.object_bindings.contracts import ObjectBindingFailure, ObjectValueBinding, identifier
 from tarel.object_families.application import (
-    _attribute_values,
+    family_attribute_values,
     iter_family_metadata,
     load_object_family_use_case,
     validate_family_selectively,
 )
 from tarel.object_families.contracts import FamilyReview
-from tarel.runtime import TarelRuntime
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.topology.endpoints import resolve_logical_endpoint_use_case
 
 
@@ -85,7 +85,8 @@ def load_object_binding_use_case(
 ) -> ObjectValueBinding:
     try:
         value = json.loads(
-            _path(graph_name, binding_id, runtime).read_text("utf-8"), object_pairs_hook=_unique
+            _path(graph_name, binding_id, runtime).read_text("utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
         )
         if not isinstance(value, dict) or "revision" not in value:
             raise ValueError("Missing revision")
@@ -130,7 +131,7 @@ def find_object_bindings_use_case(
     *,
     mode: str = "confirmed_only",
     runtime: TarelRuntime | None = None,
-) -> tuple[dict[str, object], ...]:
+) -> tuple[dict[str, Any], ...]:
     _mode(mode)
     directory = _path(graph_name, "placeholder", runtime).parent
     result = []
@@ -213,7 +214,7 @@ def resolve_object_binding_use_case(
             and str(node.metadata.get("namespace", "")).casefold() != namespace.casefold()
         ):
             continue
-        value = _attribute_values(family.attributes, node)[binding.target.field_id]
+        value = family_attribute_values(family.attributes, node)[binding.target.field_id]
         if value in counts:
             counts[value] += 1
             matched += 1
@@ -277,7 +278,7 @@ def _revision(binding: ObjectValueBinding, expected: str) -> None:
 def _path(graph_name: str, binding_id: str, runtime: TarelRuntime | None) -> Path:
     identifier(graph_name)
     identifier(binding_id)
-    root = (runtime.root if runtime else Path.cwd() / ".tarel") / "object-bindings"
+    root = resolve_runtime(runtime).root / "object-bindings"
     path = root / graph_name / f"{binding_id}.json"
     if not path.resolve().is_relative_to(root.resolve()):
         raise ObjectBindingFailure("invalid_object_binding_path", "Binding path leaves its store.")
@@ -286,26 +287,16 @@ def _path(graph_name: str, binding_id: str, runtime: TarelRuntime | None) -> Pat
 
 def _save(binding: ObjectValueBinding, runtime: TarelRuntime | None) -> None:
     path = _path(binding.graph_name, binding.id, runtime)
-    temporary: Path | None = None
+    payload = json.dumps(binding.to_dict(), ensure_ascii=False, sort_keys=True)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(prefix=".binding-", dir=path.parent)
-        temporary = Path(name)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            os.fchmod(handle.fileno(), 0o600)
-            json.dump(binding.to_dict(), handle, ensure_ascii=False, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        write_atomic(path, payload, prefix=".binding-", durable=True)
     except OSError as exc:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
         raise ObjectBindingFailure(
             "object_binding_save_failed", "Cannot save binding metadata."
         ) from exc
 
 
-def _unique(pairs: list[tuple[str, object]]) -> Mapping[str, object]:
+def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> Mapping[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:

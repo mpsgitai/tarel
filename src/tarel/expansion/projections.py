@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from tarel.context import compile_context_prefix
+from tarel.context.compiler import compile_context_prefix
 from tarel.expansion.contracts import (
     ContextExpansionFailure,
     ExpansionInput,

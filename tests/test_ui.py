@@ -31,12 +31,23 @@ from tarel.graph.contracts import (
 from tarel.graph.store import FileGraphStore
 from tarel.lineage.manual import add_manual_hop, add_manual_job, create_manual_lineage
 from tarel.lineage.store import FileLineageStore
-from tarel.ui.presentation import (
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+    UIFailure,
+)
+from tarel.ui.payloads.focus import (
     browser_focus_catalog,
     browser_focus_selection,
+)
+from tarel.ui.payloads.graph import (
     browser_graph,
 )
-from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.store import FileWorkspaceStore
 
 
@@ -205,12 +216,12 @@ class UIPresentationTests(TestCase):
         self.assertEqual(manual["hops"][0]["item_id"], hop.id)
         self.assertEqual(manual["hops"][0]["state"], "draft")
         flows = payload["lineage_flows"]
-        self.assertEqual(len(flows["edges"]), 2)
-        self.assertEqual(
-            {item["relation"] for item in flows["edges"]},
-            {"business_data", "insert"},
-        )
-        self.assertTrue(any(item["kind"] == "procedure" for item in flows["nodes"]))
+        self.assertEqual(len(flows["edges"]), 1)
+        process = flows["edges"][0]["processes"][0]
+        self.assertEqual((process["operation"], process["role"]), ("insert", "business_data"))
+        self.assertEqual(process["analyzer"], "manual")
+        self.assertEqual(flows["processes"][0]["kind"], "procedure")
+        self.assertFalse(any(item["kind"] == "procedure" for item in flows["nodes"]))
 
 
 class UIBackendTests(TestCase):
@@ -224,19 +235,19 @@ class UIBackendTests(TestCase):
         self.graph_store.save(_graph())
         self.stack = ExitStack()
         self.stack.enter_context(
-            patch("tarel.application.FileGraphStore", return_value=self.graph_store)
+            patch("tarel.runtime.FileGraphStore", return_value=self.graph_store)
         )
         self.stack.enter_context(
-            patch("tarel.application.FileWorkspaceStore", return_value=self.workspace_store)
+            patch("tarel.runtime.FileWorkspaceStore", return_value=self.workspace_store)
         )
         self.stack.enter_context(
-            patch("tarel.application.FileFocusStore", return_value=self.focus_store)
+            patch("tarel.runtime.FileFocusStore", return_value=self.focus_store)
         )
         self.stack.enter_context(
-            patch("tarel.lineage.application.FileLineageStore", return_value=self.lineage_store)
+            patch("tarel.runtime.FileLineageStore", return_value=self.lineage_store)
         )
         self.stack.enter_context(
-            patch("tarel.lineage.application.FileGraphStore", return_value=self.graph_store)
+            patch("tarel.runtime.FileGraphStore", return_value=self.graph_store)
         )
         self.backend = TarelUIBackend(UIConfig("sales", editable=True))
 
@@ -417,9 +428,18 @@ class UIBackendTests(TestCase):
                 self.assertIn('content="test-token"', html)
                 self.assertIn("Show path on canvas", html)
                 self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
-            with urlopen(f"{base}/api/bootstrap", timeout=3) as response:
+            authorized = Request(f"{base}/api/bootstrap", headers={"X-Tarel-Token": "test-token"})
+            with urlopen(authorized, timeout=3) as response:
                 payload = json.load(response)
                 self.assertEqual(payload["graph"], "sales")
+            for headers in (
+                {},
+                {"X-Tarel-Token": "test-token", "Host": "attacker.invalid"},
+            ):
+                with self.subTest(headers=headers), self.assertRaises(HTTPError) as raised:
+                    urlopen(Request(f"{base}/api/bootstrap", headers=headers), timeout=3)
+                self.assertEqual(raised.exception.code, 403)
+                raised.exception.close()
             request = Request(
                 f"{base}/api/annotation/decision",
                 data=b"{}",

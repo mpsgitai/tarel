@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
 from tarel.topology.endpoint_contracts import LogicalEndpoint
 
 SEMANTIC_CONCEPT_CONTRACT_VERSION = "tarel.semantic-concepts.v0.1.experimental"
@@ -16,10 +17,8 @@ _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-class SemanticConceptFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class SemanticConceptFailure(TarelError):
+    """Raised when a semantic concept operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +201,7 @@ class SemanticConceptDocument:
         ).hexdigest()
 
     def to_dict(self, *, include_revision: bool = True) -> dict[str, object]:
-        payload = {
+        payload: dict[str, object] = {
             "graph_name": self.graph_name,
             "graph_revision": self.graph_revision,
             "concepts": [

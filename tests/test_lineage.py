@@ -25,6 +25,9 @@ from tarel.lineage.source import (
 from tarel.lineage.store import FileLineageStore
 from tarel.lineage.tasks import lineage_task, plan_lineage_tasks
 
+# Patch target: where definition analysis looks up its provider.
+LOAD_PROVIDER = "tarel.lineage.analysis_application.load_provider"
+
 _FIXTURE = Path(__file__).parent / "fixtures/lineage/adventureworks/sales_refresh.json"
 
 
@@ -518,7 +521,7 @@ UPDATE target_alias SET value = 1 FROM #Stage AS target_alias;
             try:
                 store = FileLineageStore()
                 store.save(document)
-                with patch("tarel.lineage.application.load_provider", return_value=provider):
+                with patch(LOAD_PROVIDER, return_value=provider):
                     result = _run_cli(
                         [
                             "lineage",

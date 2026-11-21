@@ -212,13 +212,13 @@ def validate_annotation_samples(
                 "invalid_annotation_samples",
                 "Caller-supplied annotation sample targets must be stable object IDs.",
             )
-        node = nodes.get(target_id)
-        if node is None or node.type not in {"table", "view"}:
+        target = nodes.get(target_id)
+        if target is None or target.type not in {"table", "view"}:
             raise AnnotationFailure(
                 "invalid_annotation_samples",
                 f"Annotatable sample target not found: {target_id}",
             )
-        _validate_annotation_sample(sample, node, fields_by_object.get(target_id, set()))
+        _validate_annotation_sample(sample, target, fields_by_object.get(target_id, set()))
         validated[target_id] = sample
     return validated
 

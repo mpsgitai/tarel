@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import os
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -16,13 +17,14 @@ from pathlib import Path
 
 @contextmanager
 def file_lock(path: Path, *, timeout: float = 30.0) -> Iterator[None]:
+    """Hold an exclusive OS lock on ``path`` for the ``with`` block, waiting up to ``timeout``."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     with os.fdopen(descriptor, "r+b") as handle:
         deadline = time.monotonic() + timeout
         while True:
             try:
-                if os.name == "nt":
+                if sys.platform == "win32":
                     import msvcrt
 
                     handle.seek(0)
@@ -46,7 +48,7 @@ def file_lock(path: Path, *, timeout: float = 30.0) -> Iterator[None]:
                 handle.flush()
             yield
         finally:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:

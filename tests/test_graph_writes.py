@@ -13,16 +13,18 @@ from threading import Event
 from unittest import TestCase
 from unittest.mock import patch
 
-from tarel.annotations.contracts import AnnotationFailure
-from tarel.annotations.tasks import plan_annotation_tasks
-from tarel.application import (
+from tarel.annotations.application import (
     apply_annotation_use_case,
     edit_annotation_use_case,
-    refresh_graph_use_case,
     run_annotation_batch_use_case,
 )
+from tarel.annotations.contracts import AnnotationFailure
+from tarel.annotations.tasks import plan_annotation_tasks
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
 from tarel.file_lock import file_lock
+from tarel.graph.application import (
+    refresh_graph_use_case,
+)
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphFailure
 from tarel.graph.revision import graph_revision
@@ -91,7 +93,7 @@ class GraphWriteTests(TestCase):
         started, resume = Event(), Event()
         provider = _WaitingProvider(_proposal(tasks[0])["annotation"], started, resume)
         with (
-            patch("tarel.application.load_provider", return_value=provider),
+            patch("tarel.annotations.application.load_provider", return_value=provider),
             ThreadPoolExecutor(1) as pool,
         ):
             future = pool.submit(
@@ -121,7 +123,7 @@ class GraphWriteTests(TestCase):
         started, resume = Event(), Event()
         provider = _WaitingProvider(_proposal(task)["annotation"], started, resume)
         with (
-            patch("tarel.application.load_provider", return_value=provider),
+            patch("tarel.annotations.application.load_provider", return_value=provider),
             ThreadPoolExecutor(1) as pool,
         ):
             future = pool.submit(
@@ -157,7 +159,7 @@ class GraphWriteTests(TestCase):
             apply_annotation_use_case("demo", _proposal(task), runtime=self.runtime)
             return _catalog(extra=True)
 
-        with patch("tarel.application.discover_catalog_use_case", side_effect=observe):
+        with patch("tarel.graph.application.discover_catalog_use_case", side_effect=observe):
             result = refresh_graph_use_case("demo", runtime=self.runtime)
         saved = self.store.load("demo")
         self.assertIsNotNone(saved.node_by_id()[task.target_id].annotation)
@@ -172,7 +174,7 @@ class GraphWriteTests(TestCase):
             return _catalog()
 
         with (
-            patch("tarel.application.discover_catalog_use_case", side_effect=observe),
+            patch("tarel.graph.application.discover_catalog_use_case", side_effect=observe),
             self.assertRaises(GraphFailure) as failure,
         ):
             refresh_graph_use_case("demo", runtime=self.runtime)
@@ -238,7 +240,7 @@ class GraphWriteTests(TestCase):
 
         with (
             state_write_lock(self.runtime.root),
-            patch("tarel.graph.store.state_write_lock", short_lock),
+            patch("tarel.atomic.state_write_lock", short_lock),
             self.assertRaises(GraphFailure),
         ):
             self.store.save(replace(self.graph, catalog="changed"))
@@ -300,24 +302,24 @@ def _catalog(*, extra=False):
 
 def _proposal(task):
     def annotation(description):
-        return dict(
-            description=description,
-            role=None,
-            synonyms=[],
-            tags=[],
-            warnings=[],
-            confidence=0.7,
-            confidence_reason="Synthetic test schema.",
-            evidence=[dict(source="object_name", reference=task.target_label)],
-        )
+        return {
+            "description": description,
+            "role": None,
+            "synonyms": [],
+            "tags": [],
+            "warnings": [],
+            "confidence": 0.7,
+            "confidence_reason": "Synthetic test schema.",
+            "evidence": [{"source": "object_name", "reference": task.target_label}],
+        }
 
-    return dict(
-        task_id=task.id,
-        target_id=task.target_id,
-        mode=task.mode,
-        field_names=list(task.field_names) if task.mode == "missing" else [],
-        include_object=task.include_object if task.mode == "missing" else None,
-        annotation=dict(
+    return {
+        "task_id": task.id,
+        "target_id": task.target_id,
+        "mode": task.mode,
+        "field_names": list(task.field_names) if task.mode == "missing" else [],
+        "include_object": task.include_object if task.mode == "missing" else None,
+        "annotation": dict(
             **annotation("Synthetic object description."),
             grain=None,
             fields=[
@@ -325,4 +327,4 @@ def _proposal(task):
                 for name in task.field_names
             ],
         ),
-    )
+    }

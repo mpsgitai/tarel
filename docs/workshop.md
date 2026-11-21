@@ -326,7 +326,7 @@ objects. It defines a `report-01-working-set` zone in the warehouse system using
 translation is harness orchestration, not an automatic focus-to-prefix feature.
 
 ```bash
-tarel context prefix enterprise --workspace \
+tarel context prefix --workspace enterprise \
   --system warehouse --zone report-01-working-set \
   --validated-only \
   --max-objects 300 --max-fields-per-object 50 \
@@ -388,12 +388,12 @@ This topic may not exist on the report's current lineage path. Compare lexical a
 points:
 
 ```bash
-tarel search enterprise "return reason" --workspace --mode bm25 --limit 8
-tarel search enterprise "why customers send products back" \
-  --workspace --mode hybrid --limit 8
+tarel search "return reason" --workspace enterprise --mode bm25 --limit 8
+tarel search "why customers send products back" \
+  --workspace enterprise --mode hybrid --limit 8
 
-tarel context build enterprise "connect return reasons with revenue" \
-  --workspace --mode hybrid --validated-only \
+tarel context build "connect return reasons with revenue" \
+  --workspace enterprise --mode hybrid --validated-only \
   --max-objects 12 --max-hops 2 --format json
 ```
 
@@ -434,8 +434,8 @@ connect it.
 Ask: "Which data can explain late deliveries and complaints?"
 
 ```bash
-tarel grounding enterprise "investigate late deliveries and complaints" \
-  --workspace --mode hybrid --validated-only --format json
+tarel grounding "investigate late deliveries and complaints" \
+  --workspace enterprise --mode hybrid --validated-only --format json
 ```
 
 The harness locates relevant metadata, identifies missing evidence, and explains a viable analysis.

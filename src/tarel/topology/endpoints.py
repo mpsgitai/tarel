@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 from tarel.graph.contracts import GraphDocument, GraphFailure, GraphNode
 from tarel.graph.revision import physical_graph_revision
-from tarel.graph.store import FileGraphStore
-from tarel.runtime import TarelRuntime
+from tarel.object_families.contracts import FamilyField
+from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.topology.endpoint_contracts import (
     LOGICAL_ENDPOINT_KINDS as LOGICAL_ENDPOINT_KINDS,
 )
@@ -30,7 +30,7 @@ def resolve_logical_endpoint_use_case(
     runtime: TarelRuntime | None = None,
 ) -> ResolvedLogicalEndpoint:
     _validate_request(endpoint, mode)
-    store = runtime.graph_store() if runtime else FileGraphStore()
+    store = resolve_runtime(runtime).graph_store()
     if endpoint.kind == "graph_field":
         header = store.header(graph_name)
         _require_revision(endpoint, header.physical_revision)
@@ -75,9 +75,8 @@ def resolve_logical_endpoint_for_graph_use_case(
         )
     if endpoint.kind == "derived_field":
         from tarel.topology.application import validate_logical_topology_against_graph
-        from tarel.topology.store import FileLogicalTopologyStore
 
-        topologies = runtime.logical_topology_store() if runtime else FileLogicalTopologyStore()
+        topologies = resolve_runtime(runtime).logical_topology_store()
         document = topologies.load(graph_name)
         validate_logical_topology_against_graph(document, graph)
         _require_revision(endpoint, document.revision)
@@ -90,16 +89,16 @@ def resolve_logical_endpoint_for_graph_use_case(
                 "Derived relation not found.",
             )
         usage = _usage(relation.state, mode)
-        field = next(
+        output = next(
             (item for item in relation.output_schema if item.id == endpoint.field_id), None
         )
-        if field is None:
+        if output is None:
             raise LogicalEndpointFailure("logical_endpoint_not_found", "Derived output not found.")
         return ResolvedLogicalEndpoint(
             endpoint,
-            f"{relation.name}.{field.name}",
-            field.data_type,
-            field.nullable,
+            f"{relation.name}.{output.name}",
+            output.data_type,
+            output.nullable,
             usage,
             (relation.source.id,),
         )
@@ -172,7 +171,7 @@ def _resolve_family_selectively(
     )
     from tarel.object_families.contracts import ObjectFamilyFailure
 
-    store = runtime.graph_store() if runtime else FileGraphStore()
+    store = resolve_runtime(runtime).graph_store()
     header = store.header(graph_name)
     family = load_object_family_use_case(graph_name, endpoint.object_id, runtime=runtime)
     _require_revision(endpoint, family.revision)
@@ -212,11 +211,14 @@ def _resolved_family(
     field = next((item for item in fields if item.name == endpoint.field_id), None)
     if field is None:
         raise LogicalEndpointFailure("logical_endpoint_not_found", "Family endpoint not found.")
+    data_type, nullable = (
+        (field.data_type, field.nullable) if isinstance(field, FamilyField) else ("string", False)
+    )
     return ResolvedLogicalEndpoint(
         endpoint,
         f"{family.name}.{field.name}",
-        field.data_type if endpoint.kind == "family_field" else "string",
-        field.nullable if endpoint.kind == "family_field" else False,
+        data_type,
+        nullable,
         usage,
         family.member_ids,
     )

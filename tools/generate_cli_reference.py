@@ -36,6 +36,18 @@ GROUPS = {
         "package-format.md",
         "tarel package inspect team.tarel",
     ),
+    "sync": (
+        "Metadata sync",
+        "Publish approved graph metadata from a site and take it over into a central state.",
+        (
+            "Publish writes a .tarelpub file and advances the site's own counter. Plan changes "
+            "nothing. Apply checks the file against local trust and history and activates it "
+            "atomically; only the graph named in the trust entry is written. A signature proves "
+            "the sender, and the trust entry alone decides what that sender may publish."
+        ),
+        "sync.md",
+        "tarel sync status --state central/.tarel",
+    ),
     "demo": (
         "Demo warehouse",
         "Create a deterministic local source for learning and regression exercises.",
@@ -404,8 +416,25 @@ NOTES = {
         "euse. Budgets can omit fields/objects even when a complete datab"
         "ase was selected. TAREL does not guarantee a provider cache hit."
     ),
-    "context expand": (
-        "--requests must describe typed targets. Do not combine --request"
+    "index build": (
+        "Embeds only what changed. An older index keeps vectors of documents"
+        " within 256 tokens and re-embeds longer ones; see the embedding in"
+        "put contract. A document over 2048 tokens embeds its beginni"
+        "ng and is listed in truncated_documents; its fields stay whole."
+    ),
+    "index status": (
+        "ready does not mean the vectors were verified: read embedding_inpu"
+        "t.state as well. A workspace status counts each graph separately, "
+        "so a partial index is not reported as workspace coverage."
+    ),
+    "lineage upstream": (
+        "Same-named objects only stop a trace that depends on them. They ar"
+        "e settled only by identity the referring document declares, and th"
+        "e trace warns when that happened; otherwise the error lists the ca"
+        "ndidates."
+    ),
+    "context expand": (        "--requests takes a JSON file or - for stdin, never inline JSON, "
+        "and the array holds 1-32 typed targets. Do not combine --request"
         "s - with --inputs-stdin: both would require stdin. Expansion ret"
         "urns exit code 1 when omissions are reported; inspect them rathe"
         "r than treating partial output as complete."
@@ -663,6 +692,12 @@ DOC_TARGETS = {
 }
 RESULTS = {
     "version": "Version text; no JSON document.",
+    "sync": (
+        "The publisher identity, stream or trust entry; for publish, the file, its publication ID "
+        "and statement; for plan and apply, the action, sequence, object changes, affected central "
+        "claims and warnings; for status, each origin's active publication, source age, receipt "
+        "and last failure."
+    ),
     "package": (
         "Package path, selected workspace, entry counts by kind, compressed and uncompressed "
         "sizes, package revision, verification state, and unpack destination when applicable."
@@ -767,24 +802,12 @@ RESULTS = {
         " state change."
     ),
 }
-DOMAIN_CLI = {
-    "package": "packages/cli.py",
-    "lineage": "lineage/cli.py",
-    "semantic": "semantics/cli.py",
-    "entity": "entity_resolution/cli.py",
-    "discovery": "discovery/cli.py",
-    "agent": "discovery/cli.py",
-    "topology": "topology/cli.py",
-    "family": "object_families/cli.py",
-    "binding": "object_bindings/cli.py",
-    "concept": "semantic_concepts/cli.py",
-    "logical-join": "logical_joins/cli.py",
-    "reference-mapping": "reference_mapping/cli.py",
-}
+CLI_MODULE_OVERRIDES = {"agent": "discovery", "version": "__init__"}
 
 
 def source_for(group):
-    return "src/tarel/" + DOMAIN_CLI.get(group, "cli.py")
+    module = CLI_MODULE_OVERRIDES.get(group, group.replace("-", "_"))
+    return f"src/tarel/cli/{module}.py"
 
 
 def appendices():
@@ -811,9 +834,9 @@ def appendices():
         ),
         (
             "| Context packet | [Packet contract](contracts.md#context-packet"
-            "s), [serializer](../src/tarel/context_output.py) |"
+            "s), [serializer](../src/tarel/context/output.py) |"
         ),
-        "| Grounding bundle | [GroundingBundle](../src/tarel/grounding.py) |",
+        "| Grounding bundle | [GroundingBundle](../src/tarel/context/grounding.py) |",
         (
             "| Static lineage input/output | [Input](../src/tarel/lineage/sou"
             "rce.py), [stored records](../src/tarel/lineage/contracts.py) |"
@@ -1111,7 +1134,7 @@ def walk(p, path=(), helptext=""):
     for sub in subs:
         helps = {a.dest: a.help for a in sub._choices_actions}
         for n, c in sub.choices.items():
-            walk(c, path + (n,), helps.get(n, ""))
+            walk(c, (*path, n), helps.get(n, ""))
 
 
 walk(root)

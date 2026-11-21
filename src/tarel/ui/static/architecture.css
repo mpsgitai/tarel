@@ -23,8 +23,6 @@ body.architecture-mode .canvas-toolbar { background: #111c2e; border-color: #263
 .arch-badges { display:flex; flex-wrap:wrap; gap:4px; margin:10px 0; }
 .arch-badges span { font-size:var(--fs-xs, 9px); color:#c7d9fa; background:#223655; padding:4px 6px; border-radius:5px; }
 #arch-selection .arch-evidence { font-size:var(--fs-xs, 10px); color:#90a6c4; }
-.arch-legend { display:grid; gap:4px; padding:11px; margin-top:14px; border:1px solid #314259; border-radius:7px; font-size:var(--fs-xs, 10px); color:#b4c3d7; }
-.arch-legend strong { color:#e7eef9; }
 #arch-node-list { max-height:180px; overflow:auto; margin-top:8px; }
 #arch-node-list button { display:block; width:100%; background:transparent; border:0; border-bottom:1px solid #26354b; text-align:left; padding:8px 4px; font-size:var(--fs-sm, 11px); }
 #arch-node-list small { display:block; color:#8da3c1; font-size:var(--fs-xs, 10px); }
@@ -42,4 +40,4 @@ body.architecture-mode .canvas-toolbar { background: #111c2e; border-color: #263
 #arch-collection-members input { width:auto; }
 .arch-danger { color:#fda4af; margin-right:auto; }
 @media (max-width:1100px) { body.architecture-mode #graph-view {grid-template-columns:230px minmax(0,1fr);} #architecture-sidebar {padding:12px 10px;} }
-@media (max-width:700px) { body.architecture-mode #graph-view {grid-template-columns:180px minmax(0,1fr);} #architecture-toolbar {gap:4px;padding:6px;} #architecture-toolbar button {font-size:var(--fs-xs, 10px);padding:5px;} .arch-dialog .field-grid {grid-template-columns:1fr;} }
+@media (max-width:700px) { #architecture-toolbar {gap:4px;padding:6px;} #architecture-toolbar button {font-size:var(--fs-xs, 10px);padding:5px;} .arch-dialog .field-grid {grid-template-columns:1fr;} }

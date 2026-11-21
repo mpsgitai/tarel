@@ -17,7 +17,16 @@ from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.revision import graph_revision
 from tarel.knowledge.contracts import KnowledgeDocument, KnowledgeScope
 from tarel.sdk import Tarel
-from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+    UIFailure,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.contracts import Area, SchemaReference
 from tests.test_family_focus import _focus
 from tests.test_object_families_ui import _family, _graph, _workspace
@@ -76,7 +85,7 @@ class ReviewViewBackendTests(TestCase):
                 "load_lineage_use_case",
             ):
                 stack.enter_context(patch(
-                    f"tarel.ui.server.{name}", side_effect=AssertionError(f"Unexpected {name}"),
+                    f"tarel.ui.backend.{name}", side_effect=AssertionError(f"Unexpected {name}"),
                 ))
             review = self.backend.mutate("/api/review/view", {})
 
@@ -118,7 +127,7 @@ class ReviewViewBackendTests(TestCase):
             )
             for index, node in enumerate((first, second))
         )
-        with patch("tarel.ui.server.list_knowledge_documents_use_case", return_value=documents):
+        with patch("tarel.ui.backend.list_knowledge_documents_use_case", return_value=documents):
             result = self.backend.mutate("/api/review/view", {})
         records = {record["object_id"]: record for record in result["review"]}
         self.assertEqual(records[first.id]["available_context_document_ids"], ["context-0"])

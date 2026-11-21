@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 
+from tarel.atomic import write_atomic
 from tarel.lineage.contracts import LineageFailure
 from tarel.lineage.refresh import LineageRefreshReport
 
@@ -31,20 +30,9 @@ class FileLineageChangeStore:
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".change-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".change-")
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise LineageFailure(
                 "lineage_change_report_save_failed",
                 f"Could not save change report for lineage: {lineage_name}",

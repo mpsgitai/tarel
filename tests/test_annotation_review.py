@@ -13,7 +13,7 @@ from tarel.annotations.review import decide_annotation, decide_annotation_scope,
 from tarel.annotations.tasks import plan_annotation_tasks
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
-from tarel.context import compile_context
+from tarel.context.compiler import compile_context
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import AnnotationProvenance, GraphAnnotation, GraphDocument
 from tarel.graph.store import FileGraphStore
@@ -205,7 +205,7 @@ class AnnotationReviewTests(TestCase):
             output = StringIO()
             text_output = StringIO()
             with (
-                patch("tarel.application.FileGraphStore", return_value=store),
+                patch("tarel.runtime.FileGraphStore", return_value=store),
                 redirect_stdout(output),
             ):
                 edited = main(

@@ -7,15 +7,15 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from tarel.errors import TarelError
+
 _CONTRACT_VERSION = "tarel.focus.v0.1"
 _SOURCE_KINDS = frozenset({"graph", "lineage"})
 _LINEAGE_STATES = frozenset({"draft", "rejected", "review_required", "validated"})
 
 
-class FocusFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class FocusFailure(TarelError):
+    """Raised when a focus operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,10 +178,10 @@ def validate_focus(document: FocusDocument) -> None:
         raise FocusFailure("invalid_focus", "Focus members or seed are invalid.")
     if tuple(sorted(document.members, key=_member_key)) != document.members:
         raise FocusFailure("invalid_focus", "Focus members must use deterministic order.")
-    for item in document.members:
-        if item.depth < 0 or not item.reasons:
+    for member in document.members:
+        if member.depth < 0 or not member.reasons:
             raise FocusFailure("invalid_focus", "Focus member depth or reasons are invalid.")
-        if tuple(sorted(set(item.reasons))) != item.reasons:
+        if tuple(sorted(set(member.reasons))) != member.reasons:
             raise FocusFailure("invalid_focus", "Focus member reasons must be unique and sorted.")
     member_set = set(member_ids)
     hop_ids = [item.id for item in document.hops]

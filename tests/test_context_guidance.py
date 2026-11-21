@@ -13,15 +13,15 @@ from unittest.mock import patch
 from test_context import _context_graph
 
 from tarel.cli import main
-from tarel.context import (
+from tarel.context.compiler import (
     ContextFailure,
     compile_context,
     compile_context_from_objects,
     compile_context_prefix,
 )
-from tarel.context_guidance import context_brief, context_delta
-from tarel.context_output import ContextScope, canonical_hash
-from tarel.context_packets import context_packet_from_dict, load_context_packet
+from tarel.context.guidance import context_brief, context_delta
+from tarel.context.output import ContextScope, canonical_hash
+from tarel.context.packets import context_packet_from_dict, load_context_packet
 from tarel.graph.contracts import GraphAnnotation
 from tarel.graph.store import FileGraphStore
 from tarel.sdk import Tarel
@@ -379,7 +379,7 @@ class ContextGuidanceTests(TestCase):
             json_output = StringIO()
             with (
                 patch(
-                    "tarel.application.load_context_packet",
+                    "tarel.context.application.load_context_packet",
                     wraps=load_context_packet,
                 ) as packet_loader,
                 redirect_stdout(json_output),
@@ -401,7 +401,7 @@ class ContextGuidanceTests(TestCase):
             store.save(_context_graph())
             output = StringIO()
             with (
-                patch("tarel.application.FileGraphStore", return_value=store),
+                patch("tarel.runtime.FileGraphStore", return_value=store),
                 redirect_stdout(output),
             ):
                 exit_code = main([

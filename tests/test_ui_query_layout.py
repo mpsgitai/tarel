@@ -365,6 +365,12 @@ assert.equal(searchHitObject({id:'object_family:sales',source_graph:'south',
   assert.ok($('#context-result').innerHTML.includes('contains exploratory logical hints'));
   assert.ok($('#context-result').innerHTML.includes('Source review state: draft'));
   assert.ok($('#context-result').innerHTML.includes('Semantic text not included.'));
+  // Two objects were omitted: the packet was cut, so its budget comes up and the
+  // omission list is counted and marked as a notice.
+  assert.ok($('#context-result').innerHTML.includes('Compiler omissions and warnings · 3'));
+  assert.ok($('#context-result').innerHTML.includes('has-issues'));
+  assert.ok($('#context-result').innerHTML.includes('close to its size limit'));
+  assert.ok($('#context-result').innerHTML.includes('Selection not recorded'));
   assert.equal($('#context-json').textContent, JSON.stringify(packet,null,2));
   let copied;
   navigator.clipboard = {writeText:async value => copied = value};
@@ -398,6 +404,36 @@ assert.ok(html.includes('scope_warnings evidence changed'));
 assert.ok(html.includes(
   '1 field · graph revision · logical hints · retrieval · selection evidence'
 ));
+""")
+
+    def test_a_complete_packet_keeps_budget_technical_and_names_anchors(self) -> None:
+        self._script(r"""
+const packet = {
+  contract_version:'tarel.context.v0.2',
+  stable:{objects:[{id:'a',label:'Sales',fields:[]},{id:'b',label:'Customer',fields:[]},
+    {id:'c',label:'Region',fields:[]}],joins:[],annotation_states:['validated']},
+  dynamic:{budgets:{context_characters:3000,max_characters:24000},
+    omissions:{objects:0,fields:0,joins:0,paths:0,reasons:[]},
+    selection:[{id:'a',selection:'search',distance:0},{id:'b',selection:'relationship',distance:1},
+      {id:'c',selection:'selected',distance:0}]},
+  identity:{packet_hash:'abcdefabcdefabcdef'}
+};
+renderContextPreview(packet);
+const html = $('#context-result').innerHTML;
+assert.ok(html.includes('Compiler omissions and warnings · 0'));
+assert.ok(!html.includes('has-issues'));
+assert.ok(!html.includes('close to its size limit'));
+const summary = html.slice(0, html.indexOf('Exact CLI / SDK packet'));
+assert.ok(!summary.includes('Characters'), 'budget sits under the technical details');
+assert.ok(html.slice(html.indexOf('Exact CLI / SDK packet')).includes('Characters'));
+assert.ok(html.includes('Anchor · matched the question'));
+assert.ok(html.includes('Added · 1 relationship from an anchor'));
+assert.ok(html.includes('Anchor · your selection'));
+assert.equal((html.match(/abcdefabcdef/g) || []).length, 1, 'the packet hash appears once');
+const budgets = {context_characters:23000, max_characters:24000};
+const near = {...packet, dynamic:{...packet.dynamic, budgets}};
+renderContextPreview(near);
+assert.ok($('#context-result').innerHTML.includes('close to its size limit'));
 """)
 
     def _script(self, assertions: str) -> None:

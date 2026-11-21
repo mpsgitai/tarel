@@ -29,19 +29,27 @@ from tarel.retrieval.bm25 import rank_bm25
 from tarel.retrieval.contracts import RankedDocument, RetrievalDocument, RetrievalFailure
 from tarel.retrieval.documents import build_retrieval_documents
 from tarel.retrieval.index import (
-    DEFAULT_BM25_WEIGHT,
     FileRetrievalIndex,
-    _reciprocal_rank_fusion,
-    search_retrieval,
 )
 from tarel.retrieval.local import (
+    EMBEDDING_TOKEN_CAPACITY,
+    LOCAL_EMBEDDING_INPUT,
     MODEL_SPECS,
     LlamaCppEmbedding,
     ModelSpec,
     download_model,
+    qwen_embedding_query,
+)
+from tarel.retrieval.ranking import (
+    DEFAULT_BM25_WEIGHT,
+    _reciprocal_rank_fusion,
+    search_retrieval,
 )
 from tarel.sdk import Tarel
 from tarel.workspaces.core import create_workspace, define_system
+
+# Patch targets: where the use cases look these names up.
+LOCAL_EMBEDDING = "tarel.retrieval.application.LlamaCppEmbedding"
 
 
 class RetrievalTests(TestCase):
@@ -96,7 +104,7 @@ class RetrievalTests(TestCase):
             initial = store.build(graph, embedder=_FakeEmbedding(), model_path=model)
 
             with patch(
-                "tarel.retrieval.index._unpack_vector",
+                "tarel.retrieval.index.unpack_vector",
                 side_effect=AssertionError("incremental reuse must keep vectors as blobs"),
             ):
                 rebuilt = store.build(
@@ -236,7 +244,7 @@ class RetrievalTests(TestCase):
             embedder = _FakeEmbeddingWithCalls()
 
             before = sdk.index.status_workspace("multi")
-            with patch("tarel.application.LlamaCppEmbedding", return_value=embedder) as factory:
+            with patch(LOCAL_EMBEDDING, return_value=embedder) as factory:
                 first_batch = sdk.index.build_workspace(
                     "multi", model_path=model, max_graphs=1,
                 )
@@ -276,7 +284,7 @@ class RetrievalTests(TestCase):
 
             before = sdk.index.status_workspace("multi")
             embedder = _FakeEmbeddingWithCalls()
-            with patch("tarel.application.LlamaCppEmbedding", return_value=embedder) as factory:
+            with patch(LOCAL_EMBEDDING, return_value=embedder) as factory:
                 repaired = sdk.index.build_workspace("multi", max_graphs=1)
             after = sdk.index.status_workspace("multi")
 
@@ -309,7 +317,7 @@ class RetrievalTests(TestCase):
                 graphs={graph.name: graph},
             ))
             with patch(
-                "tarel.application.LlamaCppEmbedding",
+                LOCAL_EMBEDDING,
                 return_value=_FakeEmbedding(),
             ):
                 sdk.index.build(graph.name, model_path=original_model)
@@ -317,7 +325,7 @@ class RetrievalTests(TestCase):
 
             missing = sdk.index.status_workspace("multi")
             with patch(
-                "tarel.application.LlamaCppEmbedding",
+                LOCAL_EMBEDDING,
                 side_effect=AssertionError("unchanged vectors must not reload the model"),
             ):
                 repaired = sdk.index.build_workspace(
@@ -350,7 +358,7 @@ class RetrievalTests(TestCase):
                 graph_names=(graph.name,), graphs={graph.name: graph},
             ))
             with patch(
-                "tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+                LOCAL_EMBEDDING, return_value=_FakeEmbedding(),
             ):
                 sdk.index.build(graph.name, model_path=first_model)
 
@@ -359,7 +367,7 @@ class RetrievalTests(TestCase):
             )
             replacement = _FakeEmbeddingWithCalls()
             with patch(
-                "tarel.application.LlamaCppEmbedding", return_value=replacement,
+                LOCAL_EMBEDDING, return_value=replacement,
             ):
                 rebuilt = sdk.index.build_workspace(
                     "multi", model_path=second_model, max_graphs=1,
@@ -384,12 +392,12 @@ class RetrievalTests(TestCase):
                 create_workspace("multi"), "analytics",
                 graph_names=(graph.name,), graphs={graph.name: graph},
             ))
-            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+            with patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()):
                 sdk.index.build(graph.name, model_path=model)
             model.write_bytes(b"model B")
 
             status = sdk.index.status_workspace("multi")
-            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+            with patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()):
                 updated = sdk.index.build_workspace("multi")
 
         self.assertEqual(status["graphs"][0]["state"], "model_mismatch")
@@ -418,7 +426,7 @@ class RetrievalTests(TestCase):
                     del batch_size
                     return tuple(self.vector for _ in texts)
 
-            with patch("tarel.application.LlamaCppEmbedding", FileSensitiveEmbedding):
+            with patch(LOCAL_EMBEDDING, FileSensitiveEmbedding):
                 sdk.index.build(graph.name, model_path=model)
                 model.write_bytes(b"model B with different bytes")
                 rebuilt = sdk.index.build(graph.name)
@@ -454,7 +462,7 @@ class RetrievalTests(TestCase):
             try:
                 os.chdir(root)
                 with (
-                    patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding())
+                    patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding())
                     as factory,
                     redirect_stdout(output),
                     redirect_stderr(StringIO()),
@@ -507,6 +515,9 @@ class RetrievalTests(TestCase):
             active_lock = threading.Lock()
 
             class NativeProbe:
+                def tokenize(self, text):
+                    return text.split()
+
                 def embed(self, _text, **_kwargs):
                     nonlocal active, max_active
                     with active_lock:
@@ -557,7 +568,7 @@ class RetrievalTests(TestCase):
             try:
                 os.chdir(project)
                 with (
-                    patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()),
+                    patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()),
                     redirect_stdout(build_output),
                     redirect_stderr(StringIO()),
                 ):
@@ -627,7 +638,7 @@ class RetrievalTests(TestCase):
                 os.chdir(project)
                 with (
                     patch(
-                        "tarel.application.LlamaCppEmbedding",
+                        LOCAL_EMBEDDING,
                         side_effect=replace_model_during_load,
                     ),
                     redirect_stdout(StringIO()),
@@ -699,7 +710,7 @@ class RetrievalTests(TestCase):
             sdk.runtime.workspace_store().save(workspace)
             embedder = _CountingQueryEmbedding()
 
-            with patch("tarel.application.LlamaCppEmbedding", return_value=embedder):
+            with patch(LOCAL_EMBEDDING, return_value=embedder):
                 results = sdk.search.workspace(
                     "multi", "Internet Umsatz pro Jahr", mode="vector",
                     model_path=model, family_mode=None,
@@ -780,7 +791,7 @@ class RetrievalTests(TestCase):
             model.write_bytes(b"test model")
             sdk = Tarel(project / ".tarel")
             sdk.runtime.graph_store().save(_retrieval_graph())
-            with patch("tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding()):
+            with patch(LOCAL_EMBEDDING, return_value=_FakeEmbedding()):
                 sdk.index.build("retrieval_demo", model_path=model)
                 sdk_search = sdk.search.graph(
                     "retrieval_demo", "Internet Umsatz pro Jahr", mode="hybrid",
@@ -1182,7 +1193,7 @@ class RetrievalTests(TestCase):
             sdk.runtime.graph_store().save(_retrieval_graph())
             with (
                 patch(
-                    "tarel.application.LlamaCppEmbedding",
+                    LOCAL_EMBEDDING,
                     return_value=_FailingEmbedding(fail_on_call=2),
                 ),
                 self.assertRaises(RetrievalFailure),
@@ -1204,7 +1215,7 @@ class RetrievalTests(TestCase):
                         ["index", "status", "retrieval_demo", "--format", "json"]
                     )
                 with (
-                    patch("tarel.application.LlamaCppEmbedding", return_value=resumed),
+                    patch(LOCAL_EMBEDDING, return_value=resumed),
                     redirect_stdout(output),
                 ):
                     exit_code = main(
@@ -1317,6 +1328,77 @@ class RetrievalTests(TestCase):
         self.assertEqual(runtime.calls, list(texts))
         self.assertEqual(vectors, ((0.6, 0.8),) * 3)
 
+    def test_llama_cpp_runtime_separates_token_capacity_from_document_batches(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            model_path = Path(temporary_directory) / "model.gguf"
+            model_path.write_bytes(b"test model")
+            runtime = _StrictLlama()
+            settings: dict[str, object] = {}
+
+            def create(**kwargs: object) -> _StrictLlama:
+                settings.update(kwargs)
+                return runtime
+
+            with patch.dict(sys.modules, {"llama_cpp": SimpleNamespace(Llama=create)}):
+                embedder = LlamaCppEmbedding(model_path)
+
+            embedder.embed_documents(("one", "two", "three"), batch_size=1)
+            embedder.embed_query("one question")
+
+        # Batch size must not change the capacity a single document gets.
+        self.assertEqual(settings["n_ctx"], EMBEDDING_TOKEN_CAPACITY)
+        self.assertEqual(settings["n_batch"], EMBEDDING_TOKEN_CAPACITY)
+        self.assertLess(settings["n_ubatch"], EMBEDDING_TOKEN_CAPACITY)
+        self.assertEqual(runtime.truncate, [False] * 4)
+
+    def test_llama_cpp_refuses_overlong_input_instead_of_shortening_it(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            model_path = Path(temporary_directory) / "model.gguf"
+            model_path.write_bytes(b"test model")
+            runtime = _StrictLlama()
+            with patch.dict(
+                sys.modules,
+                {"llama_cpp": SimpleNamespace(Llama=lambda **kwargs: runtime)},
+            ):
+                embedder = LlamaCppEmbedding(model_path)
+
+        fits = "word " * EMBEDDING_TOKEN_CAPACITY
+        embedder.embed_documents((fits,), batch_size=1)
+        self.assertEqual(len(runtime.calls), 1)
+
+        too_long = fits + "PROTECTED_LAST_WORD"
+        with self.assertRaises(RetrievalFailure) as document:
+            embedder.embed_documents(("short", too_long), batch_size=2)
+        with self.assertRaises(RetrievalFailure) as query:
+            embedder.embed_query(too_long)
+
+        for raised in (document.exception, query.exception):
+            self.assertEqual(raised.code, "embedding_input_too_long")
+            self.assertIn(str(EMBEDDING_TOKEN_CAPACITY), str(raised))
+            self.assertNotIn("PROTECTED_LAST_WORD", str(raised))
+        self.assertIn("Document 2 of 2", str(document.exception))
+        self.assertIn("Query with its retrieval instruction", str(query.exception))
+        self.assertNotIn(too_long, runtime.calls)
+
+    def test_query_budget_includes_the_retrieval_instruction(self) -> None:
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            model_path = Path(temporary_directory) / "model.gguf"
+            model_path.write_bytes(b"test model")
+            runtime = _StrictLlama()
+            with patch.dict(
+                sys.modules,
+                {"llama_cpp": SimpleNamespace(Llama=lambda **kwargs: runtime)},
+            ):
+                embedder = LlamaCppEmbedding(model_path)
+
+        instruction = embedder.token_count(qwen_embedding_query(""))
+        self.assertGreater(instruction, 0)
+        question = "word " * (EMBEDDING_TOKEN_CAPACITY - instruction)
+        embedder.embed_query(question)
+        with self.assertRaises(RetrievalFailure) as raised:
+            embedder.embed_query(question + "word")
+        self.assertEqual(raised.exception.code, "embedding_input_too_long")
+
     def test_llama_cpp_batch_failure_identifies_position_without_text(self) -> None:
         protected_text = "PROTECTED_DOCUMENT_VALUE"
         with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
@@ -1333,11 +1415,18 @@ class RetrievalTests(TestCase):
                 embedder.embed_documents(("safe", protected_text), batch_size=2)
 
         self.assertEqual(raised.exception.code, "embedding_failed")
-        self.assertIn("document 2 of 2", str(raised.exception))
+        self.assertIn("document 2 of 2", str(raised.exception).casefold())
         self.assertNotIn(protected_text, str(raised.exception))
 
 
 class _FakeEmbedding:
+    input_strategy = LOCAL_EMBEDDING_INPUT
+    max_input_tokens = None
+    runtime_version = ""
+
+    def token_count(self, text):
+        del text
+
     @property
     def model_id(self) -> str:
         return "fake.gguf"
@@ -1411,6 +1500,10 @@ class _StrictLlama:
     def __init__(self, *, fail_on: str | None = None) -> None:
         self.calls: list[str] = []
         self.fail_on = fail_on
+        self.truncate: list[bool] = []
+
+    def tokenize(self, text: bytes) -> list[int]:
+        return [0] * len(text.split())
 
     def embed(
         self,
@@ -1419,7 +1512,8 @@ class _StrictLlama:
         normalize: bool,
         truncate: bool,
     ) -> list[float]:
-        del normalize, truncate
+        del normalize
+        self.truncate.append(truncate)
         if isinstance(text, list):
             raise RuntimeError("multi-sequence embedding is unsafe")
         self.calls.append(text)

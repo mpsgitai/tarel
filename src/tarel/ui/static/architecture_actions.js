@@ -38,8 +38,7 @@ function openArchitectureConnection(edge = null, source = null, target = null) {
     if (edge?.[name]) form.elements[name].value=edge[name];
   }
   $("#arch-connection-title").textContent=edge?"Edit connection":"Add connection";
-  $("#arch-connection-delete").hidden=!edge || !arch.snapshot.editable;
-  $("#arch-connection-save").disabled=!arch.snapshot.editable;
+  $("#arch-connection-delete").hidden=!edge;
   $("#arch-connection-dialog .arch-form-error").hidden=true;
   $("#arch-connection-dialog").showModal();
 }
@@ -69,20 +68,32 @@ function openArchitectureCollection(edit = false) {
 function toggleArchitectureSurface() {
   const active=state.canvasMode==="architecture" && Boolean(arch.snapshot);
   document.body.classList.toggle("architecture-mode",active);
-  $("#mode").textContent=active&&arch.snapshot.editable?`Map editable · graph ${state.data.editable?"editable":"read-only"}`:state.data.editable?"Edit enabled":"Read only";
+  renderModeChip();
   $("#architecture-sidebar").hidden=!active;
   $("#architecture-toolbar").hidden=!active;
-  for (const id of ["show-systems","system-jump","show-all","fit-graph","view-options","trace-selected","open-inspector","open-objects"])
+  $("#arch-claims").hidden=!active;
+  for (const id of ["level-switch","system-jump","fit-graph","view-options","trace-selected","open-inspector","open-objects"])
     $(`#${id}`).hidden=active || (id==="system-jump" && state.structureLevel!=="systems");
   $$('[data-canvas-mode]').forEach(button=>button.classList.toggle("is-active",button.dataset.canvasMode===state.canvasMode));
 }
 
+const NARROW_ARCHITECTURE="(max-width: 720px)";
+
+// On a phone the sidebar would leave the map a sliver, so it starts closed and opens over the map.
+function setArchitectureWide(wide) {
+  document.body.classList.toggle("architecture-wide",wide);
+  const button=$("#arch-wide");
+  button.setAttribute("aria-pressed",String(wide));
+  button.textContent=!window.matchMedia(NARROW_ARCHITECTURE).matches?"More space":wide?"Filters":"Hide filters";
+  if(state.cy&&document.body.classList.contains("architecture-mode")){state.cy.resize();state.cy.fit(undefined,40);}
+}
+
 function initializeArchitectureActions() {
-  $("#arch-wide").onclick=()=>{
-    document.body.classList.toggle("architecture-wide");
-    $("#arch-wide").setAttribute("aria-pressed",String(document.body.classList.contains("architecture-wide")));
-    state.cy.resize();state.cy.fit(undefined,40);
-  };
+  $("#arch-wide").onclick=()=>setArchitectureWide(!document.body.classList.contains("architecture-wide"));
+  $("#arch-sidebar-close").onclick=()=>setArchitectureWide(true);
+  const narrow=window.matchMedia(NARROW_ARCHITECTURE);
+  narrow.addEventListener("change",event=>setArchitectureWide(event.matches));
+  setArchitectureWide(narrow.matches);
   $("#arch-level").onchange=event=>{arch.level=event.target.value;renderArchitecture();};
   $("#arch-collection").onchange=event=>{arch.collection=event.target.value;renderArchitectureFilters();renderArchitecture();};
   $("#arch-search").oninput=event=>{arch.search=event.target.value;renderArchitecture();};

@@ -12,7 +12,16 @@ from urllib.request import Request, urlopen
 
 from tarel.cli import main
 from tarel.sdk import Tarel
-from tarel.ui.server import TarelUIBackend, UIConfig, UIFailure, _Server
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+    UIFailure,
+)
+from tarel.ui.server import (
+    _Server,
+)
 from tarel.workspaces.core import create_workspace, define_system
 from tests.test_retrieval import _FakeEmbedding
 from tests.test_ui import _graph
@@ -33,7 +42,7 @@ class ExplicitUIRuntimeTests(TestCase):
 
             missing = backend.read("/api/index/status")
             with patch(
-                "tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+                "tarel.retrieval.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
             ):
                 updated = backend.mutate("/api/index/build", {})
             ready = backend.read("/api/index/status")
@@ -65,7 +74,7 @@ class ExplicitUIRuntimeTests(TestCase):
             )
 
             with patch(
-                "tarel.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+                "tarel.retrieval.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
             ):
                 result = backend.mutate("/api/index/build", {})
             with self.assertRaises(UIFailure) as raised:
@@ -160,9 +169,11 @@ class ExplicitUIRuntimeTests(TestCase):
 
     @staticmethod
     def _get(server: _Server, route: str) -> dict[str, object]:
-        with urlopen(
-            f"http://127.0.0.1:{server.server_port}{route}", timeout=5,
-        ) as response:
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}{route}",
+            headers={"X-Tarel-Token": server.token},
+        )
+        with urlopen(request, timeout=5) as response:
             return json.load(response)
 
     @staticmethod

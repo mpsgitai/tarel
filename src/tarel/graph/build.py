@@ -142,6 +142,23 @@ def build_graph_from_catalog(name: str, catalog: CatalogResult) -> GraphDocument
     )
 
 
+def object_node_id(catalog: str, namespace: str, name: str) -> str:
+    """The stable graph ID of a table or view, as built from a catalog."""
+    return _id("object", catalog, namespace, name)
+
+
+def catalog_node_id(catalog: str) -> str:
+    return _id("catalog", catalog)
+
+
+def namespace_node_id(catalog: str, namespace: str) -> str:
+    return _id("namespace", catalog, namespace)
+
+
+def field_node_id(catalog: str, namespace: str, name: str, field: str) -> str:
+    return _id("field", catalog, namespace, name, field)
+
+
 def _id(kind: str, *parts: str) -> str:
     return f"{kind}:" + "/".join(quote(part, safe="") for part in parts)
 

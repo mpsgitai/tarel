@@ -10,8 +10,12 @@ from unittest.mock import Mock, patch
 
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
-from tarel.discovery.contracts import DiscoveryFailure
-from tarel.entity_resolution.contracts import EntityResolutionFailure
+from tarel.discovery.contracts import (
+    DiscoveryFailure,
+)
+from tarel.entity_resolution.contracts import (
+    EntityResolutionFailure,
+)
 from tarel.graph.build import build_graph_from_catalog
 from tarel.relationships.core import usable_relationships
 from tarel.sdk import Tarel
@@ -36,7 +40,7 @@ class DiscoveryTests(TestCase):
                 ]
             }
             with patch(
-                "tarel.discovery.application.load_provider", return_value=provider
+                "tarel.discovery.advice.load_provider", return_value=provider
             ):
                 advised = sdk.discovery.advise(
                     run.id,

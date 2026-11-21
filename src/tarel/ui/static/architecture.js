@@ -10,9 +10,9 @@ function acceptArchitecture(snapshot, initial = false) {
   arch.snapshot = snapshot;
   if (initial) arch.positions = structuredClone(snapshot.document.positions);
   $("#architecture-mode").hidden = false;
-  for (const id of ["arch-add-edge", "arch-save-layout", "arch-add-collection", "arch-edit-collection"])
-    $(`#${id}`).disabled = !snapshot.editable;
-  $("#arch-permission").textContent = snapshot.editable ? "Map editable · technical graphs separate" : "Architecture read-only";
+  if (typeof syncCanvasModeGroup === "function") syncCanvasModeGroup();
+  if (typeof applyWritePermissions === "function") applyWritePermissions();
+  $("#arch-permission").textContent = snapshot.editable ? "Experimental · map editable · technical graphs separate" : "Experimental · architecture read-only";
   renderArchitectureFilters();
 }
 
@@ -38,7 +38,7 @@ function renderArchitectureFilters() {
   select.value = arch.collection;
   $("#arch-collection-description").textContent = document.collections.find(c=>c.id===arch.collection)?.description ||
     "All sources, including empty databases. Collections may overlap.";
-  $("#arch-edit-collection").disabled = !arch.snapshot.editable || !arch.collection;
+  $("#arch-edit-collection").disabled = !arch.collection;
   const spotlight = $("#arch-spotlight");
   spotlight.replaceChildren(new Option("No system highlighted", ""));
   [...new Set(document.nodes.map(n=>n.system))].sort().forEach(name=>spotlight.add(new Option(name,name)));
@@ -206,7 +206,7 @@ function captureArchitecturePositions() {
 
 function architectureDirty() {
   $("#arch-layout-state").textContent = arch.dirty ? "Layout unsaved" : "Layout saved / default";
-  $("#arch-save-layout").disabled = !arch.snapshot?.editable || !arch.dirty || arch.busy;
+  $("#arch-save-layout").disabled = !arch.dirty || arch.busy;
   $("#arch-undo").disabled = !arch.undo.length;
 }
 
@@ -223,21 +223,21 @@ function architectureSelection() {
   const neighbourhood=selected.closedNeighborhood();
   state.cy.elements().difference(neighbourhood.union(neighbourhood.nodes().ancestors())).addClass("arch-muted");
   if (selected.length>1) {
-    details.innerHTML=`<h2>${selected.length} items selected</h2><p>Move the selected cards together. Two cards can be connected directly.</p><button id="arch-connect-selected" class="primary-button">Connect…</button>`;
+    details.innerHTML=`<h2>${selected.length} items selected</h2><p>Move the selected cards together. Two cards can be connected directly.</p><button id="arch-connect-selected" class="primary-button" data-write="architecture">Connect…</button>`;
     $("#arch-connect-selected").onclick=()=>openArchitectureConnection();return;
   }
   const item=selected[0];
   if (item.isEdge()) {
     const edge=arch.snapshot.document.connections.find(e=>e.id===item.data("recordId"));
-    details.innerHTML=`<p class="eyebrow">Architecture connection · not table lineage</p><h2>${escapeHtml(edge.label)}</h2><p>${escapeHtml(archKinds[edge.kind])} · <strong>${escapeHtml(archStates[edge.state])}</strong></p><p>${escapeHtml(edge.reason)}</p><p class="arch-evidence">${escapeHtml(edge.evidence)}</p><p>${escapeHtml(edge.mechanism||"Mechanism not stated")} · ${escapeHtml(edge.frequency||"Frequency not stated")}</p><button id="arch-edit-selected" class="primary-button">Edit…</button>`;
+    details.innerHTML=`<p class="eyebrow">Architecture connection · not table lineage</p><h2>${escapeHtml(edge.label)}</h2><p>${escapeHtml(archKinds[edge.kind])} · <strong>${escapeHtml(archStates[edge.state])}</strong></p><p>${escapeHtml(edge.reason)}</p><p class="arch-evidence">${escapeHtml(edge.evidence)}</p><p>${escapeHtml(edge.mechanism||"Mechanism not stated")} · ${escapeHtml(edge.frequency||"Frequency not stated")}</p><button id="arch-edit-selected" class="primary-button" data-write="architecture">Edit…</button>`;
     $("#arch-edit-selected").onclick=()=>openArchitectureConnection(edge);return;
   }
   const card=item.data(), members=card.members || [];
   const endpoints=architectureEndpoints();
   const collections=arch.snapshot.document.collections.filter(c=>c.members.some(id=>endpoints.get(id).members.some(m=>members.some(n=>n.id===m))));
-  details.innerHTML=`<p class="eyebrow">${card.proxy?"Cross-cutting endpoint":"Architecture card"}</p><h2>${escapeHtml(card.label.split("\n")[0])}</h2><p>${archCount(members.reduce((s,n)=>s+n.objects,0), "object")} · ${archCount(new Set(members.map(n=>n.graph)).size, "source")}</p><div class="arch-badges">${collections.map(c=>`<span>${escapeHtml(c.label)}</span>`).join("")}</div><p class="arch-evidence">${escapeHtml([...new Set(members.map(n=>n.method))].join(" · "))}</p><div class="arch-buttons"><button id="arch-open-objects" class="quiet-button">Open objects</button><button id="arch-connect-from" class="primary-button">Connect from here…</button></div>`;
+  details.innerHTML=`<p class="eyebrow">${card.proxy?"Cross-cutting endpoint":"Architecture card"}</p><h2>${escapeHtml(card.label.split("\n")[0])}</h2><p>${archCount(members.reduce((s,n)=>s+n.objects,0), "object")} · ${archCount(new Set(members.map(n=>n.graph)).size, "source")}</p><div class="arch-badges">${collections.map(c=>`<span>${escapeHtml(c.label)}</span>`).join("")}</div><p class="arch-evidence">${escapeHtml([...new Set(members.map(n=>n.method))].join(" · "))}</p><div class="arch-buttons"><button id="arch-open-objects" class="quiet-button">Open objects</button><button id="arch-connect-from" class="primary-button" data-write="architecture">Connect from here…</button></div>`;
   $("#arch-open-objects").onclick=()=>openArchitectureObjects(members);
-  $("#arch-connect-from").disabled=!card.endpoint || !arch.snapshot.editable;
+  $("#arch-connect-from").disabled=!card.endpoint;
   $("#arch-connect-from").onclick=()=>{arch.connecting=card.endpoint;toast("Click the target card (Esc cancels).");};
 }
 

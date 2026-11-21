@@ -12,7 +12,12 @@ from tarel.graph.contracts import GraphDocument, GraphEdge
 from tarel.graph.revision import graph_revision
 from tarel.graph.store import FileGraphStore
 from tarel.runtime import TarelRuntime
-from tarel.ui.server import TarelUIBackend, UIConfig
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure
 from tarel.workspaces.core import validate_system_references
 from tests.test_ui import _focus, _graph

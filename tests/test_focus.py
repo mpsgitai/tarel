@@ -7,12 +7,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from tarel.application import (
-    build_focus_use_case,
+from tarel.annotations.application import (
     plan_focus_annotations_use_case,
 )
 from tarel.cli import main
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
+from tarel.focus.application import (
+    build_focus_use_case,
+)
 from tarel.focus.contracts import FocusDocument, FocusFailure
 from tarel.focus.store import FileFocusStore
 from tarel.graph.build import build_graph_from_catalog

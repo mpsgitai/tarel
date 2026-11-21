@@ -34,6 +34,8 @@ function updateCanvasNavigation() {
   const overview = state.canvasMode === "space" && state.structureLevel === "systems";
   $("#show-systems").classList.toggle("is-active", overview);
   $("#show-systems").setAttribute("aria-pressed", String(overview));
+  $("#show-all").classList.toggle("is-active", !overview);
+  $("#show-all").setAttribute("aria-pressed", String(!overview));
   $("#system-jump").hidden = !overview;
   $("#graph-canvas").setAttribute("aria-label", overview ? "System overview; select a system to inspect its objects" : "Interactive schema graph");
 }
@@ -46,7 +48,23 @@ function bindCanvasZoom() {
   state.cy.on("zoom", update);
   update();
   bindFastWheelZoom($("#graph-canvas"));
+  bindOverviewScroll($("#graph-canvas"));
   window.TarelAtlas?.attach(state.cy);
+}
+
+function systemOverviewActive() {
+  return state.canvasMode === "space" && state.structureLevel === "systems";
+}
+
+function bindOverviewScroll(container) {
+  if (container.dataset.overviewScroll) return;
+  container.dataset.overviewScroll = "1";
+  container.addEventListener("wheel", event => {
+    if (event.ctrlKey || event.metaKey || !systemOverviewActive() || !state.cy || state.cy.destroyed()) return;
+    event.preventDefault();
+    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1;
+    state.cy.panBy({x: -event.deltaX * unit, y: -event.deltaY * unit});
+  }, {passive: false});
 }
 
 // Ctrl/Cmd + wheel (and trackpad pinch) zooms much faster than the plain wheel, towards the
@@ -131,6 +149,8 @@ function renderSystemOverview(objects) {
     container: canvas, elements,
     layout: {name: "grid", cols: columns, fit: true, padding: 30, avoidOverlap: true, condense: true, spacingFactor: 1.12},
     minZoom: .002, maxZoom: 2.3, wheelSensitivity: .18,
+    // A plain wheel scrolls the overview like a list; zoom stays on the buttons and Ctrl + wheel.
+    userZoomingEnabled: false,
     autoungrabify: true,
     style: [{selector: "node", style: {
       "shape": "round-rectangle", "width": 224, "height": 106,
@@ -151,6 +171,9 @@ function initializeEstateNavigation() {
   $("#zoom-out").addEventListener("click", () => zoomCanvas(1 / 1.4));
   $("#zoom-in").addEventListener("click", () => zoomCanvas(1.4));
   $("#zoom-fit").addEventListener("click", () => {
-    if (state.cy) { state.cy.resize(); state.cy.fit(state.cy.elements(":visible"), 30); }
+    if (!state.cy) return;
+    if (window.TarelAtlas?.active()) { window.TarelAtlas.fit(state.cy, 30); return; }
+    state.cy.resize();
+    state.cy.fit(state.cy.elements(":visible"), 30);
   });
 }

@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, NoReturn
 
+from tarel.errors import TarelError
+
 FAMILY_CONTRACT_VERSION = "tarel.object-family.v0.1.experimental"
 FAMILY_STATES = frozenset({"candidate", "reviewed", "rejected"})
 ATTRIBUTE_SOURCES = frozenset({"object_name", "namespace"})
@@ -17,10 +19,8 @@ _DATA_TYPE = re.compile(r"^[A-Za-z][A-Za-z0-9_. (),\[\]-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-class ObjectFamilyFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class ObjectFamilyFailure(TarelError):
+    """Raised when an object family operation is rejected."""
 
 
 @dataclass(frozen=True, slots=True)

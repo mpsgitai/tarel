@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Protocol
 
+from tarel.atomic import write_atomic
 from tarel.semantics.contracts import (
     SemanticFailure,
     SemanticImportDocument,
@@ -40,21 +39,9 @@ class FileSemanticImportStore:
             indent=2,
             sort_keys=True,
         )
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".semantic-import-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".semantic-import-")
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise SemanticFailure(
                 "semantic_import_save_failed",
                 f"Could not save semantic import: {document.name}",

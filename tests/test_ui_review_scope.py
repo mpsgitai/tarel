@@ -10,7 +10,10 @@ from unittest.mock import patch
 from tarel.graph.contracts import GraphAnnotation, GraphNode
 from tarel.graph.store import FileGraphStore
 from tarel.sdk import Tarel
-from tarel.ui.presentation import browser_graph, browser_workspace
+from tarel.ui.payloads.graph import (
+    browser_graph,
+    browser_workspace,
+)
 from tests.test_family_focus import _focus
 from tests.test_object_families_ui import _family, _graph, _workspace
 

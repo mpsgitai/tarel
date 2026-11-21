@@ -326,19 +326,20 @@ def _graph() -> GraphDocument:
         GraphNode("bid", "field", "id", {"object_id": "b", "data_type": "int"}),
         GraphNode("z", "view", "private.z", {"namespace": "private", "name": "z"}),
     )
-    edges = tuple(
-        GraphEdge(key, source, target, "contains")
-        for key, source, target in (
-            ("c-sales", "catalog", "sales"),
-            ("c-private", "catalog", "private"),
-            ("sales-a", "sales", "a"),
-            ("sales-b", "sales", "b"),
-            ("a-id", "a", "aid"),
-            ("a-v", "a", "av"),
-            ("b-id", "b", "bid"),
-            ("private-z", "private", "z"),
-        )
-    ) + (
+    edges = (
+        *tuple(
+            GraphEdge(key, source, target, "contains")
+            for key, source, target in (
+                ("c-sales", "catalog", "sales"),
+                ("c-private", "catalog", "private"),
+                ("sales-a", "sales", "a"),
+                ("sales-b", "sales", "b"),
+                ("a-id", "a", "aid"),
+                ("a-v", "a", "av"),
+                ("b-id", "b", "bid"),
+                ("private-z", "private", "z"),
+            )
+        ),
         GraphEdge("fk", "a", "b", "foreign_key"),
         GraphEdge("fk-field", "aid", "bid", "foreign_key_field"),
     )

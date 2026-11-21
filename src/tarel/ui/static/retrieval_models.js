@@ -22,8 +22,21 @@ function renderRetrievalModels(payload) {
   const embedding = `${settings.embedding.provider} · ${settings.embedding.model}`;
   const reranker = settings.reranker ? `${settings.reranker.provider} · ${settings.reranker.model}` : "off";
   $("#retrieval-selection-label").textContent = `Embedding: ${embedding}; reranker: ${reranker}`;
+  renderExternalProviderNote(settings);
   renderSearchMode();
   renderContextPolicySummary();
+}
+
+// A selected cloud model is the one thing that lets a search leave this machine: say so at the search.
+function renderExternalProviderNote(settings) {
+  const providers = [...new Set([settings.embedding, settings.reranker]
+    .filter(choice => choice && choice.provider !== "local")
+    .map(choice => choice.provider))];
+  const note = $("#external-provider-note");
+  note.hidden = !providers.length;
+  note.textContent = providers.length
+    ? `Cloud provider selected: ${providers.join(", ")}. Searches using it send the question and selected schema metadata there.`
+    : "";
 }
 
 function updateModelControls(task) {

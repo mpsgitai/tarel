@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import Any, NamedTuple
 
 from tarel.lineage.contracts import (
     LineageAnalysis,
@@ -207,281 +207,285 @@ def refresh_lineage(
     current: LineageDocument,
     source: LineageInput,
 ) -> tuple[LineageDocument, LineageRefreshReport]:
+    """Rebuild lineage from ``source`` and carry reviewed semantics over where still valid.
+
+    Semantics of an unchanged definition are rebound to it; those of a changed definition are
+    kept but marked ``review_required``; those of a removed definition become stale items.
+    """
     discovered = build_lineage(current.name, source)
     if current.workflow_id != discovered.workflow_id:
         raise LineageFailure(
             "lineage_refresh_mismatch",
             "Lineage refresh requires the same workflow external ID.",
         )
-    changes = classify_lineage_changes(current, discovered)
     current_by_external = {item.external_id: item for item in current.definitions}
     discovered_by_external = {item.external_id: item for item in discovered.definitions}
-    stale_items: list[StaleLineageItem] = []
-    analyses: list[LineageAnalysis] = []
-    failures: list[LineageAnalysisFailure] = []
-    claims: list[LineageClaim] = []
-    materializations: list[LineageMaterialization] = []
-    write_units: list[LineageWriteUnit] = []
-    review_required_claims = 0
-    review_required_write_units = 0
-
-    current_materializations = {
-        item.definition_id: item for item in current.materializations
-    }
-    discovered_materializations = {
-        item.definition_id: item for item in discovered.materializations
-    }
-    discovered_declared_claims = {
+    declared_claims = {
         item.id: item
         for item in discovered.claims
         if item.evidence.source == "declared_reference"
     }
-    declared_claim_keys = {
+    declared_keys = {
         (item.definition_id, item.operation.casefold(), item.target.casefold())
-        for item in discovered_declared_claims.values()
+        for item in declared_claims.values()
     }
-
+    current_materializations = {item.definition_id: item for item in current.materializations}
+    discovered_materializations = {
+        item.definition_id: item for item in discovered.materializations
+    }
+    out = _Carried()
     for definition in discovered.definitions:
         previous = current_by_external.get(definition.external_id)
-        discovered_materialization = discovered_materializations.get(definition.id)
+        _refresh_materialization(
+            out,
+            previous,
+            current_materializations.get(previous.id) if previous else None,
+            discovered_materializations.get(definition.id),
+        )
         if previous is None:
-            if discovered_materialization is not None:
-                materializations.append(discovered_materialization)
             continue
-        previous_materialization = current_materializations.get(previous.id)
-        if discovered_materialization is not None and previous_materialization is not None:
-            if (
-                discovered_materialization.mode == previous_materialization.mode
-                and discovered_materialization.target == previous_materialization.target
-            ):
-                materializations.append(
-                    replace(
-                        discovered_materialization,
-                        state=previous_materialization.state,
-                        reviews=previous_materialization.reviews,
-                    )
-                )
-            else:
-                materializations.append(
-                    replace(
-                        discovered_materialization,
-                        state="review_required",
-                        reviews=previous_materialization.reviews,
-                    )
-                )
-                stale_items.append(
-                    _stale_item(
-                        "materialization",
-                        previous,
-                        previous_materialization.to_dict(),
-                        previous_materialization.state,
-                        True,
-                        ("materialization_changed",),
-                    )
-                )
-        elif discovered_materialization is not None:
-            materializations.append(discovered_materialization)
-        elif previous_materialization is not None:
-            stale_items.append(
-                _stale_item(
-                    "materialization",
-                    previous,
-                    previous_materialization.to_dict(),
-                    previous_materialization.state,
-                    True,
-                    ("materialization_removed",),
-                )
-            )
-        previous_analyses = [
-            item for item in current.analyses if item.definition_id == previous.id
-        ]
-        previous_failures = [
-            item for item in current.analysis_failures if item.definition_id == previous.id
-        ]
-        for item in current.claims:
-            if (
-                item.definition_id == previous.id
-                and item.evidence.source == "declared_reference"
-                and item.id not in discovered_declared_claims
-            ):
-                stale_items.append(
-                    _stale_item(
-                        "claim",
-                        previous,
-                        item.to_dict(),
-                        item.state,
-                        True,
-                        ("declared_reference_removed",),
-                    )
-                )
-        previous_claims = [
-            item
-            for item in current.claims
-            if item.definition_id == previous.id
-            and (
-                item.evidence.source != "declared_reference"
-                or item.id in discovered_declared_claims
-            )
-            and (
-                item.evidence.source == "declared_reference"
-                or (item.definition_id, item.operation.casefold(), item.target.casefold())
-                not in declared_claim_keys
-            )
-        ]
-        previous_units = [
-            item for item in current.write_units if item.definition_id == previous.id
-        ]
+        semantics = _previous_semantics(out, current, previous, declared_claims, declared_keys)
         if (
             previous.id == definition.id
             and previous.content_hash == definition.content_hash
             and previous.language == definition.language
         ):
-            analyses.extend(_rebind_analysis(item, definition) for item in previous_analyses)
-            failures.extend(_rebind_failure(item, definition) for item in previous_failures)
-            for item in previous_claims:
-                if item.evidence.source != "declared_reference":
-                    claims.append(_rebind_claim(item, definition))
-                    continue
-                declared = discovered_declared_claims[item.id]
-                evidence_changed = declared.evidence != item.evidence
-                state = (
-                    "review_required"
-                    if evidence_changed and item.state == "validated"
-                    else item.state
-                )
-                claims.append(replace(declared, state=state, reviews=item.reviews))
-                if evidence_changed:
-                    stale_items.append(
-                        _stale_item(
-                            "claim",
-                            previous,
-                            item.to_dict(),
-                            item.state,
-                            True,
-                            ("declared_reference_evidence_changed",),
-                        )
-                    )
-                    if state != item.state:
-                        review_required_claims += 1
-            write_units.extend(_rebind_write_unit(item, definition) for item in previous_units)
-            continue
-
-        reasons = tuple(
-            reason
-            for changed, reason in (
-                (previous.kind != definition.kind, "definition_kind_changed"),
-                (
-                    previous.content_hash != definition.content_hash,
-                    "definition_content_changed",
-                ),
-                (previous.language != definition.language, "definition_language_changed"),
-            )
-            if changed
-        )
-        stale_items.extend(
-            _stale_semantics(
-                previous,
-                previous_analyses,
-                previous_failures,
-                (),
-                (),
-                (),
-                present=True,
-                reasons=reasons,
-            )
-        )
-        for item in previous_claims:
-            base = (
-                discovered_declared_claims[item.id]
-                if item.evidence.source == "declared_reference"
-                else item
-            )
-            refreshed = replace(
-                base, definition_id=definition.id, state="review_required", reviews=item.reviews,
-            )
-            claims.append(refreshed)
-            review_required_claims += 1
-            stale_items.append(
-                _stale_item(
-                    "claim",
-                    previous,
-                    item.to_dict(),
-                    item.state,
-                    True,
-                    reasons,
-                )
-            )
-        for item in previous_units:
-            refreshed = replace(item, definition_id=definition.id, state="review_required")
-            write_units.append(refreshed)
-            review_required_write_units += 1
-            stale_items.append(
-                _stale_item(
-                    "write_unit",
-                    previous,
-                    item.to_dict(),
-                    item.state,
-                    True,
-                    reasons,
-                )
-            )
-
+            _carry_unchanged(out, previous, definition, semantics, declared_claims)
+        else:
+            _mark_changed(out, previous, definition, semantics, declared_claims)
     for external_id in sorted(current_by_external.keys() - discovered_by_external.keys()):
-        definition = current_by_external[external_id]
-        stale_items.extend(
-            _stale_semantics(
-                definition,
-                [item for item in current.analyses if item.definition_id == definition.id],
-                [
-                    item
-                    for item in current.analysis_failures
-                    if item.definition_id == definition.id
-                ],
-                [item for item in current.claims if item.definition_id == definition.id],
-                [
-                    item
-                    for item in current.materializations
-                    if item.definition_id == definition.id
-                ],
-                [item for item in current.write_units if item.definition_id == definition.id],
-                present=False,
-                reasons=("definition_removed",),
-            )
-        )
+        out.stale_items.extend(_removed_definition(current, current_by_external[external_id]))
 
-    carried_claim_ids = {item.id for item in claims}
-    claims.extend(
-        item for item in discovered_declared_claims.values() if item.id not in carried_claim_ids
+    carried_claim_ids = {item.id for item in out.claims}
+    out.claims.extend(
+        item for item in declared_claims.values() if item.id not in carried_claim_ids
     )
     refreshed = replace(
         discovered,
-        analyses=tuple(sorted(analyses, key=lambda item: item.definition_id)),
-        analysis_failures=tuple(sorted(failures, key=lambda item: item.definition_id)),
-        claims=tuple(sorted(claims, key=lambda item: item.id)),
-        materializations=tuple(sorted(materializations, key=lambda item: item.id)),
-        write_units=tuple(sorted(write_units, key=lambda item: item.id)),
+        analyses=tuple(sorted(out.analyses, key=lambda item: item.definition_id)),
+        analysis_failures=tuple(sorted(out.failures, key=lambda item: item.definition_id)),
+        claims=tuple(sorted(out.claims, key=lambda item: item.id)),
+        materializations=tuple(sorted(out.materializations, key=lambda item: item.id)),
+        write_units=tuple(sorted(out.write_units, key=lambda item: item.id)),
     )
     validate_lineage_document(refreshed)
     report = LineageRefreshReport(
         before_revision=current.source_revision,
         after_revision=refreshed.source_revision,
-        changes=changes,
+        changes=classify_lineage_changes(current, discovered),
         stale_items=tuple(
             sorted(
-                stale_items,
+                out.stale_items,
                 key=lambda item: (item.reference.casefold(), item.item_type, item.definition_id),
             )
         ),
-        carried_analyses=len(analyses),
-        carried_failures=len(failures),
-        carried_claims=len(claims),
-        carried_write_units=len(write_units),
-        review_required_claims=review_required_claims,
-        review_required_write_units=review_required_write_units,
+        carried_analyses=len(out.analyses),
+        carried_failures=len(out.failures),
+        carried_claims=len(out.claims),
+        carried_write_units=len(out.write_units),
+        review_required_claims=out.review_required_claims,
+        review_required_write_units=out.review_required_write_units,
         added_definitions=len(discovered_by_external.keys() - current_by_external.keys()),
         removed_definitions=len(current_by_external.keys() - discovered_by_external.keys()),
     )
     return refreshed, report
+
+
+@dataclass(slots=True)
+class _Carried:
+    """What one refresh carries into the new document, and what it reports as stale."""
+
+    analyses: list[LineageAnalysis] = field(default_factory=list)
+    failures: list[LineageAnalysisFailure] = field(default_factory=list)
+    claims: list[LineageClaim] = field(default_factory=list)
+    materializations: list[LineageMaterialization] = field(default_factory=list)
+    write_units: list[LineageWriteUnit] = field(default_factory=list)
+    stale_items: list[StaleLineageItem] = field(default_factory=list)
+    review_required_claims: int = 0
+    review_required_write_units: int = 0
+
+
+class _PreviousSemantics(NamedTuple):
+    """The reviewed knowledge one previous definition had."""
+
+    analyses: list[LineageAnalysis]
+    failures: list[LineageAnalysisFailure]
+    claims: list[LineageClaim]
+    units: list[LineageWriteUnit]
+
+
+def _refresh_materialization(
+    out: _Carried,
+    previous: LineageDefinition | None,
+    before: LineageMaterialization | None,
+    after: LineageMaterialization | None,
+) -> None:
+    """Keep the review of an unchanged materialization; flag a changed or removed one."""
+    if after is not None and (previous is None or before is None):
+        out.materializations.append(after)
+    elif after is not None and before is not None and previous is not None:
+        unchanged = after.mode == before.mode and after.target == before.target
+        out.materializations.append(
+            replace(
+                after,
+                state=before.state if unchanged else "review_required",
+                reviews=before.reviews,
+            )
+        )
+        if not unchanged:
+            out.stale_items.append(
+                _stale_item(
+                    "materialization", previous, before.to_dict(), before.state, True,
+                    ("materialization_changed",),
+                )
+            )
+    elif before is not None and previous is not None:
+        out.stale_items.append(
+            _stale_item(
+                "materialization", previous, before.to_dict(), before.state, True,
+                ("materialization_removed",),
+            )
+        )
+
+
+def _previous_semantics(
+    out: _Carried,
+    current: LineageDocument,
+    previous: LineageDefinition,
+    declared_claims: dict[str, LineageClaim],
+    declared_keys: set[tuple[str, str, str]],
+) -> _PreviousSemantics:
+    """Collect what ``previous`` had; declared claims no longer declared become stale.
+
+    An analyzed claim that a declared reference now states explicitly is superseded by it.
+    """
+    claims = []
+    for claim in current.claims:
+        if claim.definition_id != previous.id:
+            continue
+        declared = claim.evidence.source == "declared_reference"
+        if declared and claim.id not in declared_claims:
+            out.stale_items.append(
+                _stale_item(
+                    "claim", previous, claim.to_dict(), claim.state, True,
+                    ("declared_reference_removed",),
+                )
+            )
+            continue
+        key = (claim.definition_id, claim.operation.casefold(), claim.target.casefold())
+        if declared or key not in declared_keys:
+            claims.append(claim)
+    return _PreviousSemantics(
+        analyses=[item for item in current.analyses if item.definition_id == previous.id],
+        failures=[
+            item for item in current.analysis_failures if item.definition_id == previous.id
+        ],
+        claims=claims,
+        units=[item for item in current.write_units if item.definition_id == previous.id],
+    )
+
+
+def _carry_unchanged(
+    out: _Carried,
+    previous: LineageDefinition,
+    definition: LineageDefinition,
+    semantics: _PreviousSemantics,
+    declared_claims: dict[str, LineageClaim],
+) -> None:
+    """Rebind everything to the unchanged definition; re-review declared evidence that moved."""
+    out.analyses.extend(_rebind_analysis(item, definition) for item in semantics.analyses)
+    out.failures.extend(_rebind_failure(item, definition) for item in semantics.failures)
+    out.write_units.extend(_rebind_write_unit(item, definition) for item in semantics.units)
+    for claim in semantics.claims:
+        if claim.evidence.source != "declared_reference":
+            out.claims.append(_rebind_claim(claim, definition))
+            continue
+        declared = declared_claims[claim.id]
+        evidence_changed = declared.evidence != claim.evidence
+        reviewed = claim.state == "validated"
+        state = "review_required" if evidence_changed and reviewed else claim.state
+        out.claims.append(replace(declared, state=state, reviews=claim.reviews))
+        if evidence_changed:
+            out.stale_items.append(
+                _stale_item(
+                    "claim",
+                    previous,
+                    claim.to_dict(),
+                    claim.state,
+                    True,
+                    ("declared_reference_evidence_changed",),
+                )
+            )
+            if state != claim.state:
+                out.review_required_claims += 1
+
+
+def _mark_changed(
+    out: _Carried,
+    previous: LineageDefinition,
+    definition: LineageDefinition,
+    semantics: _PreviousSemantics,
+    declared_claims: dict[str, LineageClaim],
+) -> None:
+    """Keep claims and write units of a changed definition, but require a new review."""
+    reasons = tuple(
+        reason
+        for changed, reason in (
+            (previous.kind != definition.kind, "definition_kind_changed"),
+            (previous.content_hash != definition.content_hash, "definition_content_changed"),
+            (previous.language != definition.language, "definition_language_changed"),
+        )
+        if changed
+    )
+    out.stale_items.extend(
+        _stale_semantics(
+            previous,
+            semantics.analyses,
+            semantics.failures,
+            (),
+            (),
+            (),
+            present=True,
+            reasons=reasons,
+        )
+    )
+    for claim in semantics.claims:
+        base = declared_claims[claim.id] if claim.evidence.source == "declared_reference" else claim
+        out.claims.append(
+            replace(
+                base,
+                definition_id=definition.id,
+                state="review_required",
+                reviews=claim.reviews,
+            )
+        )
+        out.review_required_claims += 1
+        out.stale_items.append(
+            _stale_item("claim", previous, claim.to_dict(), claim.state, True, reasons)
+        )
+    for unit in semantics.units:
+        out.write_units.append(replace(unit, definition_id=definition.id, state="review_required"))
+        out.review_required_write_units += 1
+        out.stale_items.append(
+            _stale_item("write_unit", previous, unit.to_dict(), unit.state, True, reasons)
+        )
+
+
+def _removed_definition(
+    current: LineageDocument,
+    definition: LineageDefinition,
+) -> list[StaleLineageItem]:
+    """Everything a definition that disappeared from the source had becomes stale."""
+    return _stale_semantics(
+        definition,
+        [item for item in current.analyses if item.definition_id == definition.id],
+        [item for item in current.analysis_failures if item.definition_id == definition.id],
+        [item for item in current.claims if item.definition_id == definition.id],
+        [item for item in current.materializations if item.definition_id == definition.id],
+        [item for item in current.write_units if item.definition_id == definition.id],
+        present=False,
+        reasons=("definition_removed",),
+    )
 
 
 def classify_lineage_changes(
@@ -489,14 +493,16 @@ def classify_lineage_changes(
     discovered: LineageDocument,
 ) -> tuple[LineageChange, ...]:
     changes: list[LineageChange] = []
-    for before, after, kind in (
+    for old_value, new_value, kind in (
         (current.source_kind, discovered.source_kind, "source_kind_changed"),
         (current.source_name, discovered.source_name, "source_name_changed"),
         (current.source_reference, discovered.source_reference, "source_reference_changed"),
         (current.workflow_name, discovered.workflow_name, "workflow_name_changed"),
     ):
-        if before != after:
-            changes.append(LineageChange(kind, "info", "workflow", current.name, before, after))
+        if old_value != new_value:
+            changes.append(
+                LineageChange(kind, "info", "workflow", current.name, old_value, new_value)
+            )
 
     before_definitions = {item.external_id: item for item in current.definitions}
     after_definitions = {item.external_id: item for item in discovered.definitions}
@@ -590,12 +596,8 @@ def _materialization_changes(
 ) -> list[LineageChange]:
     before_definitions = {item.id: item.external_id for item in current.definitions}
     after_definitions = {item.id: item.external_id for item in discovered.definitions}
-    before = {
-        before_definitions[item.definition_id]: item for item in current.materializations
-    }
-    after = {
-        after_definitions[item.definition_id]: item for item in discovered.materializations
-    }
+    before = {before_definitions[item.definition_id]: item for item in current.materializations}
+    after = {after_definitions[item.definition_id]: item for item in discovered.materializations}
     changes: list[LineageChange] = []
     for external_id in sorted(before.keys() - after.keys()):
         item = before[external_id]
@@ -727,38 +729,36 @@ def _step_changes(
             LineageChange("step_removed", "breaking", "step", external_id, external_id, None)
         )
     for external_id in sorted(after_steps.keys() - before_steps.keys()):
-        changes.append(
-            LineageChange("step_added", "info", "step", external_id, None, external_id)
-        )
+        changes.append(LineageChange("step_added", "info", "step", external_id, None, external_id))
     before_shape = _step_shapes(current)
     after_shape = _step_shapes(discovered)
     for external_id in sorted(before_steps.keys() & after_steps.keys()):
         before = before_shape[external_id]
         after = after_shape[external_id]
-        if before["name"] != after["name"]:
+        if before.name != after.name:
             changes.append(
                 LineageChange(
                     "step_name_changed",
                     "info",
                     "step",
                     external_id,
-                    before["name"],
-                    after["name"],
+                    before.name,
+                    after.name,
                 )
             )
-        if before["definition"] != after["definition"]:
+        if before.definition != after.definition:
             changes.append(
                 LineageChange(
                     "step_definition_changed",
                     "review_required",
                     "step",
                     external_id,
-                    before["definition"],
-                    after["definition"],
+                    before.definition,
+                    after.definition,
                 )
             )
-        before_dependencies = set(before["depends_on"])
-        after_dependencies = set(after["depends_on"])
+        before_dependencies = set(before.depends_on)
+        after_dependencies = set(after.depends_on)
         for dependency in sorted(before_dependencies - after_dependencies):
             changes.append(
                 LineageChange(
@@ -784,15 +784,23 @@ def _step_changes(
     return changes
 
 
-def _step_shapes(document: LineageDocument) -> dict[str, dict[str, object]]:
+class _StepShape(NamedTuple):
+    """What makes two versions of a workflow step comparable: its definition, inputs and name."""
+
+    definition: str
+    depends_on: tuple[str, ...]
+    name: str
+
+
+def _step_shapes(document: LineageDocument) -> dict[str, _StepShape]:
     definitions = {item.id: item.external_id for item in document.definitions}
     steps = {item.id: item.external_id for item in document.steps}
     return {
-        item.external_id: {
-            "definition": definitions[item.definition_id],
-            "depends_on": tuple(sorted(steps[value] for value in item.depends_on)),
-            "name": item.name,
-        }
+        item.external_id: _StepShape(
+            definition=definitions[item.definition_id],
+            depends_on=tuple(sorted(steps[value] for value in item.depends_on)),
+            name=item.name,
+        )
         for item in document.steps
     }
 

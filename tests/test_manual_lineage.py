@@ -27,7 +27,7 @@ class ManualLineageTests(TestCase):
         self.store = FileLineageStore(Path(self.temporary.name) / "lineage")
         self.stack = ExitStack()
         self.stack.enter_context(
-            patch("tarel.lineage.application.FileLineageStore", return_value=self.store)
+            patch("tarel.runtime.FileLineageStore", return_value=self.store)
         )
 
     def tearDown(self) -> None:

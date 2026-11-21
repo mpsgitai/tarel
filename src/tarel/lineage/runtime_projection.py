@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from tarel.lineage.runtime import (
-    RuntimeLineageDocument,
-    RuntimeMongoAttempt,
-    RuntimeSQLAttempt,
     validate_runtime_lineage_document,
 )
 from tarel.lineage.runtime_logical import RuntimeLogicalOperation
+from tarel.lineage.runtime_records import (
+    RuntimeLineageDocument,
+    RuntimeMongoAttempt,
+    RuntimeSQLAttempt,
+)
 
 
 def browser_runtime_lineage(document: RuntimeLineageDocument) -> dict[str, object]:

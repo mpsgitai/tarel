@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Protocol
 
-from tarel.file_lock import state_write_lock
+from tarel.atomic import write_atomic
 from tarel.knowledge.contracts import (
     KnowledgeDocument,
     KnowledgeFailure,
@@ -36,21 +34,9 @@ class FileKnowledgeStore:
         path = self.path(document.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(document.to_dict(), indent=2, ensure_ascii=False, sort_keys=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".knowledge-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary_path = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            with state_write_lock(self.root.parent):
-                os.replace(temporary_path, path)
+            write_atomic(path, payload + "\n", prefix=".knowledge-", lock_root=self.root.parent)
         except OSError as exc:
-            temporary_path.unlink(missing_ok=True)
             raise KnowledgeFailure(
                 "knowledge_save_failed",
                 f"Could not save knowledge document: {document.id}",

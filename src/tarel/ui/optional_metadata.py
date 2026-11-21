@@ -5,13 +5,20 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import replace
+from typing import Any
 
-from tarel.discovery.application import list_query_linked_coverages_use_case
+from tarel.discovery.coverage_application import (
+    list_query_linked_coverages_use_case,
+)
 from tarel.entity_resolution.application import (
     find_entity_resolution_candidates_for_graph_use_case,
 )
-from tarel.entity_resolution.contracts import EntityResolutionCandidate, EntityResolutionMatch
+from tarel.entity_resolution.candidates import (
+    EntityResolutionCandidate,
+    EntityResolutionMatch,
+)
 from tarel.entity_resolution.projection import project_entity_resolution_edges
+from tarel.errors import TarelError
 from tarel.graph.contracts import GraphDocument, GraphNode
 from tarel.graph.revision import graph_revision
 from tarel.reference_mapping.application import (
@@ -20,20 +27,20 @@ from tarel.reference_mapping.application import (
 from tarel.runtime import TarelRuntime
 from tarel.semantics.application import list_semantic_imports_use_case
 from tarel.semantics.projection import semantic_node_bindings
-from tarel.ui.presentation import (
-    _edge_payload,
-    _query_linked_coverage_summary,
-    _reference_mapping_edge_payloads,
+from tarel.ui.payloads.graph import (
+    edge_payload,
+    query_linked_coverage_summary,
+)
+from tarel.ui.payloads.logical import (
+    reference_mapping_edge_payloads,
 )
 
 _MAX_LIMIT = 20
 _MAX_PAYLOAD_BYTES = 128 * 1024
 
 
-class OptionalMetadataFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class OptionalMetadataFailure(TarelError):
+    """Raised when an optional metadata operation is rejected."""
 
 
 def optional_object_metadata(
@@ -44,7 +51,7 @@ def optional_object_metadata(
     kind: str,
     limit: int = _MAX_LIMIT,
     runtime: TarelRuntime | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Project current optional claims for one authorized physical object.
 
     Existing find use cases remain authoritative for rejected, superseded and stale
@@ -71,7 +78,7 @@ def optional_object_metadata(
         node.id for node in graph.nodes if node.type in {"table", "view"}
     )
     omissions: Counter[str] = Counter()
-    records: list[dict[str, object]] = []
+    records: list[dict[str, Any]] = []
     revisions: dict[str, str] = {}
     if kind in {"identity", "coverage"}:
         matches = find_entity_resolution_candidates_for_graph_use_case(graph, runtime=runtime)
@@ -85,7 +92,7 @@ def optional_object_metadata(
                 edge = project_entity_resolution_edges(
                     graph, (replace(match, query_linked_coverage=None),),
                 )[0]
-                record = _edge_payload(edge, nodes, graph.name)
+                record = edge_payload(edge, nodes, graph.name)
                 if record is None:
                     raise OptionalMetadataFailure(
                         "invalid_optional_edge", "Cannot project this edge.",
@@ -98,13 +105,17 @@ def optional_object_metadata(
                 graph, object_id, nodes, scoped, omissions, runtime,
             )
     elif kind == "mappings":
-        matches = find_reference_mapping_candidates_for_graph_use_case(graph, runtime=runtime)
-        scoped = tuple(match for match in matches if _in_scope(
+        mapping_matches = find_reference_mapping_candidates_for_graph_use_case(
+            graph, runtime=runtime
+        )
+        scoped_mappings = tuple(match for match in mapping_matches if _in_scope(
             (match.candidate.source_field_id, match.candidate.target_field_id),
             nodes, object_id, allowed,
         ))
-        records = _reference_mapping_edge_payloads(graph, scoped, visible_object_ids=set(allowed))
-        revisions = {match.candidate.id: match.candidate.revision for match in scoped}
+        records = reference_mapping_edge_payloads(
+            graph, scoped_mappings, visible_object_ids=set(allowed)
+        )
+        revisions = {match.candidate.id: match.candidate.revision for match in scoped_mappings}
     else:
         documents = list_semantic_imports_use_case(graph_name=graph.name, runtime=runtime)
         bindings = semantic_node_bindings(documents)
@@ -195,7 +206,7 @@ def _coverage_records(
     graph: GraphDocument, object_id: str, nodes: dict[str, GraphNode],
     matches: tuple[EntityResolutionMatch, ...], omissions: Counter[str],
     runtime: TarelRuntime | None,
-) -> tuple[list[dict[str, object]], dict[str, str]]:
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     by_run: dict[str, set[str]] = {}
     revision = graph_revision(graph)
     for match in matches:
@@ -215,7 +226,7 @@ def _coverage_records(
         ):
             omissions["coverage_object_scope_unverified"] += 1
         else:
-            summary = _query_linked_coverage_summary(coverage, ())
+            summary = query_linked_coverage_summary(coverage, ())
             usages = {
                 match.usage for match in matches
                 if match.candidate.provenance.run_id == coverage.run_id
@@ -231,8 +242,8 @@ def _coverage_records(
 
 
 def _bounded(
-    records: list[dict[str, object]], limit: int, omissions: Counter[str],
-) -> tuple[list[dict[str, object]], bool]:
+    records: list[dict[str, Any]], limit: int, omissions: Counter[str],
+) -> tuple[list[dict[str, Any]], bool]:
     selected = []
     # Leave space for bounded revisions and the envelope rather than truncating a
     # claim's evidence or uncertainty text halfway through.

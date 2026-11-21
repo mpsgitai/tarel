@@ -9,9 +9,11 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from tarel.cli import main
+from tarel.lineage.analysis_application import (
+    run_lineage_provider_use_case,
+)
 from tarel.lineage.application import (
     build_lineage_use_case,
-    run_lineage_provider_use_case,
 )
 from tarel.lineage.contracts import LineageDocument, LineageFailure
 from tarel.lineage.core import apply_lineage_proposal, build_lineage
@@ -21,6 +23,9 @@ from tarel.lineage.source import LineageInput, SourceDefinition, SourceObservati
 from tarel.lineage.status import lineage_status
 from tarel.lineage.store import FileLineageStore
 from tarel.lineage.tasks import lineage_task, plan_lineage_tasks
+
+# Patch target: where definition analysis looks up its provider.
+LOAD_PROVIDER = "tarel.lineage.analysis_application.load_provider"
 
 
 class LineageOperationsTests(TestCase):
@@ -214,7 +219,7 @@ class LineageOperationsTests(TestCase):
                     store.save(build_lineage(name, source))
                 analysis = _proposal(build_lineage("first", source), source)["analysis"]
                 provider = _Provider([analysis])
-                with patch("tarel.lineage.application.load_provider", return_value=provider):
+                with patch(LOAD_PROVIDER, return_value=provider):
                     first = run_lineage_provider_use_case(
                         "first",
                         source_path=source_path,
@@ -241,7 +246,7 @@ class LineageOperationsTests(TestCase):
 
                 other_model_provider = _Provider([analysis])
                 with patch(
-                    "tarel.lineage.application.load_provider",
+                    LOAD_PROVIDER,
                     return_value=other_model_provider,
                 ):
                     third = run_lineage_provider_use_case(
@@ -280,7 +285,7 @@ class LineageOperationsTests(TestCase):
                     ]
                 )
                 with (
-                    patch("tarel.lineage.application.load_provider", return_value=provider),
+                    patch(LOAD_PROVIDER, return_value=provider),
                     self.assertRaisesRegex(LineageFailure, "did not classify"),
                 ):
                     run_lineage_provider_use_case(

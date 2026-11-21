@@ -29,8 +29,15 @@ from tarel.semantics.contracts import (
     validate_semantic_import,
 )
 from tarel.semantics.ossie import read_ossie_import
-from tarel.ui.presentation import browser_graph
-from tarel.ui.server import TarelUIBackend, UIConfig
+from tarel.ui.backend import (
+    TarelUIBackend,
+)
+from tarel.ui.contracts import (
+    UIConfig,
+)
+from tarel.ui.payloads.graph import (
+    browser_graph,
+)
 
 
 class SemanticImportTests(TestCase):
@@ -301,7 +308,7 @@ class SemanticImportTests(TestCase):
                             "sales",
                             "--source",
                             str(source),
-                            "--output",
+                            "--format",
                             "json",
                         ]
                     )
@@ -350,11 +357,11 @@ class SemanticImportTests(TestCase):
             backend = TarelUIBackend(UIConfig("sales", editable=True))
             with (
                 patch(
-                    "tarel.semantics.application.FileSemanticImportStore",
+                    "tarel.runtime.FileSemanticImportStore",
                     return_value=runtime.semantic_import_store(),
                 ),
                 patch(
-                    "tarel.application.FileGraphStore",
+                    "tarel.runtime.FileGraphStore",
                     return_value=runtime.graph_store(),
                 ),
             ):

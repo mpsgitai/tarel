@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from tarel.retrieval.contracts import RetrievalFailure
+from tarel.retrieval.contracts import ModelCatalog, ModelEntry, RetrievalFailure
 from tarel.retrieval.local import MODEL_SPECS, default_model_path
 from tarel.retrieval.remote import HTTPRetrievalClient
 
 
-def list_models(*, provider: str = "local", task: str = "embedding") -> dict[str, object]:
+def list_models(*, provider: str = "local", task: str = "embedding") -> ModelCatalog:
+    """List the models ``provider`` offers for ``task``; only remote providers use the network."""
     if task not in {"embedding", "reranker"}:
         raise RetrievalFailure("invalid_retrieval_task", "Task must be embedding or reranker.")
+    models: list[ModelEntry]
     if provider == "local":
         models = [
             {
@@ -38,4 +40,5 @@ def list_models(*, provider: str = "local", task: str = "embedding") -> dict[str
                     "invalid_retrieval_response", "Invalid provider model catalog."
                 )
             models = [{"id": row["id"], "task": task} for row in data]
-    return {"provider": provider, "task": task, "models": sorted(models, key=lambda row: row["id"])}
+    models.sort(key=lambda row: row["id"])
+    return {"provider": provider, "task": task, "models": models}

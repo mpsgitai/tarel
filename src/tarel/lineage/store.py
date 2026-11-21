@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Protocol
 
-from tarel.file_lock import state_write_lock
+from tarel.atomic import write_atomic
 from tarel.lineage.contracts import (
     LineageDocument,
     LineageFailure,
@@ -36,21 +34,9 @@ class FileLineageStore:
         path = self.path(document.name)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(document.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".lineage-",
-            suffix=".tmp",
-            text=True,
-        )
-        temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.write("\n")
-            with state_write_lock(self.root.parent):
-                os.replace(temporary, path)
+            write_atomic(path, payload + "\n", prefix=".lineage-", lock_root=self.root.parent)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise LineageFailure(
                 "lineage_save_failed",
                 f"Could not save lineage: {document.name}",

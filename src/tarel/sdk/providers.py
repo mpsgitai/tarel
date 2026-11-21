@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tarel.application import (
+from tarel.providers.application import (
     check_provider_use_case,
     configure_provider_use_case,
     list_provider_names_use_case,
     test_provider_use_case,
 )
-from tarel.providers.contracts import ProviderCheck
+from tarel.providers.contracts import ProviderCheck, ProviderTestResult
 
 
 class ProviderAPI:
@@ -48,6 +48,6 @@ class ProviderAPI:
             allow_no_api_key=allow_no_api_key,
         )
 
-    def test(self, name: str, *, timeout: float = 120.0) -> dict[str, object]:
+    def test(self, name: str, *, timeout: float = 120.0) -> ProviderTestResult:
         """Make the same explicit, potentially billable provider request as the CLI."""
         return test_provider_use_case(name, timeout=timeout)

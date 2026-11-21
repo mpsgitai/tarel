@@ -10,13 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
+from tarel.atomic import write_atomic
+from tarel.errors import TarelError
 
-class DemoFailure(RuntimeError):
+
+class DemoFailure(TarelError):
     """A demo creation failure safe to present at the CLI boundary."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +63,7 @@ def create_retail_demo(
     temporary_path = Path(temporary_name)
     try:
         _create_database(temporary_path, version)
-        os.replace(temporary_path, database_path)
+        temporary_path.replace(database_path)
         _write_config(config_path, database_path)
     except DemoFailure:
         temporary_path.unlink(missing_ok=True)
@@ -293,7 +292,7 @@ def _insert_facts(connection: sqlite3.Connection, version: int) -> None:
     for index in range(1, 121):
         quantity = 1 + index % 4
         amount = round(quantity * (35.0 + (index % 8) * 47.5), 2)
-        base = (
+        base: tuple[object, ...] = (
             100000 + index,
             date_keys[(index * 3) % len(date_keys)],
             1 + index % 8,
@@ -303,7 +302,7 @@ def _insert_facts(connection: sqlite3.Connection, version: int) -> None:
             quantity,
             amount,
         )
-        internet_rows.append(base + (round(amount * 0.05, 2),) if version == 2 else base)
+        internet_rows.append((*base, round(amount * 0.05, 2)) if version == 2 else base)
     internet_columns = 9 if version == 2 else 8
     connection.executemany(
         f"INSERT INTO F_SLS_01 VALUES ({', '.join('?' for _ in range(internet_columns))})",
@@ -338,7 +337,7 @@ def _insert_facts(connection: sqlite3.Connection, version: int) -> None:
         )
         if version == 1:
             base += (round(quantity * (20.0 + (index % 8) * 17.5), 2),)
-        returns.append(base + (("WEB" if index % 2 else "RSLR"),))
+        returns.append((*base, "WEB" if index % 2 else "RSLR"))
     placeholders = ", ".join("?" for _ in range(7 if version == 1 else 6))
     connection.executemany(f"INSERT INTO F_RET_01 VALUES ({placeholders})", returns)
 
@@ -351,17 +350,17 @@ def _write_config(config_path: Path, database_path: Path) -> None:
         f"url = {json.dumps(url, ensure_ascii=False)}\n"
         'default_database = "TarelRetailDW"\n'
     )
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=config_path.parent,
-        prefix=".retail-dwh-",
-        suffix=".toml.tmp",
-        text=True,
-    )
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-        os.replace(temporary_path, config_path)
-    except OSError:
-        temporary_path.unlink(missing_ok=True)
-        raise
+    write_atomic(config_path, payload, prefix=".retail-dwh-")
+
+
+def create_demo_use_case(
+    name: str,
+    *,
+    path: Path | None = None,
+    version: int = 1,
+    force: bool = False,
+) -> DemoCreateResult:
+    """Create the named demo; ``retail-dwh`` is the only one today."""
+    if name != "retail-dwh":
+        raise DemoFailure("unknown_demo", f"Unknown demo: {name}")
+    return create_retail_demo(path=path, version=version, force=force)
