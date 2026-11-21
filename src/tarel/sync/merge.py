@@ -27,6 +27,8 @@ ACTION_NONE = "already_active"
 ACTION_FRESHNESS = "confirm_freshness"
 ACTION_UPDATE = "update_content"
 PUBLISHED_ANNOTATION_KEY = "published_annotation"
+# Semantic metadata a site may publish; refresh would otherwise keep the central copy forever.
+IMPORTED_SEMANTIC_KEYS = frozenset({"grain", "semantic_type"})
 _KEEPS_STATE = frozenset({"deferred", "draft", "rejected"})
 
 
@@ -185,9 +187,16 @@ def _restore(node: GraphNode, claim: Mapping[str, Any]) -> GraphNode:
 
 
 def _central_annotation_only(node: GraphNode, known: GraphNode | None) -> GraphNode:
-    if known is not None and node.annotation == known.annotation:
-        return replace(node, annotation=None)
-    return node
+    """Strip what the last activation wrote and nobody here changed, so it follows the site."""
+    if known is None:
+        return node
+    annotation = None if node.annotation == known.annotation else node.annotation
+    metadata = {
+        key: value
+        for key, value in node.metadata.items()
+        if key not in IMPORTED_SEMANTIC_KEYS or known.metadata.get(key) != value
+    }
+    return replace(node, annotation=annotation, metadata=metadata)
 
 
 def _materialize_node(

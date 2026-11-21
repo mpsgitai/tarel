@@ -10,6 +10,7 @@ import stat
 import subprocess
 import zipfile
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest import SkipTest
@@ -290,6 +291,16 @@ class KeyTrustTests(_SecurityCase):
         expired = _make_key(self.root, "expired")
         self.central.sync.trust_key(
             self.publisher_id, public_key=_public(expired), not_after="2020-01-01T00:00:00Z",
+        )
+        self.refused("expired_signing_key", self.signed(expired))
+
+    def test_a_key_expired_in_basic_iso_spelling_is_refused(self) -> None:
+        # "2030-06-01..." sorts before "20300101T..." as text, though the latter is earlier.
+        yesterday = datetime.now(UTC) - timedelta(days=1)
+        expired = _make_key(self.root, "expired-basic")
+        self.central.sync.trust_key(
+            self.publisher_id, public_key=_public(expired),
+            not_after=yesterday.strftime("%Y%m%dT%H%M%SZ"),
         )
         self.refused("expired_signing_key", self.signed(expired))
 

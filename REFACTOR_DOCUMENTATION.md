@@ -1912,7 +1912,7 @@ When a graph was last read from its source, kept beside the graph and outside it
     - `GraphObservation.to_dict`: to dict; returns `dict[str, object]`.
     - `GraphObservation.from_dict`: from dict; returns `GraphObservation`.
 - **Output:** returns `GraphObservation`, `dict[str, object]`, `str`
-- **Used by:** `tarel.graph.store`, `tarel.sync.application`, `tarel.sync.authorization`
+- **Used by:** `tarel.graph.store`, `tarel.sync.application`
 
 ### `src/tarel/graph/reads.py`
 
@@ -4441,21 +4441,22 @@ Who sent a publication, and what that sender may publish. Local trust decides bo
     - `trusted_entry`: trusted entry; returns `TrustEntry`. Raises `SyncFailure`.
     - `check_sender`: Who sent this, then whether they may say it. A good signature grants no permission. Raises `SyncFailure`.
 - **Output:** returns `TrustEntry`
-- **Uses:** `tarel.graph.observation`, `tarel.sync.contracts`, `tarel.sync.envelope`, `tarel.sync.signing`, `tarel.sync.store`
+- **Uses:** `tarel.sync.contracts`, `tarel.sync.envelope`, `tarel.sync.signing`, `tarel.sync.store`
 - **Used by:** `tarel.sync.application`
 
 ### `src/tarel/sync/contracts.py`
 
 Versioned contracts of a publication, its stream and the central record of it.
 
-- **Input:** parameters `data: bytes`, `data: dict[str, Any]`, `data: object`, `label: str`, `prefix: str`, `value: object`
+- **Input:** parameters `data: bytes`, `data: dict[str, Any]`, `data: object`, `label: str`, `prefix: str`, `value: object`, `value: str`
 - **Processing:**
     - `SyncFailure`: Raised when a publication or central update is rejected.
     - `sha256_hex`: sha256 hex; returns `str`.
     - `stable_digest`: Digest of a value this process built itself; received documents are hashed as raw bytes.
     - `require_identity`: require identity; returns `str`.
     - `require_name`: require name; returns `str`.
-    - `require_timestamp`: Accept UTC only, so two sites can never state one instant in two spellings.
+    - `require_timestamp`: Accept UTC only. Basic and extended ISO spellings both pass, so compare via ``instant``.
+    - `instant`: The moment a validated UTC timestamp names; text order differs between ISO spellings.
     - `ExportScope`: The approved part of a graph. Only what is listed here may leave the site.
     - `ExportScope.digest`: digest; returns `str`.
     - `ExportScope.to_dict`: to dict; returns `dict[str, object]`.
@@ -4480,7 +4481,7 @@ Versioned contracts of a publication, its stream and the central record of it.
     - `StreamHead`: The authoritative answer to which publication of a stream is active.
     - `StreamHead.to_dict`: to dict; returns `dict[str, object]`.
     - `StreamHead.from_dict`: from dict; returns `StreamHead`.
-- **Output:** returns `ExportScope`, `Publication`, `PublisherStream`, `StreamHead`, `TrustEntry`, `TrustedKey`, `TrustedPublisher`, `dict[str, object]`, `str`
+- **Output:** returns `ExportScope`, `Publication`, `PublisherStream`, `StreamHead`, `TrustEntry`, `TrustedKey`, `TrustedPublisher`, `datetime`, `dict[str, object]`, `str`
 - **Uses:** `tarel.errors`
 - **Used by:** `tarel.sdk.sync`, `tarel.sync.admin_application`, `tarel.sync.application`, `tarel.sync.authorization`, `tarel.sync.envelope`, `tarel.sync.export`, `tarel.sync.impacts`, `tarel.sync.inbox`, `tarel.sync.merge`, `tarel.sync.publish_application`, `tarel.sync.results`, `tarel.sync.signing`, `tarel.sync.store`
 

@@ -430,6 +430,62 @@ class CentralKnowledgeTests(_SyncCase):
 
         self.assertEqual(self.central_graph().node_by_id()[ORDERS].annotation.description, "Second")
 
+    def set_grain(self, store_owner: Tarel, graph_name: str, grain: str | None) -> None:
+        store = store_owner.runtime.graph_store()
+        graph = store.load(graph_name)
+        nodes = []
+        for node in graph.nodes:
+            if node.id == ORDERS:
+                metadata = {k: v for k, v in node.metadata.items() if k != "grain"}
+                if grain is not None:
+                    metadata["grain"] = grain
+                node = replace(node, metadata=metadata)
+            nodes.append(node)
+        store.save(replace(graph, nodes=tuple(nodes)))
+
+    def central_grain(self) -> str | None:
+        return self.central_graph().node_by_id()[ORDERS].metadata.get("grain")
+
+    def test_untouched_imported_grain_follows_the_site(self) -> None:
+        self.use_annotated_stream()
+        self.annotate_site(GraphAnnotation("Orders"))
+        self.set_grain(self.site, "erp", "one row per order")
+        self.apply(self.publish())
+        self.set_grain(self.site, "erp", "one row per order line")
+
+        self.apply(self.publish())
+
+        self.assertEqual(self.central_grain(), "one row per order line")
+
+    def test_withdrawn_annotation_export_takes_the_imported_grain_along(self) -> None:
+        self.use_annotated_stream()
+        self.annotate_site(GraphAnnotation("Orders"))
+        self.set_grain(self.site, "erp", "one row per order")
+        self.apply(self.publish())
+        store = self.site.runtime.sync_store()
+        stream = store.publisher_stream("erp-main")
+        store.save_publisher_stream(replace(
+            stream,
+            scope=replace(stream.scope, annotations=False),
+            profile_version=stream.profile_version + 1,
+        ))
+
+        self.apply(self.publish())
+
+        self.assertIsNone(self.central_grain())
+
+    def test_central_grain_survives_a_site_change(self) -> None:
+        self.use_annotated_stream()
+        self.annotate_site(GraphAnnotation("Orders"))
+        self.set_grain(self.site, "erp", "one row per order")
+        self.apply(self.publish())
+        self.set_grain(self.central, "site-a.erp", "one row per order, checked here")
+        self.set_grain(self.site, "erp", "one row per order line")
+
+        self.apply(self.publish())
+
+        self.assertEqual(self.central_grain(), "one row per order, checked here")
+
     def test_central_rejection_of_an_imported_claim_survives_and_both_stay_visible(self) -> None:
         self.use_annotated_stream()
         self.annotate_site(GraphAnnotation("Site view", state="draft"))

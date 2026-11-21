@@ -15,6 +15,7 @@ from tarel.sync.contracts import (
     TrustedKey,
     TrustedPublisher,
     TrustEntry,
+    instant,
     require_identity,
 )
 from tarel.sync.envelope import frozen_copy, open_publication
@@ -254,5 +255,5 @@ def _stream_status(
 
 
 def _age_seconds(head: StreamHead) -> int:
-    observed = datetime.fromisoformat(head.observed_at.removesuffix("Z") + "+00:00")
+    observed = instant(head.observed_at)
     return int((datetime.now(UTC) - observed).total_seconds())

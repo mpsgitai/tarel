@@ -78,14 +78,19 @@ def require_name(value: object, label: str) -> str:
 
 
 def require_timestamp(value: object, label: str) -> str:
-    """Accept UTC only, so two sites can never state one instant in two spellings."""
+    """Accept UTC only. Basic and extended ISO spellings both pass, so compare via ``instant``."""
     if not isinstance(value, str) or not value.endswith("Z"):
         raise SyncFailure("invalid_timestamp", f"{label} must be UTC, ending in Z.")
     try:
-        datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+        instant(value)
     except ValueError as exc:
         raise SyncFailure("invalid_timestamp", f"Invalid {label}.") from exc
     return value
+
+
+def instant(value: str) -> datetime:
+    """The moment a validated UTC timestamp names; text order differs between ISO spellings."""
+    return datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
 
 
 @dataclass(frozen=True, slots=True)

@@ -479,21 +479,24 @@ class LineageFlowModel:
                     self.nodes[target.node_id]["reference"]
                 )
             for source in unit.sources:
-                evidence = (source.evidence, unit.evidence)
                 named = self._resolve(source.target, document, definition)
-                sources = (
-                    [
-                        (read.node_id, read.through, (*named.notes, *read.notes))
-                        for read in self._inputs(named.node_id)
-                    ]
-                    if named.node_id in self.processes else [(named.node_id, (), named.notes)]
-                )
-                for source_id, through, notes in sources:
-                    linked.add((source_id, target.node_id))
-                    self._link(process, source_id, target.node_id, _Contribution(
-                        process.id, unit.operation, source.role, unit.state, (item,), evidence,
-                        (*source.via, *through),
-                        source_notes=notes, target_notes=target.notes,
+                if named.node_id not in self.processes:
+                    linked.add((named.node_id, target.node_id))
+                    self._link(process, named.node_id, target.node_id, _Contribution(
+                        process.id, unit.operation, source.role, unit.state, (item,),
+                        (source.evidence, unit.evidence), source.via,
+                        source_notes=named.notes, target_notes=target.notes,
+                    ))
+                    continue
+                # A named process stands for what it reads; its claims bound how sure the flow is.
+                for read in self._inputs(named.node_id):
+                    linked.add((read.node_id, target.node_id))
+                    self._link(process, read.node_id, target.node_id, _Contribution(
+                        process.id, unit.operation, source.role,
+                        _weakest((unit.state, read.state)), (item, read.item),
+                        (source.evidence, unit.evidence, read.evidence),
+                        (*source.via, *read.through),
+                        source_notes=(*named.notes, *read.notes), target_notes=target.notes,
                     ))
         for mat in document.materializations:
             if mat.definition_id != definition.id or mat.state not in _STATE_ORDER:

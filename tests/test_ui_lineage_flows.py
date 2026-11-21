@@ -138,6 +138,25 @@ class DataFlowPayloadTests(TestCase):
         self.assertFalse(edge["indirect"])
         self.assertEqual([item["operation"] for item in edge["processes"]], ["insert"])
 
+    def test_write_from_a_named_process_keeps_the_state_of_its_reads(self) -> None:
+        document = _document(
+            "etl", _definition("load"), _definition("extract"),
+            claims=(_claim("c1", "extract", "Shop.main.Source"),),
+            units=(
+                _unit("u1", "load", "Shop.main.Target", "pipeline.extract", state="validated"),
+            ),
+        )
+        model = LineageFlowModel((document,), _objects())
+        flows = model.payload()
+
+        self.assertEqual(_labels(flows), {("Source", "Target")})
+        edge = flows["edges"][0]
+        self.assertEqual(edge["state"], "draft")
+        detail = model.edge_detail(edge["id"], roots=())
+        contribution = detail["processes"][0]["contributions"][0]
+        self.assertEqual(contribution["state"], "draft")
+        self.assertEqual(contribution["items"], ["u1", "c1"])
+
     def test_materialization_connects_the_reads_of_its_definition(self) -> None:
         flows = _flows(_document(
             "dbt", _definition("model"),

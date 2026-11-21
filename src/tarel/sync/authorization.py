@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from tarel.graph.observation import utc_now
-from tarel.sync.contracts import Publication, SyncFailure, TrustEntry
+from datetime import UTC, datetime
+
+from tarel.sync.contracts import Publication, SyncFailure, TrustEntry, instant
 from tarel.sync.envelope import SignedStatement
 from tarel.sync.signing import verify_statement
 from tarel.sync.store import FileSyncStore
@@ -87,6 +88,6 @@ def _check_signature(
         raise SyncFailure("unknown_signing_key", f"Key is not trusted for this publisher: {named}")
     if key.revoked:
         raise SyncFailure("revoked_signing_key", f"Key is revoked here: {named}")
-    if key.not_after is not None and utc_now() > key.not_after:
+    if key.not_after is not None and datetime.now(UTC) > instant(key.not_after):
         raise SyncFailure("expired_signing_key", f"Key expired at {key.not_after}: {named}")
     verify_statement(statement.statement, statement.signature, key.public_key)

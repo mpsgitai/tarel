@@ -5433,7 +5433,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | Code | Defined at |
 | --- | --- |
 | `activation_blocked` | [sync/application.py](../src/tarel/sync/application.py#L424) |
-| `activation_pending` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L202), [sync/application.py](../src/tarel/sync/application.py#L74) |
+| `activation_pending` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L203), [sync/application.py](../src/tarel/sync/application.py#L74) |
 | `agent_setup_failed` | [tarel/agents.py](../src/tarel/agents.py#L59) |
 | `agent_skill_exists` | [tarel/agents.py](../src/tarel/agents.py#L38) |
 | `agent_skill_missing` | [tarel/agents.py](../src/tarel/agents.py#L48) |
@@ -5516,7 +5516,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `expansion_target_not_found` | [expansion/projections.py](../src/tarel/expansion/projections.py#L93) |
 | `expected_logical_topology_revision_required` | [topology/application.py](../src/tarel/topology/application.py#L59), [topology/application.py](../src/tarel/topology/application.py#L99) |
 | `expected_reference_mapping_revision_required` | [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L270) |
-| `expired_signing_key` | [sync/authorization.py](../src/tarel/sync/authorization.py#L91) |
+| `expired_signing_key` | [sync/authorization.py](../src/tarel/sync/authorization.py#L92) |
 | `export_not_allowed` | [sync/export.py](../src/tarel/sync/export.py#L236) |
 | `family_proposal_model_required` | [object_families/proposals.py](../src/tarel/object_families/proposals.py#L85) |
 | `family_proposals_exist` | [object_families/proposals.py](../src/tarel/object_families/proposals.py#L78), [object_families/proposals.py](../src/tarel/object_families/proposals.py#L155) |
@@ -5548,7 +5548,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `graph_required` | [ui/backend.py](../src/tarel/ui/backend.py#L1058) |
 | `graph_revision_mismatch` | [graph/selective.py](../src/tarel/graph/selective.py#L482) |
 | `graph_save_failed` | [graph/store.py](../src/tarel/graph/store.py#L51), [graph/store.py](../src/tarel/graph/store.py#L99), [graph/store.py](../src/tarel/graph/store.py#L156) |
-| `history_gap` | [sync/merge.py](../src/tarel/sync/merge.py#L72) |
+| `history_gap` | [sync/merge.py](../src/tarel/sync/merge.py#L74) |
 | `identity_artifact_exists` | [discovery/identity.py](../src/tarel/discovery/identity.py#L425), [discovery/identity.py](../src/tarel/discovery/identity.py#L489) |
 | `identity_inspection_budget_exceeded` | [discovery/identity.py](../src/tarel/discovery/identity.py#L416), [discovery/identity.py](../src/tarel/discovery/identity.py#L460), [discovery/identity.py](../src/tarel/discovery/identity.py#L484) |
 | `identity_inventory_exists` | [discovery/identity.py](../src/tarel/discovery/identity.py#L404) |
@@ -5566,7 +5566,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `incomplete_query_linked_provenance` | [discovery/coverage.py](../src/tarel/discovery/coverage.py#L396), [discovery/coverage_application.py](../src/tarel/discovery/coverage_application.py#L163) |
 | `incomplete_reference_mapping_evidence` | [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L80), [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L85), [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L324), [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L340) |
 | `incomplete_reference_mapping_manifest` | [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L73) |
-| `incomplete_snapshot` | [sync/merge.py](../src/tarel/sync/merge.py#L44) |
+| `incomplete_snapshot` | [sync/merge.py](../src/tarel/sync/merge.py#L46) |
 | `incomplete_write_coverage` | [lineage/core.py](../src/tarel/lineage/core.py#L661) |
 | `index_build_failed` | [retrieval/index.py](../src/tarel/retrieval/index.py#L393) |
 | `index_checkpoint_failed` | [retrieval/checkpoint.py](../src/tarel/retrieval/checkpoint.py#L56), [retrieval/checkpoint.py](../src/tarel/retrieval/checkpoint.py#L148) |
@@ -5726,7 +5726,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_provider_request` | [providers/openai_compatible.py](../src/tarel/providers/openai_compatible.py#L66), [providers/openai_compatible.py](../src/tarel/providers/openai_compatible.py#L74), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L39), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L47) |
 | `invalid_provider_response` | [discovery/advice.py](../src/tarel/discovery/advice.py#L82), [discovery/advice.py](../src/tarel/discovery/advice.py#L90), [discovery/advice.py](../src/tarel/discovery/advice.py#L98), [providers/application.py](../src/tarel/providers/application.py#L123), [providers/openai_compatible.py](../src/tarel/providers/openai_compatible.py#L99), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L78), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L89), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L108), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L135), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L140) |
 | `invalid_public_key` | [sync/signing.py](../src/tarel/sync/signing.py#L34), [sync/signing.py](../src/tarel/sync/signing.py#L42), [sync/signing.py](../src/tarel/sync/signing.py#L46) |
-| `invalid_publication` | [sync/contracts.py](../src/tarel/sync/contracts.py#L121), [sync/contracts.py](../src/tarel/sync/contracts.py#L133), [sync/contracts.py](../src/tarel/sync/contracts.py#L136), [sync/contracts.py](../src/tarel/sync/contracts.py#L184), [sync/contracts.py](../src/tarel/sync/contracts.py#L187), [sync/contracts.py](../src/tarel/sync/contracts.py#L194), [sync/contracts.py](../src/tarel/sync/contracts.py#L203), [sync/contracts.py](../src/tarel/sync/contracts.py#L207), [sync/contracts.py](../src/tarel/sync/contracts.py#L212), [sync/contracts.py](../src/tarel/sync/contracts.py#L215), [sync/contracts.py](../src/tarel/sync/contracts.py#L218) |
+| `invalid_publication` | [sync/contracts.py](../src/tarel/sync/contracts.py#L126), [sync/contracts.py](../src/tarel/sync/contracts.py#L138), [sync/contracts.py](../src/tarel/sync/contracts.py#L141), [sync/contracts.py](../src/tarel/sync/contracts.py#L189), [sync/contracts.py](../src/tarel/sync/contracts.py#L192), [sync/contracts.py](../src/tarel/sync/contracts.py#L199), [sync/contracts.py](../src/tarel/sync/contracts.py#L208), [sync/contracts.py](../src/tarel/sync/contracts.py#L212), [sync/contracts.py](../src/tarel/sync/contracts.py#L217), [sync/contracts.py](../src/tarel/sync/contracts.py#L220), [sync/contracts.py](../src/tarel/sync/contracts.py#L223) |
 | `invalid_publication_path` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L131) |
 | `invalid_query` | [ui/query_tools.py](../src/tarel/ui/query_tools.py#L401) |
 | `invalid_query_budget` | [ui/query_tools.py](../src/tarel/ui/query_tools.py#L246), [ui/query_tools.py](../src/tarel/ui/query_tools.py#L410) |
@@ -5755,7 +5755,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_runtime_lineage_name` | [lineage/runtime_store.py](../src/tarel/lineage/runtime_store.py#L107) |
 | `invalid_sample_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L356), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L97), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L345), [sources/application.py](../src/tarel/sources/application.py#L253) |
 | `invalid_schema_reference` | [workspaces/core.py](../src/tarel/workspaces/core.py#L267), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L303) |
-| `invalid_scope` | [sync/contracts.py](../src/tarel/sync/contracts.py#L454), [sync/publish_application.py](../src/tarel/sync/publish_application.py#L66), [sync/publish_application.py](../src/tarel/sync/publish_application.py#L100) |
+| `invalid_scope` | [sync/contracts.py](../src/tarel/sync/contracts.py#L459), [sync/publish_application.py](../src/tarel/sync/publish_application.py#L66), [sync/publish_application.py](../src/tarel/sync/publish_application.py#L100) |
 | `invalid_scope_target` | [cli/_args.py](../src/tarel/cli/_args.py#L175) |
 | `invalid_search_filter` | [tarel/search.py](../src/tarel/search.py#L57), [tarel/search.py](../src/tarel/search.py#L62) |
 | `invalid_semantic_concept_mode` | [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L188) |
@@ -5770,7 +5770,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_semantic_source` | [semantics/source.py](../src/tarel/semantics/source.py#L127) |
 | `invalid_semantic_source_bundle` | [semantics/source.py](../src/tarel/semantics/source.py#L53) |
 | `invalid_session` | [ui/server.py](../src/tarel/ui/server.py#L126) |
-| `invalid_signature` | [sync/authorization.py](../src/tarel/sync/authorization.py#L66) |
+| `invalid_signature` | [sync/authorization.py](../src/tarel/sync/authorization.py#L67) |
 | `invalid_small_domain_limit` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L382), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L797) |
 | `invalid_sml` | [semantics/sml.py](../src/tarel/semantics/sml.py#L390), [semantics/sml.py](../src/tarel/semantics/sml.py#L396), [semantics/sml.py](../src/tarel/semantics/sml.py#L404), [semantics/sml.py](../src/tarel/semantics/sml.py#L410), [semantics/sml.py](../src/tarel/semantics/sml.py#L416), [semantics/sml.py](../src/tarel/semantics/sml.py#L419), [semantics/sml.py](../src/tarel/semantics/sml.py#L425) |
 | `invalid_source` | [sources/contracts.py](../src/tarel/sources/contracts.py#L131), [sources/contracts.py](../src/tarel/sources/contracts.py#L133), [sources/contracts.py](../src/tarel/sources/contracts.py#L135), [sources/contracts.py](../src/tarel/sources/contracts.py#L137), [sources/contracts.py](../src/tarel/sources/contracts.py#L163), [sources/contracts.py](../src/tarel/sources/contracts.py#L202), [sources/contracts.py](../src/tarel/sources/contracts.py#L210), [sources/contracts.py](../src/tarel/sources/contracts.py#L216), [sources/store.py](../src/tarel/sources/store.py#L48), [sources/store.py](../src/tarel/sources/store.py#L50) |
@@ -5898,7 +5898,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `provider_http_error` | [providers/openai_compatible.py](../src/tarel/providers/openai_compatible.py#L92), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L71) |
 | `provider_not_configured` | [providers/config.py](../src/tarel/providers/config.py#L77), [providers/config.py](../src/tarel/providers/config.py#L153), [providers/config.py](../src/tarel/providers/config.py#L169), [providers/config.py](../src/tarel/providers/config.py#L257), [providers/host.py](../src/tarel/providers/host.py#L27) |
 | `provider_unavailable` | [providers/openai_compatible.py](../src/tarel/providers/openai_compatible.py#L97), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L76) |
-| `publication_conflict` | [sync/merge.py](../src/tarel/sync/merge.py#L57), [sync/merge.py](../src/tarel/sync/merge.py#L66), [sync/merge.py](../src/tarel/sync/merge.py#L91), [sync/merge.py](../src/tarel/sync/merge.py#L100) |
+| `publication_conflict` | [sync/merge.py](../src/tarel/sync/merge.py#L59), [sync/merge.py](../src/tarel/sync/merge.py#L68), [sync/merge.py](../src/tarel/sync/merge.py#L93), [sync/merge.py](../src/tarel/sync/merge.py#L102) |
 | `publication_exists` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L133) |
 | `publication_not_found` | [sync/envelope.py](../src/tarel/sync/envelope.py#L164) |
 | `publication_write_failed` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L197) |
@@ -5933,7 +5933,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `retrieval_settings_override` | [retrieval/settings.py](../src/tarel/retrieval/settings.py#L146) |
 | `reviewed_annotation` | [annotations/apply.py](../src/tarel/annotations/apply.py#L93) |
 | `reviewed_lineage_item` | [lineage/core.py](../src/tarel/lineage/core.py#L270) |
-| `revoked_signing_key` | [sync/authorization.py](../src/tarel/sync/authorization.py#L89) |
+| `revoked_signing_key` | [sync/authorization.py](../src/tarel/sync/authorization.py#L90) |
 | `route_not_found` | [ui/backend.py](../src/tarel/ui/backend.py#L503), [ui/backend.py](../src/tarel/ui/backend.py#L981) |
 | `runtime_call_not_evidence` | [lineage/runtime_application.py](../src/tarel/lineage/runtime_application.py#L96) |
 | `runtime_call_not_found` | [lineage/runtime_application.py](../src/tarel/lineage/runtime_application.py#L91) |
@@ -6006,34 +6006,34 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `stale_optional_scope` | [ui/backend.py](../src/tarel/ui/backend.py#L378) |
 | `stale_plan` | [sync/application.py](../src/tarel/sync/application.py#L109), [sync/application.py](../src/tarel/sync/application.py#L401) |
 | `stale_proposal` | [annotations/apply.py](../src/tarel/annotations/apply.py#L40), [annotations/apply.py](../src/tarel/annotations/apply.py#L58), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L156), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L161) |
-| `stale_publication` | [sync/merge.py](../src/tarel/sync/merge.py#L52) |
+| `stale_publication` | [sync/merge.py](../src/tarel/sync/merge.py#L54) |
 | `stale_query_scope` | [ui/query_tools.py](../src/tarel/ui/query_tools.py#L363), [ui/query_tools.py](../src/tarel/ui/query_tools.py#L486) |
 | `stale_reference_mapping_candidate` | [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L275) |
 | `stale_semantic_concepts` | [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L77), [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L145) |
 | `stale_semantic_import` | [semantics/application.py](../src/tarel/semantics/application.py#L122) |
 | `stale_workspace` | [ui/backend.py](../src/tarel/ui/backend.py#L1081) |
 | `stream_exists` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L72) |
-| `stream_not_found` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L98), [sync/admin_application.py](../src/tarel/sync/admin_application.py#L200), [sync/store.py](../src/tarel/sync/store.py#L90) |
+| `stream_not_found` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L99), [sync/admin_application.py](../src/tarel/sync/admin_application.py#L201), [sync/store.py](../src/tarel/sync/store.py#L90) |
 | `sync_busy` | [sync/inbox.py](../src/tarel/sync/inbox.py#L49), [sync/store.py](../src/tarel/sync/store.py#L47), [sync/store.py](../src/tarel/sync/store.py#L56) |
 | `sync_save_failed` | [sync/store.py](../src/tarel/sync/store.py#L178), [sync/store.py](../src/tarel/sync/store.py#L241) |
 | `system_not_found` | [workspaces/core.py](../src/tarel/workspaces/core.py#L277), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L256) |
 | `target_exists` | [connectors/authoring.py](../src/tarel/connectors/authoring.py#L30), [providers/authoring.py](../src/tarel/providers/authoring.py#L32) |
 | `target_not_found` | [annotations/tasks.py](../src/tarel/annotations/tasks.py#L120), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L139) |
-| `trust_exists` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L77), [sync/admin_application.py](../src/tarel/sync/admin_application.py#L79), [sync/admin_application.py](../src/tarel/sync/admin_application.py#L136) |
+| `trust_exists` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L78), [sync/admin_application.py](../src/tarel/sync/admin_application.py#L80), [sync/admin_application.py](../src/tarel/sync/admin_application.py#L137) |
 | `ui_operation_failed` | [ui/server.py](../src/tarel/ui/server.py#L314) |
 | `ui_source_required` | [ui/backend.py](../src/tarel/ui/backend.py#L1047), [ui/server.py](../src/tarel/ui/server.py#L206) |
-| `unauthorized_scope` | [sync/authorization.py](../src/tarel/sync/authorization.py#L26), [sync/authorization.py](../src/tarel/sync/authorization.py#L45), [sync/authorization.py](../src/tarel/sync/authorization.py#L50), [sync/authorization.py](../src/tarel/sync/authorization.py#L54) |
+| `unauthorized_scope` | [sync/authorization.py](../src/tarel/sync/authorization.py#L27), [sync/authorization.py](../src/tarel/sync/authorization.py#L46), [sync/authorization.py](../src/tarel/sync/authorization.py#L51), [sync/authorization.py](../src/tarel/sync/authorization.py#L55) |
 | `unknown_demo` | [tarel/demo.py](../src/tarel/demo.py#L365) |
 | `unknown_model` | [retrieval/local.py](../src/tarel/retrieval/local.py#L102) |
-| `unknown_signing_key` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L158), [sync/authorization.py](../src/tarel/sync/authorization.py#L87) |
+| `unknown_signing_key` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L159), [sync/authorization.py](../src/tarel/sync/authorization.py#L88) |
 | `unsafe_manifest` | [connectors/contracts.py](../src/tarel/connectors/contracts.py#L68) |
 | `unsafe_semantic_source` | [semantics/source.py](../src/tarel/semantics/source.py#L67), [semantics/source.py](../src/tarel/semantics/source.py#L106) |
-| `unsigned_publication` | [sync/authorization.py](../src/tarel/sync/authorization.py#L69) |
+| `unsigned_publication` | [sync/authorization.py](../src/tarel/sync/authorization.py#L70) |
 | `unsupported_agent_setup` | [tarel/agents.py](../src/tarel/agents.py#L31) |
 | `unsupported_capability` | [connectors/application.py](../src/tarel/connectors/application.py#L116), [relationships/application.py](../src/tarel/relationships/application.py#L205) |
 | `unsupported_change_report` | [graph/refresh.py](../src/tarel/graph/refresh.py#L124) |
 | `unsupported_context_packet` | [context/packets.py](../src/tarel/context/packets.py#L139) |
-| `unsupported_contract` | [connectors/contracts.py](../src/tarel/connectors/contracts.py#L53), [sync/contracts.py](../src/tarel/sync/contracts.py#L182) |
+| `unsupported_contract` | [connectors/contracts.py](../src/tarel/connectors/contracts.py#L53), [sync/contracts.py](../src/tarel/sync/contracts.py#L187) |
 | `unsupported_dbt_manifest` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L42) |
 | `unsupported_dbt_materialization` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L207) |
 | `unsupported_discovery` | [discovery/runs.py](../src/tarel/discovery/runs.py#L607), [discovery/runs.py](../src/tarel/discovery/runs.py#L692), [discovery/runs.py](../src/tarel/discovery/runs.py#L699), [discovery/runs.py](../src/tarel/discovery/runs.py#L707), [discovery/runs.py](../src/tarel/discovery/runs.py#L715), [discovery/runs.py](../src/tarel/discovery/runs.py#L719) |
@@ -6058,11 +6058,11 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `unsupported_semantic_format` | [semantics/readers.py](../src/tarel/semantics/readers.py#L25) |
 | `unsupported_semantic_import` | [semantics/contracts.py](../src/tarel/semantics/contracts.py#L390), [semantics/contracts.py](../src/tarel/semantics/contracts.py#L422) |
 | `unsupported_source` | [sources/contracts.py](../src/tarel/sources/contracts.py#L79) |
-| `unsupported_sync_state` | [sync/contracts.py](../src/tarel/sync/contracts.py#L464) |
+| `unsupported_sync_state` | [sync/contracts.py](../src/tarel/sync/contracts.py#L469) |
 | `unsupported_url` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L236), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L245), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L605) |
 | `unsupported_workspace` | [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L235), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L263) |
 | `untrusted_host` | [ui/server.py](../src/tarel/ui/server.py#L119) |
-| `untrusted_publisher` | [sync/authorization.py](../src/tarel/sync/authorization.py#L15) |
+| `untrusted_publisher` | [sync/authorization.py](../src/tarel/sync/authorization.py#L16) |
 | `workspace_exists` | [workspaces/application.py](../src/tarel/workspaces/application.py#L59) |
 | `workspace_not_found` | [workspaces/store.py](../src/tarel/workspaces/store.py#L53) |
 | `workspace_required` | [ui/backend.py](../src/tarel/ui/backend.py#L1028) |
