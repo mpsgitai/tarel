@@ -132,10 +132,17 @@ Try the synthetic [Retail DWH walkthrough](docs/retail-demo.md) without credenti
 - [Python SDK](docs/cli-reference.md#python-sdk)
 - [Documentation index](docs/README.md)
 
-Moving scripts from an earlier TAREL: workspace commands now take the workspace by name, so
-`tarel search enterprise "revenue" --workspace` becomes
-`tarel search "revenue" --workspace enterprise`. The package version alone does not tell the two
-apart. Existing retrieval indexes keep working; see their
+Moving scripts from 0.0.3 to 0.0.4: JSON output is unchanged, but some flags and defaults are not.
+
+- `search`, `context build`, `context prefix` and `grounding` take the workspace by name:
+  `tarel search enterprise "revenue" --workspace` becomes
+  `tarel search "revenue" --workspace enterprise`.
+- `graph header`, `graph objects`, `graph slice` and `graph rebuild-index` print text by default;
+  pass `--format json` for the previous output.
+- `semantic import`, `list`, `show` and `edit` select their output with `--format` instead of
+  `--output`; the input format of `semantic import` moved from `--format` to `--source-format`.
+
+Existing retrieval indexes keep working; see their
 [embedding input state](docs/contracts.md#embedding-input).
 
 TAREL is pre-alpha. SQLite and SQL Server connectors are included. TAREL does not execute
