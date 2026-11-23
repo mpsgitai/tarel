@@ -388,6 +388,7 @@ async function inspectSearchHit(hit, button) {
     if (!selected) throw new Error("This result is not in the loaded graph view. Reload the project before inspecting it.");
     state.objectKind = "all";
     $$('[data-kind]').forEach(item => item.classList.toggle("is-active", item.dataset.kind === "all"));
+    if ($("#search-object-type")) $("#search-object-type").value = "";
     renderAll();
     selectObject(selected.id);
   } catch (error) { toast(error.message); }

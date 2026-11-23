@@ -49,10 +49,12 @@ function renderHealthFilterBar() {
   const scoped = typeof visibleObjects === "function" ? visibleObjects() : state.data.objects || [];
   const kindFiltered = scoped.filter(item => state.objectKind === "all" || item.type === state.objectKind);
   const counts = computeHealthCounts(kindFiltered);
+  let autoReset = false;
   if (healthState.filter !== "all") {
     const activeCount = counts[healthState.filter] ?? 0;
     if (activeCount === 0 && (healthState.filter !== "orphan" || !counts.lineage_loaded)) {
       healthState.filter = "all";
+      autoReset = true;
     }
   }
   const chips = [
@@ -108,6 +110,13 @@ function renderHealthFilterBar() {
   bar.querySelectorAll("[data-health-filter]").forEach(button => {
     button.addEventListener("click", () => setHealthFilter(button.dataset.healthFilter));
   });
+  if (autoReset) {
+    if (typeof renderObjectList === "function") renderObjectList();
+    if (typeof applyHealthCanvasDecorations === "function") applyHealthCanvasDecorations();
+    if (typeof window !== "undefined" && window.TarelAtlas?.active() && document.body.classList.contains("at-table-mode")) {
+      window.TarelAtlas.renderTable();
+    }
+  }
 }
 
 function setHealthFilter(nextFilter) {

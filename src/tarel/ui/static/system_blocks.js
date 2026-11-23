@@ -26,6 +26,7 @@ function blockGraphId(systemName, graphName) {
 }
 
 function blockWeakestState(states) {
+  if (states.has("rejected")) return "rejected";
   if (states.has("draft")) return "draft";
   if (states.has("review_required")) return "review_required";
   if (states.has("validated") || states.has("reviewed")) return "validated";
