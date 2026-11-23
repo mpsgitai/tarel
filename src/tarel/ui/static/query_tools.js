@@ -23,6 +23,7 @@ const queryTools = {
   indexBuilding: false,
   indexError: null,
   requireSubmit: false,
+  activeHit: null,
 };
 
 const SEMANTIC_MODES = new Set(["vector", "hybrid"]);
@@ -55,6 +56,7 @@ function renderSearchMode() {
   note.hidden = !text;
   note.textContent = text;
   note.className = `search-mode-note${SEMANTIC_MODES.has(mode) ? " caution" : ""}`;
+  if (typeof syncInlineSearchMode === "function") syncInlineSearchMode();
   renderSearchBlocker();
 }
 
@@ -196,7 +198,12 @@ function scheduleProjectSearch() {
   const active = projectSearchActive();
   $("#project-search-status").hidden = !active;
   $('[data-kind="all"]').parentElement.hidden = active;
-  if (!active) { renderObjectList(); return; }
+  if (!active) {
+    queryTools.activeHit = null;
+    if (typeof applySearchSpotlight === "function") applySearchSpotlight(null);
+    renderObjectList();
+    return;
+  }
   renderProjectSearch();
   if (queryTools.requireSubmit) return;
   queryTools.searchTimer = setTimeout(runProjectSearch, 300);
@@ -269,23 +276,51 @@ function renderProjectSearch() {
   status.textContent = `${hits.length} result${hits.length === 1 ? "" : "s"} · ${SEARCH_MODE_NAMES[mode] || mode}${similarityOnly ? ` · ${similarityOnly} by similarity only` : ""}${inventory ? ` · ${inventory.objects_after_filters}/${inventory.objects_in_scope} objects after filters` : ""}`;
   $("#object-list").innerHTML = hits.map((hit, index) => {
     const object = searchHitObject(hit);
-    const outside = !object || !visibleObjects().some(item => item.id === object.id);
-    const action = hit.family ? (outside ? "Show family · clear display filters" : "Show reviewed family") : outside ? "Inspect · clear display filters" : "Inspect object";
     const metadata = hit.metadata || {};
-    const evidence = semanticOnly(hit)
-      ? '<span class="search-evidence semantic" title="Ranked by embedding similarity only; no keyword in names, fields or annotations matched.">Semantic only · no keyword evidence</span>'
-      : hit.reasons?.some(reason => String(reason).startsWith("retrieval:vector")) ? '<span class="search-evidence both">Keyword + semantic</span>' : "";
-    return `<article class="search-hit${semanticOnly(hit) ? " is-semantic-only" : ""}"><div class="search-hit-heading"><span class="kind-icon">${hit.family ? "F" : hit.type === "view" ? "V" : "T"}</span><strong>${escapeHtml(hit.label)}</strong></div>${evidence}
-      <p>Graph: ${[hit.source_graph || queryTools.searchResult.results.graph, metadata.namespace].filter(Boolean).map(escapeHtml).join(" · ")}</p>
-      ${metadata.description ? `<p>${escapeHtml(metadata.description)}</p>` : '<p>Meaning not documented.</p>'}
-      ${metadata.role || metadata.grain || metadata.annotation_state ? `<p>${metadata.role ? `Role: ${escapeHtml(metadata.role)}` : "Role: unknown"}${metadata.grain ? ` · Grain: ${escapeHtml(metadata.grain)}` : ""}${metadata.annotation_state ? ` · ${escapeHtml(metadata.annotation_state)}` : ""}</p>` : ""}
-      ${hit.family ? `<p>${hit.family.member_count} members · ${escapeHtml(hit.family.usage)} · metadata only</p>` : ""}
-      ${hit.fields?.length ? `<p class="search-match">Fields: ${hit.fields.slice(0, 4).map(field => escapeHtml(field.label)).join(", ")}${hit.fields.length > 4 ? " …" : ""}</p>` : ""}
-      ${hit.reasons?.length ? `<details class="search-reasons"><summary>Why this match</summary><p>${hit.reasons.slice(0, 2).map(escapeHtml).join(" · ")}</p></details>` : ""}
-      <div class="search-hit-actions"><button class="quiet-button" data-search-hit="${index}">${action}</button>${hit.family ? "" : `<button class="quiet-button" data-context-hit="${index}">${queryTools.selectedObjects.has(contextObjectReference(hit)) ? "Selected for context" : "Use for context"}</button>`}</div></article>`;
+    const isSemOnly = semanticOnly(hit);
+    const isHybrid = !isSemOnly && hit.reasons?.some(reason => String(reason).startsWith("retrieval:vector"));
+    const evidence = isSemOnly
+      ? '<span class="search-evidence semantic" title="Ranked by embedding similarity only">Semantic only · no keyword evidence</span>'
+      : isHybrid
+      ? '<span class="search-evidence both" title="Matched by both keywords and embedding similarity">Keyword + semantic</span>'
+      : '<span class="search-evidence keyword" title="Matched by keyword">Keyword</span>';
+    const ref = hit.family ? "" : contextObjectReference(hit);
+    const checked = ref && queryTools.selectedObjects.has(ref);
+    const micro = object && typeof healthMicroBadges === "function" ? healthMicroBadges(object) : "";
+    const snippet = metadata.description
+      || (hit.fields?.length ? `Fields: ${hit.fields.slice(0, 3).map(f => f.label).join(", ")}` : "No description");
+    const loc = [hit.source_graph || queryTools.searchResult.results.graph, metadata.namespace].filter(Boolean).join(" · ");
+    const isActive = object && object.id === state.selectedId;
+    return `<div class="search-hit compact-hit${isSemOnly ? " is-semantic-only" : ""}${isActive ? " is-active" : ""}" data-search-hit="${index}" role="button" tabindex="0">
+      <div class="compact-hit-line1">
+        ${hit.family ? '<span class="hit-check-spacer"></span>' : `<input type="checkbox" class="row-check" data-context-hit="${index}" aria-label="Select ${escapeAttr(hit.label)} for context" ${checked ? "checked" : ""} />`}
+        <span class="kind-icon">${hit.family ? "F" : hit.type === "view" ? "V" : "T"}</span>
+        <strong class="compact-hit-name">${escapeHtml(hit.label)}</strong>
+        ${evidence}
+        ${micro}
+      </div>
+      <div class="compact-hit-line2"><span class="compact-hit-loc">${escapeHtml(loc)}</span><span class="compact-hit-sep">·</span><span class="compact-hit-snippet">${escapeHtml(snippet)}</span></div>
+    </div>`;
   }).join("") || '<div class="empty-state compact"><h2>No metadata matches</h2><p>Try a field name, synonym or a shorter topic. Clear search to return to the object list.</p></div>';
-  $$('[data-search-hit]').forEach(button => button.addEventListener("click", () => inspectSearchHit(hits[Number(button.dataset.searchHit)], button)));
-  $$('[data-context-hit]').forEach(button => button.addEventListener("click", () => selectSearchHitForContext(hits[Number(button.dataset.contextHit)])));
+  $$('[data-search-hit]').forEach(row => {
+    row.addEventListener("click", event => {
+      if (event.target.closest("[data-context-hit]")) return;
+      const hit = hits[Number(row.dataset.searchHit)];
+      queryTools.activeHit = hit;
+      inspectSearchHit(hit, row);
+    });
+    row.addEventListener("keydown", event => {
+      if ((event.key === "Enter" || event.key === " ") && !event.target.closest("[data-context-hit]")) {
+        event.preventDefault();
+        const hit = hits[Number(row.dataset.searchHit)];
+        queryTools.activeHit = hit;
+        inspectSearchHit(hit, row);
+      }
+    });
+  });
+  $$('[data-context-hit]').forEach(input => input.addEventListener("change", () => selectSearchHitForContext(hits[Number(input.dataset.contextHit)])));
+  if (typeof applySearchSpotlight === "function") applySearchSpotlight(hits);
+  if (typeof renderContextActionBar === "function") renderContextActionBar();
 }
 
 function contextObjectReference(hit) {
@@ -303,6 +338,7 @@ function selectSearchHitForContext(hit) {
     : queryTools.selectedObjects.add(reference);
   $("#context-kind").value = "selected";
   updateContextKind();
+  if (typeof renderContextActionBar === "function") renderContextActionBar();
   renderProjectSearch();
 }
 
@@ -320,6 +356,8 @@ function applySearchHere() {
   queryTools.selectedObjects.clear();
   $("#retrieval-workspace-label").textContent = `Working scope: ${objects.length} visible objects`;
   $("#search-project").hidden = false;
+  if (typeof syncSearchScopePill === "function") syncSearchScopePill();
+  if (typeof renderContextActionBar === "function") renderContextActionBar();
   queryToolsScopeChanged();
 }
 
@@ -328,6 +366,8 @@ function searchWholeProject() {
   queryTools.selectedObjects.clear();
   $("#retrieval-workspace-label").textContent = "Working scope: project";
   $("#search-project").hidden = true;
+  if (typeof syncSearchScopePill === "function") syncSearchScopePill();
+  if (typeof renderContextActionBar === "function") renderContextActionBar();
   queryToolsScopeChanged();
 }
 
@@ -649,6 +689,7 @@ function initializeQueryTools() {
       const count = refineFilterCount();
       $("#search-filter-summary").textContent = count ? `${count} active` : "No filters";
       if (typeof renderFiltersCount === "function") renderFiltersCount();
+      if (typeof renderActiveFilterPills === "function") renderActiveFilterPills();
       if (projectSearchActive()) scheduleProjectSearch();
     });
   }

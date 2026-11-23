@@ -20,10 +20,29 @@
         <nav class="view-tabs" aria-label="Views">
           <button class="tab is-active" data-view="graph">Explore</button>
           <button class="tab" data-view="review">Review <span id="review-badge">…</span></button>
-          <button id="open-context" class="context-launch" aria-haspopup="dialog"><span class="context-label-full">Agent context</span><span class="context-label-short">Context</span></button>
         </nav>
-        <div class="session-meta"><span id="graph-name">Loading…</span><span id="revision" class="mono"></span><span id="mode" class="mode-badge"></span></div>
+        <div class="topbar-search" role="search" aria-label="Project search">
+          <label class="search unified-search">
+            <span aria-hidden="true">⌕</span>
+            <input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Search objects, fields, meaning…" autocomplete="off" />
+            <kbd class="search-kbd" aria-hidden="true">Ctrl K</kbd>
+          </label>
+          <div id="search-mode-switch" class="inline-mode-switch" role="group" aria-label="Search mode">
+            <button type="button" class="chip is-active" data-search-mode="lexical" aria-pressed="true" title="Exact text match in names, fields and annotations">Exact</button>
+            <button type="button" class="chip" data-search-mode="bm25" aria-pressed="false" title="Keyword ranking (BM25)">BM25</button>
+            <button type="button" class="chip" data-search-mode="hybrid" aria-pressed="false" title="Keyword + semantic vector ranking (requires local index)">Hybrid</button>
+          </div>
+          <button id="search-scope-toggle" type="button" class="chip scope-toggle-pill" hidden>Project</button>
+          <button id="run-model-search" type="button" class="quiet-button run-model-search" hidden>Search</button>
+        </div>
+        <div class="topbar-right">
+          <button id="open-context" class="context-launch" aria-haspopup="dialog"><span class="context-label-full">Context</span><span class="context-label-short">Context</span></button>
+          <div class="session-meta"><span id="graph-name">Loading…</span><span id="revision" class="mono"></span><span id="mode" class="mode-badge"></span></div>
+          <button id="search-settings-toggle" class="icon-button search-settings-toggle" aria-controls="search-settings" aria-expanded="false" aria-label="Search &amp; model settings" title="Search &amp; model settings"><span aria-hidden="true">⚙</span><i id="search-settings-dot" class="attention-dot" title="The selected search mode needs attention" hidden></i></button>
+        </div>
       </header>
+      <div id="search-blocker" class="search-blocker topbar-blocker" role="alert" hidden><span id="search-blocker-text"></span><button id="search-blocker-update" class="quiet-button">Update index</button></div>
+      <small id="external-provider-note" class="search-mode-note caution search-note topbar-note" hidden></small>
 
       <main id="workspace">
         <section id="graph-view" class="view is-active">
@@ -46,38 +65,17 @@
             <details><summary>Select connections</summary><nav id="arch-edge-list" aria-label="Architecture connections"></nav></details>
           </aside>
           <aside id="object-sidebar" class="sidebar">
-            <div class="pane-heading"><div><h1>Objects</h1></div><button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button></div>
-            <div class="search-row">
-              <label class="search"><span aria-hidden="true">⌕</span><input id="object-search" aria-label="Project search" type="search" maxlength="2000" placeholder="Names, fields, meaning…" autocomplete="off" /></label>
-              <button id="search-settings-toggle" class="icon-button search-settings-toggle" aria-controls="search-settings" aria-expanded="false" aria-label="Search settings" title="Search settings"><span aria-hidden="true">⚙</span><i id="search-settings-dot" class="attention-dot" title="The selected search mode needs attention" hidden></i></button>
+            <div class="pane-heading compact-heading">
+              <div><h1>Objects</h1></div>
+              <button class="icon-button panel-close mobile-only" data-close-panel="objects" aria-label="Close object navigation">×</button>
             </div>
-            <div id="search-blocker" class="search-blocker" role="alert" hidden><span id="search-blocker-text"></span><button id="search-blocker-update" class="quiet-button">Update index</button></div>
-            <small id="external-provider-note" class="search-mode-note caution search-note" hidden></small>
-            <div id="project-search-status" class="project-search-status" role="status" aria-live="polite" hidden></div>
-            <button id="run-model-search" class="quiet-button run-model-search" hidden>Search</button>
-            <section id="search-settings" class="search-settings" aria-label="Search settings" hidden>
-              <div class="index-health"><span id="index-health-dot" aria-hidden="true"></span><span id="index-health-label" role="status" aria-live="polite">Checking local search…</span><button id="update-index" class="quiet-button" hidden>Update</button></div>
-              <small id="retrieval-selection-label"></small>
-              <div id="retrieval-model-panel" class="search-models">
-                <h2>Search models</h2>
-                <label>Search mode<select id="retrieval-mode" aria-describedby="search-mode-note"><option value="lexical">Names</option><option value="bm25">BM25</option><option value="hybrid">Hybrid</option><option value="vector">Vector</option></select></label>
-                <p id="search-mode-note" class="search-mode-note" hidden></p>
-                <label>Embedding<select id="embedding-provider"></select><input id="embedding-model" list="embedding-models" maxlength="256" aria-label="Embedding model" /><datalist id="embedding-models"></datalist></label>
-                <div><button id="embedding-catalog" class="quiet-button">List models</button><button id="embedding-download" class="quiet-button">Download local model</button></div>
-                <label>Reranker<select id="reranker-provider"></select><input id="reranker-model" list="reranker-models" maxlength="256" aria-label="Reranker model" /><datalist id="reranker-models"></datalist></label>
-                <div><button id="reranker-catalog" class="quiet-button">List models</button><button id="reranker-download" class="quiet-button">Download local model</button></div>
-                <label>Rerank candidates<input id="rerank-depth" type="number" min="1" max="100" value="10" /></label>
-                <p>Cloud selections send search questions and selected schema metadata to the provider. Index vectors stay local. Downloads and index updates are separate actions.</p>
-                <button id="apply-retrieval" class="quiet-button">Apply selection</button><p id="retrieval-message" role="status" aria-live="polite"></p>
-              </div>
-            </section>
             <div class="list-controls">
               <div class="filter-row"><button class="chip is-active" data-kind="all">All</button><button class="chip" data-kind="table">Tables</button><button class="chip" data-kind="view">Views</button></div>
               <button id="filters-toggle" class="quiet-button filters-toggle" aria-controls="filters-panel" aria-expanded="false">Filters<span id="filters-count" class="filters-count"></span></button>
             </div>
             <div id="filters-panel" class="filters-panel" hidden>
-              <details class="search-filter-panel"><summary>Refine search results <small id="search-filter-summary">No filters</small></summary><div>
-                <label>Object type<select id="search-object-type"><option value="">Tables and views</option><option value="table">Tables</option><option value="view">Views</option></select></label>
+              <details class="search-filter-panel" open><summary>Refine search results <small id="search-filter-summary">No filters</small></summary><div>
+                <select id="search-object-type" hidden aria-hidden="true"><option value="">Tables and views</option><option value="table">Tables</option><option value="view">Views</option></select>
                 <label>Documented role<input id="search-role" maxlength="100" placeholder="fact" /></label>
                 <label>Required field<input id="search-required-field" maxlength="200" placeholder="SalesAmount" /></label>
                 <label class="checkbox"><input id="search-reviewed" type="checkbox" /><span>Reviewed descriptions and roles only</span></label>
@@ -94,15 +92,26 @@
                 <div id="focus-summary" class="focus-summary"></div>
               </details>
             </div>
+            <div id="active-filter-pills" class="active-filter-pills" aria-label="Active filters" hidden></div>
+            <div id="health-filter-bar" class="health-filter-bar" role="group" aria-label="Health quick filters"></div>
             <div class="scope-line">
               <span id="active-scope" class="active-scope">Loading objects…</span>
               <span class="scope-search"><span id="retrieval-workspace-label">Working scope: project</span><button id="search-here" class="quiet-button" hidden>Search here</button><button id="search-project" class="quiet-button" hidden>Search project</button></span>
             </div>
+            <div id="project-search-status" class="project-search-status" role="status" aria-live="polite" hidden></div>
             <div id="family-notices" class="topology-notices" role="status" hidden></div>
             <div id="logical-topology-notices" class="topology-notices" role="status" hidden></div>
             <div id="object-list" class="object-list" aria-label="Graph objects"></div>
+            <div id="context-action-bar" class="context-action-bar" role="region" aria-label="Selected objects context actions" hidden>
+              <span id="context-action-count" class="context-action-count">0 selected</span>
+              <div class="context-action-buttons">
+                <button id="quick-copy-context" type="button" class="primary-button">Copy context</button>
+                <button id="quick-preview-context" type="button" class="quiet-button">Preview</button>
+                <button id="quick-clear-context" type="button" class="quiet-button" aria-label="Clear selection">Clear</button>
+              </div>
+            </div>
             <details id="zones-panel" class="scope-panel zones-panel"><summary><span>Business zones</span><small id="zone-count"></small></summary>
-            <div class="zone-heading" data-write="graph"><button id="new-zone"class="quiet-button" title="Create zone">+ Create zone</button></div>
+            <div class="zone-heading" data-write="graph"><button id="new-zone" class="quiet-button" title="Create zone">+ Create zone</button></div>
             <p class="zone-help">Group related objects without changing their source.</p>
             <div id="zone-list" class="zone-list"></div>
             </details>
@@ -114,6 +123,7 @@
               <div class="toolbar-actions">
                 <button id="open-objects" class="quiet-button mobile-only" aria-controls="object-sidebar" aria-expanded="false">Objects</button>
                 <div id="canvas-mode-group" class="canvas-mode" role="group" aria-label="Canvas mode"><button id="architecture-mode" class="chip" data-canvas-mode="architecture" hidden>Architecture</button><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
+                <div id="canvas-lens-group" class="canvas-mode canvas-lens" role="group" aria-label="Canvas color lens"><button type="button" class="chip is-active" data-canvas-lens="schema" aria-pressed="true" title="Color nodes by schema &amp; object type">Schema</button><button type="button" class="chip" data-canvas-lens="health" aria-pressed="false" title="Highlight empty tables, lineage orphans and unannotated objects">Health</button></div>
                 <div id="level-switch" class="canvas-mode level-switch" role="group" aria-label="Level"><button id="show-systems" class="chip" aria-pressed="false" title="Return to the system overview; preserve other source filters">Systems</button><button id="show-all" class="chip" title="Show every object in the current filters">All objects</button></div>
                 <select id="system-jump" aria-label="Open a system" hidden></select>
                 <button id="fit-graph" class="quiet-button moved-to-inspector" title="Show the selected object and its immediate neighbours" tabindex="-1" aria-hidden="true">Neighbours</button>
@@ -136,6 +146,14 @@
               <button id="arch-save-layout" class="quiet-button" data-write="architecture">Save layout</button><button id="arch-wide" class="quiet-button" aria-pressed="false">More space</button><span id="arch-layout-state"></span>
             </div>
             <div id="graph-canvas" role="application" aria-label="Interactive schema graph"></div>
+            <div id="block-expansion-bar" class="block-expansion-bar" role="region" aria-label="Expanded system blocks" hidden></div>
+            <div id="health-legend" class="health-legend" aria-label="Health lens legend" hidden>
+              <strong>Health lens</strong>
+              <span><i class="hl-swatch is-empty"></i>Empty (0 rows)</span>
+              <span><i class="hl-swatch is-orphan"></i>No lineage</span>
+              <span><i class="hl-swatch is-isolated"></i>Isolated + unannotated</span>
+              <span><i class="hl-swatch is-ok"></i>Reviewed</span>
+            </div>
             <div id="canvas-busy" class="canvas-busy" role="status" aria-live="polite" hidden><span class="canvas-busy-spinner" aria-hidden="true"></span><strong>Drawing objects…</strong><small>Large views take a few seconds; the page responds again when the graph appears.</small></div>
             <div class="canvas-zoom" role="group" aria-label="Graph zoom">
               <button id="zoom-out" class="quiet-button" aria-label="Zoom out">−</button>
@@ -171,6 +189,26 @@
         </section>
       </main>
       <footer><span id="footer-status">Ready</span></footer>
+      <section id="search-settings" class="search-settings settings-drawer" aria-label="Search settings" hidden>
+        <div class="drawer-heading">
+          <div><p class="eyebrow">Retrieval &amp; index</p><h2>Search settings</h2></div>
+          <button id="close-search-settings" type="button" class="icon-button" aria-label="Close search settings">×</button>
+        </div>
+        <div class="index-health"><span id="index-health-dot" aria-hidden="true"></span><span id="index-health-label" role="status" aria-live="polite">Checking local search…</span><button id="update-index" class="quiet-button" hidden>Update</button></div>
+        <small id="retrieval-selection-label"></small>
+        <div id="retrieval-model-panel" class="search-models">
+          <h2>Search models</h2>
+          <label>Search mode<select id="retrieval-mode" aria-describedby="search-mode-note"><option value="lexical">Names</option><option value="bm25">BM25</option><option value="hybrid">Hybrid</option><option value="vector">Vector</option></select></label>
+          <p id="search-mode-note" class="search-mode-note" hidden></p>
+          <label>Embedding<select id="embedding-provider"></select><input id="embedding-model" list="embedding-models" maxlength="256" aria-label="Embedding model" /><datalist id="embedding-models"></datalist></label>
+          <div><button id="embedding-catalog" class="quiet-button">List models</button><button id="embedding-download" class="quiet-button">Download local model</button></div>
+          <label>Reranker<select id="reranker-provider"></select><input id="reranker-model" list="reranker-models" maxlength="256" aria-label="Reranker model" /><datalist id="reranker-models"></datalist></label>
+          <div><button id="reranker-catalog" class="quiet-button">List models</button><button id="reranker-download" class="quiet-button">Download local model</button></div>
+          <label>Rerank candidates<input id="rerank-depth" type="number" min="1" max="100" value="10" /></label>
+          <p>Cloud selections send search questions and selected schema metadata to the provider. Index vectors stay local. Downloads and index updates are separate actions.</p>
+          <button id="apply-retrieval" class="quiet-button">Apply selection</button><p id="retrieval-message" role="status" aria-live="polite"></p>
+        </div>
+      </section>
     </div>
 
     <dialog id="zone-dialog" aria-labelledby="zone-title">
@@ -291,6 +329,9 @@
     <script src="/architecture.js"></script>
     <script src="/architecture_actions.js"></script>
     <script src="/lineage_flows.js"></script>
+    <script src="/health_signals.js"></script>
+    <script src="/compact_retrieval.js"></script>
+    <script src="/system_blocks.js"></script>
     <script src="/app.js"></script>
     <script src="/atlas.js"></script>
   </body>

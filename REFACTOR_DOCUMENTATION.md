@@ -4969,13 +4969,13 @@ The Space canvas: objects, fields, edges, review state and workspace structure.
 - **Input:** parameters `allowed_objects: set[tuple[str, str]]`, `coverage: QueryLinkedEntityCoverage`, `edge: GraphEdge`, `editable: bool`, `entity_resolution_matches: Iterable[EntityResolutionMatch]`, `family_mode: str | None`, `focus_documents: Iterable[FocusDocument]`, `graph: GraphDocument`, `graph_name: str`, `graphs: Iterable[GraphDocument]`, `graphs: tuple[GraphDocument, ...]`, `lineage_documents: Iterable[LineageDocument]` …
 - **Processing:**
     - `browser_graph`: browser graph; returns `dict[str, Any]`.
-    - `browser_workspace`: browser workspace; returns `dict[str, Any]`.
+    - `browser_workspace`: browser workspace; returns `dict[str, Any]`. Calls `attach_object_signals`.
     - `query_linked_coverage_summary`: query linked coverage summary; returns `dict[str, Any]`.
     - `workspace_revision`: workspace revision; returns `str`.
     - `edge_payload`: edge payload; returns `dict[str, Any] | None`. Calls `browser_id`.
     - `summarize_review`: Aggregate review work before visual collapse, never outside the physical scope.
 - **Output:** returns `dict[str, Any]`, `dict[str, Any] | None`, `str`
-- **Uses:** `tarel.discovery.coverage`, `tarel.entity_resolution.candidates`, `tarel.entity_resolution.projection`, `tarel.focus.contracts`, `tarel.graph.contracts`, `tarel.graph.revision`, `tarel.lineage.contracts`, `tarel.object_families.contracts`, `tarel.reference_mapping.contracts`, `tarel.semantics.contracts`, `tarel.semantics.projection`, `tarel.topology.application`, `tarel.topology.contracts`, `tarel.ui.payloads._ids`, `tarel.ui.payloads.families`, `tarel.ui.payloads.focus`, `tarel.ui.payloads.lineage`, `tarel.ui.payloads.lineage_flows`, `tarel.ui.payloads.logical`, `tarel.workspaces.contracts`, `tarel.workspaces.scope`
+- **Uses:** `tarel.discovery.coverage`, `tarel.entity_resolution.candidates`, `tarel.entity_resolution.projection`, `tarel.focus.contracts`, `tarel.graph.contracts`, `tarel.graph.revision`, `tarel.lineage.contracts`, `tarel.object_families.contracts`, `tarel.reference_mapping.contracts`, `tarel.semantics.contracts`, `tarel.semantics.projection`, `tarel.topology.application`, `tarel.topology.contracts`, `tarel.ui.payloads._ids`, `tarel.ui.payloads.families`, `tarel.ui.payloads.focus`, `tarel.ui.payloads.lineage`, `tarel.ui.payloads.lineage_flows`, `tarel.ui.payloads.logical`, `tarel.ui.payloads.signals`, `tarel.workspaces.contracts`, `tarel.workspaces.scope`
 - **Used by:** `tarel.sdk.view`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.optional_metadata`
 
 ### `src/tarel/ui/payloads/lineage.py`
@@ -5028,6 +5028,17 @@ Logical layer: derived relations and reference mappings drawn over physical obje
 - **Output:** returns `list[dict[str, Any]]`, `tuple[list[dict[str, Any]], list[dict[str, Any]]]`
 - **Uses:** `tarel.graph.contracts`, `tarel.graph.revision`, `tarel.reference_mapping.contracts`, `tarel.topology.contracts`, `tarel.ui.payloads._ids`
 - **Used by:** `tarel.ui.optional_metadata`, `tarel.ui.payloads.graph`
+
+### `src/tarel/ui/payloads/signals.py`
+
+At-a-glance object health signals and summary counts for the browser UI.
+
+- **Input:** parameters `lineage_loaded: bool`, `metadata: Mapping[str, Any]`, `observed_rows_by_id: Mapping[str, int | None] | None`, `payload: dict[str, Any]`
+- **Processing:**
+    - `extract_observed_rows`: Read an observed row count from node metadata without inventing values.
+    - `attach_object_signals`: Attach per-object ``signals`` and payload-level ``health_summary`` in place.
+- **Output:** returns `dict[str, Any]`, `int | None`
+- **Used by:** `tarel.ui.payloads.graph`
 
 ### `src/tarel/ui/query_tools.py`
 
