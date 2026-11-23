@@ -511,7 +511,10 @@ function renderSystemBlocksCanvas(scopedObjects, mode) {
     }
   }
 
-  if (state.cy) state.cy.destroy();
+  if (state.cy) {
+    if (isLineage && !state.cy.scratch("_systemBlocksCanvas")) rememberLineageLayout();
+    state.cy.destroy();
+  }
   state.cy = cytoscape({
     container: canvas,
     elements: result.elements,
@@ -531,6 +534,7 @@ function renderSystemBlocksCanvas(scopedObjects, mode) {
       {selector: 'edge[type = "bundle-lineage"][state = "draft"], edge[type = "bundle-lineage"][state = "review_required"]', style: {"line-style": "dashed", "line-color": "#f59e0b", "target-arrow-color": "#f59e0b"}},
     ],
   });
+  state.cy.scratch("_systemBlocksCanvas", true);
 
   state.cy.on("tap", 'node[type = "system-block"]', event => {
     toggleExpandSystem(event.target.data("system"), true);
@@ -560,10 +564,25 @@ function renderSystemBlocksCanvas(scopedObjects, mode) {
   const objectNodes = 'node[type = "table"], node[type = "view"], node[type = "derived_relation"], node[type = "object_family"]';
   state.cy.on("tap", objectNodes, event => inspectObject(event.target.id()));
   state.cy.on("dbltap", objectNodes, event => selectObject(event.target.id()));
+  state.cy.on("tap", 'node[type = "asset"], node[type = "procedure"], node[type = "query"], node[type = "script"]', event => {
+    const reference = event.target.data("reference");
+    if (!reference) return;
+    const analyzer = event.target.data("analyzer");
+    const dialect = event.target.data("dialect");
+    $("#lineage-drawer").hidden = false;
+    $("#lineage-reference").value = reference;
+    $("#lineage-status").className = "notice";
+    $("#lineage-status").textContent = analyzer
+      ? `Analysis: ${analyzer}${dialect ? ` · ${dialect}` : ""} · review state remains separate. Trace this asset to show its upstream path.`
+      : "Trace this lineage asset to show its upstream path.";
+  });
   if (isLineage) bindLineageCanvas();
 
   bindCanvasZoom();
   if (typeof applyHealthCanvasDecorations === "function") applyHealthCanvasDecorations(state.cy);
+  if (typeof applySearchSpotlight === "function" && typeof projectSearchActive === "function" && projectSearchActive() && queryTools.searchResult?.results?.hits) {
+    applySearchSpotlight(queryTools.searchResult.results.hits);
+  }
   renderBlockExpansionBar(result);
 
   $("#canvas-title").textContent = isLineage ? "Lineage · system flow map" : "Structure · system blocks";

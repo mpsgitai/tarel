@@ -95,7 +95,7 @@ function bindLineageCanvas() {
 // ---------- stable layout ----------
 
 function rememberLineageLayout() {
-  if (!state.cy || state.cy.destroyed() || !state.lineageLaidOut) return;
+  if (!state.cy || state.cy.destroyed() || !state.lineageLaidOut || state.cy.scratch("_systemBlocksCanvas")) return;
   const positions = new Map();
   state.cy.nodes().forEach(node => { if (!node.isParent()) positions.set(node.id(), {...node.position()}); });
   state.lineageLayout = {positions, zoom: state.cy.zoom(), pan: {...state.cy.pan()}, processNodes: Boolean(state.lineageProcessNodes)};

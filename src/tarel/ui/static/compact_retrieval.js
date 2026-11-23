@@ -63,7 +63,21 @@ function applySearchSpotlight(hits = null) {
   const hitIds = new Set();
   for (const hit of hits) {
     const obj = typeof searchHitObject === "function" ? searchHitObject(hit) : null;
-    if (obj) hitIds.add(obj.id);
+    if (!obj) continue;
+    if (cy && !cy.destroyed()) {
+      if (cy.$id(obj.id).length) {
+        hitIds.add(obj.id);
+      } else {
+        const sys = obj.system || "Standalone";
+        const graphBlockId = `block-graph::${sys}::${obj.graph}`;
+        const sysBlockId = `block-system::${sys}`;
+        if (cy.$id(graphBlockId).length) hitIds.add(graphBlockId);
+        else if (cy.$id(sysBlockId).length) hitIds.add(sysBlockId);
+        else hitIds.add(obj.id);
+      }
+    } else {
+      hitIds.add(obj.id);
+    }
   }
   if (cy && !cy.destroyed()) {
     cy.batch(() => {
@@ -131,18 +145,27 @@ async function quickCopyContext() {
   const button = $("#quick-copy-context");
   if (button) { button.disabled = true; button.textContent = "Compiling…"; }
   try {
+    const MAX_CONTEXT_OBJECTS = 50;
+    const allSelected = [...queryTools.selectedObjects];
+    const truncatedSelection = allSelected.length > MAX_CONTEXT_OBJECTS;
+    const selectedBatch = truncatedSelection ? allSelected.slice(0, MAX_CONTEXT_OBJECTS) : allSelected;
+    const requestedBudget = Number($("#context-max-objects")?.value || 10);
+    const maxObjects = Math.min(
+      MAX_CONTEXT_OBJECTS,
+      Math.max(selectedBatch.length, Number.isFinite(requestedBudget) ? requestedBudget : 10),
+    );
     const scope = queryTools.scope || await api("/api/query/scope", {scope_objects: queryTools.scopeObjects}, 60000);
     queryTools.scope = scope;
     const payload = {
       query: $("#object-search")?.value.trim() || "Selected objects",
       kind: "selected",
-      object_ids: [...queryTools.selectedObjects],
+      object_ids: selectedBatch,
       expected_revisions: scope.revisions,
       expected_scope_identity: scope.scope_identity,
       reviewed_annotations_only: Boolean($("#context-reviewed")?.checked),
       logical_hints: $("#context-logical-hints")?.value || null,
-      max_objects: Math.max(count, Number($("#context-max-objects")?.value || 10)),
-      seed_limit: Math.min(3, Math.max(count, 1)),
+      max_objects: maxObjects,
+      seed_limit: Math.min(3, Math.max(selectedBatch.length, 1)),
       max_characters: Number($("#context-max-characters")?.value || 24000),
     };
     if (queryTools.scopeObjects.length) payload.scope_objects = queryTools.scopeObjects;
@@ -150,16 +173,17 @@ async function quickCopyContext() {
     queryTools.packet = result.packet;
     queryTools.lastPacket = result.packet;
     const json = JSON.stringify(result.packet, null, 2);
-    const objCount = result.packet?.stable?.objects?.length || count;
+    const objCount = result.packet?.stable?.objects?.length || selectedBatch.length;
+    const omitNote = truncatedSelection ? ` (capped at ${MAX_CONTEXT_OBJECTS} of ${count} selected)` : "";
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(json);
-        toast(`Context copied: ${objCount} object${objCount === 1 ? "" : "s"} · ${json.length.toLocaleString()} chars.`);
+        toast(`Context copied: ${objCount} object${objCount === 1 ? "" : "s"} · ${json.length.toLocaleString()} chars${omitNote}.`);
       } else {
         throw new Error("Clipboard API unavailable");
       }
     } catch (_) {
-      toast(`Context ready (${objCount} objects · ${json.length.toLocaleString()} chars). Opening preview…`);
+      toast(`Context ready (${objCount} objects · ${json.length.toLocaleString()} chars${omitNote}). Opening preview…`);
       await quickPreviewContext(result);
     }
   } catch (error) {
