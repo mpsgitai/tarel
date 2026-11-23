@@ -180,7 +180,7 @@
 
   // ---------- canvas state ----------
   // `surface` is what is shown; `preferred` survives Architecture, which has no table.
-  let current = null, ui = null, view = {tier: 2, zoom: 1}, layered = false, surface = "graph", preferred = "graph";
+  let current = null, ui = null, view = {tier: 2, zoom: 1, cards: false}, layered = false, surface = "graph", preferred = "graph";
   const listeners = new WeakMap();
   const tierFor = zoom => zoom < TIER.far ? 0 : zoom < TIER.near ? 1 : 2;
   const quantized = zoom => 2 ** (Math.round(Math.log2(Math.max(zoom, 1e-4)) * 2) / 2);
@@ -513,7 +513,7 @@
   const groupWidth = ele => ele.data("atGW") || 400;
   const groupFont = (px, ele) => Math.min(px / view.zoom, Math.max(11, groupWidth(ele) / 8));
 
-  function stylesheet(t, tier, kind) {
+  function stylesheet(t, tier, kind, cardsOn = false) {
     const far = tier === 0, near = tier === 2;
     const flow = Boolean(current?.scratch("_atlasLayered"));
     const stops = (color) => ({"background-fill": "linear-gradient", "background-gradient-direction": "to-right",
@@ -570,21 +570,21 @@
 
       // Summary and architecture cards: drawn by the HTML layer when legible, otherwise Cytoscape keeps labels visible.
       {selector: 'node[type = "system-summary"]', style: {"corner-radius": 10, "background-color": t.surface,
-        "border-color": t.lineStrong, "label": view.zoom >= .3 ? "" : "data(label)", "font-size": 16, "font-weight": 600, "text-wrap": "wrap", "text-max-width": 210,
+        "border-color": t.lineStrong, "label": cardsOn ? "" : "data(label)", "font-size": 16, "font-weight": 600, "text-wrap": "wrap", "text-max-width": 210,
         "text-valign": "center", "color": t.ink}},
       {selector: 'node[type = "architecture-card"]', style: {"corner-radius": 10, "background-color": t.surface,
-        "border-color": "data(color)", "border-width": 1.5, "label": view.zoom >= .42 ? "" : "data(label)", "font-size": 16, "font-weight": 600, "text-wrap": "wrap", "text-max-width": 206,
+        "border-color": "data(color)", "border-width": 1.5, "label": cardsOn ? "" : "data(label)", "font-size": 16, "font-weight": 600, "text-wrap": "wrap", "text-max-width": 206,
         "text-valign": "center", "color": t.ink}},
       {selector: 'node[type = "system-block"]', style: {"corner-radius": 10, "background-color": t.surface,
-        "border-color": t.accent, "border-width": 2, "label": view.zoom >= .32 ? "" : "data(label)", "font-family": t.sans, "font-size": 15, "font-weight": 600,
+        "border-color": t.accent, "border-width": 2, "label": cardsOn ? "" : "data(label)", "font-family": t.sans, "font-size": 15, "font-weight": 600,
         "text-wrap": "wrap", "text-max-width": 218, "text-valign": "center", "color": t.ink, "line-height": 1.35}},
       {selector: 'node[type = "system-block"][giant = 1]', style: {"border-color": t.warn, "border-width": 2.2}},
       {selector: 'node[type = "graph-block"]', style: {"corner-radius": 8, "background-color": t.surface2,
-        "border-color": t.accent, "border-width": 1.6, "border-style": "dashed", "label": view.zoom >= .32 ? "" : "data(label)", "font-family": t.mono, "font-size": 13, "font-weight": 600,
+        "border-color": t.accent, "border-width": 1.6, "border-style": "dashed", "label": cardsOn ? "" : "data(label)", "font-family": t.mono, "font-size": 13, "font-weight": 600,
         "text-wrap": "wrap", "text-max-width": 200, "text-valign": "center", "color": t.ink, "line-height": 1.35}},
       {selector: 'node[type = "graph-block"][tooLarge = 1]', style: {"border-color": t.warn}},
       {selector: 'node[type = "asset-group"]', style: {"corner-radius": 8, "background-color": t.surface2,
-        "border-color": t.neutral, "border-width": 1.5, "border-style": "dashed", "label": view.zoom >= .32 ? "" : "data(label)", "font-family": t.sans, "font-size": 13, "font-weight": 600,
+        "border-color": t.neutral, "border-width": 1.5, "border-style": "dashed", "label": cardsOn ? "" : "data(label)", "font-family": t.sans, "font-size": 13, "font-weight": 600,
         "text-wrap": "wrap", "text-max-width": 190, "text-valign": "center", "color": t.ink2, "line-height": 1.3}},
       {selector: "node[proxy]", style: {"border-style": "dashed"}},
       {selector: 'node[type = "architecture-layer"]', style: {"padding": 30, "font-size": 13, "text-margin-y": -10, "text-transform": "none",
@@ -887,16 +887,17 @@
     if (ui) ui.idle = setTimeout(() => { if (current === cy && !cy.destroyed()) { applyZoomDetail(cy); refreshCards(); } }, 120);
     scheduleMinimap();
     const level = cardsWanted(cy);
-    if (ui && level !== !ui.layer.hidden) scheduleCards();
+    if (ui && level !== !ui.layer.hidden) { applyZoomDetail(cy); scheduleCards(); }
   }
 
   function applyZoomDetail(cy, force = false) {
-    const zoom = cy.zoom(), tier = tierFor(zoom);
+    const zoom = cy.zoom(), tier = tierFor(zoom), cardsOn = cardsWanted(cy);
     const zoomChanged = Math.abs(Math.log2(quantized(zoom) / view.zoom)) > .01;
-    if (!force && tier === view.tier && !zoomChanged) return;
+    const cardsChanged = cardsOn !== view.cards;
+    if (!force && tier === view.tier && !zoomChanged && !cardsChanged) return;
     const tierChanged = tier !== view.tier;
-    view = {tier, zoom: quantized(zoom)};
-    if (force || tierChanged) cy.style(stylesheet(tokens(), tier, kindOf(cy)));
+    view = {tier, zoom: quantized(zoom), cards: cardsOn};
+    if (force || tierChanged || cardsChanged) cy.style(stylesheet(tokens(), tier, kindOf(cy), cardsOn));
     else cy.nodes(":parent").updateStyle();
   }
 
@@ -1085,7 +1086,10 @@
     if (!s?.data) return [];
     const {degree} = indexData();
     const objects = (typeof visibleObjects === "function" ? visibleObjects() : s.data.objects)
-      .filter(item => s.objectKind === "all" || item.type === s.objectKind);
+      .filter(item =>
+        (s.objectKind === "all" || item.type === s.objectKind) &&
+        (typeof matchesHealthFilter !== "function" || matchesHealthFilter(item))
+      );
     return objects.map(item => {
       const d = degree.get(item.id) || {out: 0, in: 0}, st = objectState(item);
       return {id: item.id, item, type: item.type, typeLabel: TYPE_LABELS[item.type] || item.type, name: item.name || item.label,
@@ -1226,7 +1230,7 @@
     const s = appState();
     if (!s?.data) return;
     s.selectedId = id;
-    renderObjectList();
+    renderObjectList(false);
     renderInspector();
     setPanel("inspector", true);
     if (s.cy && !s.cy.destroyed()) { s.cy.nodes().unselect(); s.cy.$id(id).select(); }
@@ -1535,8 +1539,9 @@
   function restyle(cy) {
     const t = tokens();
     enrich(cy, t);
-    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom())};
-    cy.style(stylesheet(t, view.tier, kindOf(cy)));
+    const cardsOn = cardsWanted(cy);
+    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom()), cards: cardsOn};
+    cy.style(stylesheet(t, view.tier, kindOf(cy), cardsOn));
     clearCards();
     refreshCards();
     scheduleMinimap();
@@ -1558,8 +1563,9 @@
     const kind = kindOf(cy);
     const t = tokens();
     enrich(cy, t);
-    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom())};
-    cy.style(stylesheet(t, view.tier, kind));
+    const cardsOn = cardsWanted(cy);
+    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom()), cards: cardsOn};
+    cy.style(stylesheet(t, view.tier, kind, cardsOn));
     arrange(cy, kind);
     measureGroups(cy);
     applyZoomDetail(cy, true);

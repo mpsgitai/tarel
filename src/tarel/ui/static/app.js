@@ -475,6 +475,8 @@ function renderGraph() {
   updateCanvasNavigation();
   if (typeof systemBlocksActive === "function" && systemBlocksActive() && typeof renderSystemBlocksCanvas === "function") {
     renderSystemBlocksCanvas(scopedObjects, state.canvasMode);
+    state.lineagePathActive = false;
+    updateLineagePathControls();
     return;
   }
   if (typeof renderBlockExpansionBar === "function") renderBlockExpansionBar();
@@ -638,7 +640,7 @@ function resolveReference(reference) {
 
 function selectObject(id) {
   state.selectedId = id;
-  renderObjectList();
+  renderObjectList(false);
   renderInspector();
   setPanel("objects", false);
   setPanel("inspector", true);
@@ -648,7 +650,7 @@ function selectObject(id) {
 // Select without re-laying out the canvas: the graph keeps its position and zoom.
 function inspectObject(id) {
   state.selectedId = id;
-  renderObjectList();
+  renderObjectList(false);
   renderInspector();
   setPanel("objects", false);
   setPanel("inspector", true);

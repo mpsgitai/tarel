@@ -112,7 +112,7 @@ function toggleObjectContextSelection(ref) {
   if (typeof projectSearchActive === "function" && projectSearchActive()) {
     if (typeof renderProjectSearch === "function") renderProjectSearch();
   } else if (typeof renderObjectList === "function") {
-    renderObjectList();
+    renderObjectList(false);
   }
 }
 
@@ -197,7 +197,7 @@ function clearContextSelection() {
   if (typeof projectSearchActive === "function" && projectSearchActive()) {
     if (typeof renderProjectSearch === "function") renderProjectSearch();
   } else if (typeof renderObjectList === "function") {
-    renderObjectList();
+    renderObjectList(false);
   }
 }
 
@@ -212,7 +212,14 @@ function renderActiveFilterPills() {
       if ($("#search-object-type")) $("#search-object-type").value = "";
       renderHealthFilterBar();
       renderActiveFilterPills();
-      renderObjectList();
+      if (typeof projectSearchActive === "function" && projectSearchActive() && typeof scheduleProjectSearch === "function") {
+        scheduleProjectSearch();
+      } else {
+        renderObjectList();
+      }
+      if (window.TarelAtlas?.active() && document.body.classList.contains("at-table-mode")) {
+        window.TarelAtlas.renderTable();
+      }
     }});
   }
   if (typeof healthState !== "undefined" && healthState.filter !== "all") {
