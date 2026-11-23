@@ -876,7 +876,8 @@
 @keyframes lineage-pulse { from { opacity: .45; } to { opacity: 1; } }
 
 /* --- Atlas theme overrides for compact topbar, unified search, health lens & context bar --- */
-.theme-atlas .topbar { gap: 12px; padding: 0 12px 0 14px; }
+.theme-atlas .shell { grid-template-rows: auto minmax(0, 1fr) 26px; }
+.theme-atlas .topbar { min-height: 52px; gap: 12px; padding: 0 12px 0 14px; }
 .theme-atlas .topbar-search { flex: 1 1 360px; max-width: 640px; }
 .theme-atlas .unified-search { height: 32px; border: 1px solid var(--at-line-strong); border-radius: 8px; background: var(--at-surface-2); }
 .theme-atlas .unified-search:focus-within { background: var(--at-surface); border-color: var(--at-accent); box-shadow: 0 0 0 3px var(--at-accent-soft); }

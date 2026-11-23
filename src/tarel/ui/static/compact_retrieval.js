@@ -27,8 +27,7 @@ async function switchInlineSearchMode(nextMode) {
     if (typeof renderRetrievalModels === "function") renderRetrievalModels(payload);
     syncInlineSearchMode();
     if (typeof projectSearchActive === "function" && projectSearchActive()) {
-      clearTimeout(queryTools.searchTimer);
-      if (!searchIndexBlocker()) runProjectSearch();
+      scheduleProjectSearch();
     }
   } catch (error) {
     toast(error.message);
@@ -180,6 +179,8 @@ async function quickPreviewContext(precompiled = null) {
   $("#context-dialog").showModal();
   await loadContextScope();
   if (precompiled && typeof renderContextPreview === "function") {
+    queryTools.packet = precompiled.packet;
+    queryTools.lastPacket = precompiled.packet;
     renderContextPreview(precompiled.packet, precompiled.brief, precompiled.delta || null);
     $("#context-request-status").textContent = "Packet ready. This is metadata context, not an analytical answer.";
     return;

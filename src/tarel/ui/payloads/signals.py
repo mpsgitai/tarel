@@ -9,7 +9,7 @@ Truth principle:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 _PHYSICAL_TYPES = frozenset({"table", "view"})
@@ -38,6 +38,7 @@ def attach_object_signals(
     *,
     observed_rows_by_id: Mapping[str, int | None] | None = None,
     lineage_loaded: bool = False,
+    lineage_edges: Iterable[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Attach per-object ``signals`` and payload-level ``health_summary`` in place."""
     objects = payload.get("objects")
@@ -62,17 +63,26 @@ def attach_object_signals(
 
     upstream_counts: dict[str, int] = {}
     downstream_counts: dict[str, int] = {}
-    flow_edges = lineage_flows.get("edges") if isinstance(lineage_flows, Mapping) else None
-    if isinstance(flow_edges, list):
-        for edge in flow_edges:
-            if not isinstance(edge, Mapping):
-                continue
-            source = edge.get("source")
-            target = edge.get("target")
-            if isinstance(source, str):
-                downstream_counts[source] = downstream_counts.get(source, 0) + 1
-            if isinstance(target, str):
-                upstream_counts[target] = upstream_counts.get(target, 0) + 1
+    lineage_truncated = False
+    if lineage_edges is not None:
+        for source, target in lineage_edges:
+            downstream_counts[source] = downstream_counts.get(source, 0) + 1
+            upstream_counts[target] = upstream_counts.get(target, 0) + 1
+    else:
+        lineage_truncated = bool(
+            isinstance(lineage_flows, Mapping) and lineage_flows.get("truncated")
+        )
+        flow_edges = lineage_flows.get("edges") if isinstance(lineage_flows, Mapping) else None
+        if isinstance(flow_edges, list):
+            for edge in flow_edges:
+                if not isinstance(edge, Mapping):
+                    continue
+                source = edge.get("source")
+                target = edge.get("target")
+                if isinstance(source, str):
+                    downstream_counts[source] = downstream_counts.get(source, 0) + 1
+                if isinstance(target, str):
+                    upstream_counts[target] = upstream_counts.get(target, 0) + 1
 
     rows_lookup = observed_rows_by_id or {}
     total = 0
@@ -88,11 +98,10 @@ def attach_object_signals(
             continue
         total += 1
         obj_id = str(item.get("id") or "")
+        existing_signals = item.get("signals")
         observed_rows = rows_lookup.get(obj_id)
-        if observed_rows is None:
-            existing_signals = item.get("signals")
-            if isinstance(existing_signals, Mapping):
-                observed_rows = _non_negative_int(existing_signals.get("observed_rows"))
+        if observed_rows is None and isinstance(existing_signals, Mapping):
+            observed_rows = _non_negative_int(existing_signals.get("observed_rows"))
 
         if observed_rows is None:
             population = "unknown"
@@ -104,15 +113,30 @@ def attach_object_signals(
             population = "populated"
             populated += 1
 
-        up_count = upstream_counts.get(obj_id, 0) if lineage_loaded else 0
-        down_count = downstream_counts.get(obj_id, 0) if lineage_loaded else 0
-        if not lineage_loaded:
-            lineage_state = "no_lineage_loaded"
-        elif up_count + down_count > 0:
-            lineage_state = "connected"
+        if (
+            lineage_edges is None
+            and lineage_truncated
+            and lineage_loaded
+            and isinstance(existing_signals, Mapping)
+            and existing_signals.get("lineage") in {"connected", "orphan"}
+        ):
+            lineage_state = str(existing_signals["lineage"])
+            up_count = _non_negative_int(existing_signals.get("lineage_upstream_count")) or 0
+            down_count = _non_negative_int(existing_signals.get("lineage_downstream_count")) or 0
+            if lineage_state == "orphan":
+                lineage_orphan += 1
         else:
-            lineage_state = "orphan"
-            lineage_orphan += 1
+            up_count = upstream_counts.get(obj_id, 0) if lineage_loaded else 0
+            down_count = downstream_counts.get(obj_id, 0) if lineage_loaded else 0
+            if not lineage_loaded:
+                lineage_state = "no_lineage_loaded"
+            elif up_count + down_count > 0:
+                lineage_state = "connected"
+            elif lineage_truncated:
+                lineage_state = "unknown"
+            else:
+                lineage_state = "orphan"
+                lineage_orphan += 1
 
         rel_count = relation_counts.get(obj_id, 0)
         relations_state = "connected" if rel_count > 0 else "isolated"

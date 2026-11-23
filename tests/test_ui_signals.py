@@ -152,3 +152,23 @@ class ObjectSignalsTests(TestCase):
         summary = payload["health_summary"]
         self.assertTrue(summary["lineage_loaded"])
         self.assertEqual(summary["lineage_orphan"], 1)
+
+    def test_truncated_lineage_flows_never_falsely_mark_objects_orphan(self) -> None:
+        from tarel.ui.payloads.signals import attach_object_signals
+
+        payload = browser_graph(_sample_graph())
+        payload["lineage_flows"] = {"edges": [], "truncated": True}
+        attach_object_signals(payload, lineage_loaded=True)
+        by_name = {obj["name"]: obj["signals"] for obj in payload["objects"]}
+        self.assertEqual(by_name["fact_sales"]["lineage"], "unknown")
+        self.assertEqual(payload["health_summary"]["lineage_orphan"], 0)
+
+        attach_object_signals(
+            payload,
+            lineage_loaded=True,
+            lineage_edges=((payload["objects"][2]["id"], payload["objects"][1]["id"]),),
+        )
+        by_name = {obj["name"]: obj["signals"] for obj in payload["objects"]}
+        self.assertEqual(by_name["fact_sales"]["lineage"], "connected")
+        self.assertEqual(by_name["dim_empty"]["lineage"], "orphan")
+        self.assertEqual(payload["health_summary"]["lineage_orphan"], 1)

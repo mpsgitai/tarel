@@ -557,7 +557,7 @@ function renderSystemBlocksCanvas(scopedObjects, mode) {
     event.target.select();
     inspectBundleEdge(event.target.id());
   });
-  const objectNodes = 'node[type = "table"], node[type = "view"]';
+  const objectNodes = 'node[type = "table"], node[type = "view"], node[type = "derived_relation"], node[type = "object_family"]';
   state.cy.on("tap", objectNodes, event => inspectObject(event.target.id()));
   state.cy.on("dbltap", objectNodes, event => selectObject(event.target.id()));
   if (isLineage) bindLineageCanvas();

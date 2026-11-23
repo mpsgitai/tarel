@@ -197,7 +197,6 @@ function scheduleProjectSearch() {
   queryTools.searchLoading = projectSearchActive() && !queryTools.requireSubmit;
   const active = projectSearchActive();
   $("#project-search-status").hidden = !active;
-  $('[data-kind="all"]').parentElement.hidden = active;
   if (!active) {
     queryTools.activeHit = null;
     if (typeof applySearchSpotlight === "function") applySearchSpotlight(null);

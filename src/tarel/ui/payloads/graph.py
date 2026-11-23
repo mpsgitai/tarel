@@ -34,7 +34,7 @@ from tarel.ui.payloads.families import (
 )
 from tarel.ui.payloads.focus import browser_focus_selection, focus_physical_objects
 from tarel.ui.payloads.lineage import browser_lineages
-from tarel.ui.payloads.lineage_flows import browser_lineage_flows
+from tarel.ui.payloads.lineage_flows import LineageFlowModel
 from tarel.ui.payloads.logical import logical_topology_payloads, reference_mapping_edge_payloads
 from tarel.ui.payloads.signals import attach_object_signals, extract_observed_rows
 from tarel.workspaces.contracts import WorkspaceDocument
@@ -281,6 +281,10 @@ def _browser_payload(
 
     documents = tuple(lineage_documents)
     selected_lineages = tuple(item.name for item in documents) or lineage_names
+    lineage_model = LineageFlowModel(documents, object_payloads)
+    full_lineage_edges = tuple(
+        (edge.source, edge.target) for edge in lineage_model.edges.values()
+    )
     revisions = {graph.name: graph_revision(graph) for graph in graphs}
     revision = (
         next(iter(revisions.values()))
@@ -328,7 +332,7 @@ def _browser_payload(
         "graph": first.name,
         "graphs": graph_payloads,
         "lineage_documents": browser_lineages(documents),
-        "lineage_flows": browser_lineage_flows(documents, object_payloads),
+        "lineage_flows": lineage_model.payload(),
         "lineages": list(selected_lineages),
         "logical_topology_notices": [
             {
@@ -408,6 +412,7 @@ def _browser_payload(
         payload,
         observed_rows_by_id=observed_rows_by_id,
         lineage_loaded=bool(documents),
+        lineage_edges=full_lineage_edges,
     )
     return payload
 

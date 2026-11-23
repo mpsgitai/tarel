@@ -528,7 +528,9 @@ footer #footer-status { margin-left: auto; }
 .search-evidence.both { border: 1px solid var(--line-strong); color: var(--muted); }
 
 /* --- Compact 3-zone topbar, unified retrieval, health signals & floating context bar --- */
-.topbar { display: flex; align-items: center; gap: 12px; padding: 0 12px; }
+.shell { grid-template-rows: auto minmax(0, 1fr) 28px; }
+.shell-header { display: flex; flex-direction: column; min-width: 0; }
+.topbar { min-height: 54px; display: flex; align-items: center; gap: 12px; padding: 0 12px; }
 .topbar-search { flex: 1 1 360px; max-width: 660px; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .unified-search { flex: 1 1 200px; margin: 0 !important; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
 .search-kbd { flex: none; padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--subtle); font: 500 10px "JetBrains Mono", monospace; }

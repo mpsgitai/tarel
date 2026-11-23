@@ -5033,7 +5033,7 @@ Logical layer: derived relations and reference mappings drawn over physical obje
 
 At-a-glance object health signals and summary counts for the browser UI.
 
-- **Input:** parameters `lineage_loaded: bool`, `metadata: Mapping[str, Any]`, `observed_rows_by_id: Mapping[str, int | None] | None`, `payload: dict[str, Any]`
+- **Input:** parameters `lineage_edges: Iterable[tuple[str, str]] | None`, `lineage_loaded: bool`, `metadata: Mapping[str, Any]`, `observed_rows_by_id: Mapping[str, int | None] | None`, `payload: dict[str, Any]`
 - **Processing:**
     - `extract_observed_rows`: Read an observed row count from node metadata without inventing values.
     - `attach_object_signals`: Attach per-object ``signals`` and payload-level ``health_summary`` in place.
