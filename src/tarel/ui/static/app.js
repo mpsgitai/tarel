@@ -28,6 +28,9 @@ const state = {
   reviewRequest: 0,
   reviewLoading: false,
   reviewError: null,
+  objectListLimit: 150,
+  objectListBound: false,
+  zonesDirty: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -137,9 +140,12 @@ function renderAll() {
   $("#toggle-derived-relations").title = state.familyMode ? "Family view owns its logical projection. Switch to physical objects to change this layer." : "Read logical-topology metadata on demand; no execution.";
   renderLogicalTopologyNotices();
   renderFamilyNotices();
+  if (typeof renderHealthFilterBar === "function") renderHealthFilterBar();
   renderObjectList();
   renderFocuses();
   renderScopeFilters();
+  if (typeof renderActiveFilterPills === "function") renderActiveFilterPills();
+  if (typeof syncSearchScopePill === "function") syncSearchScopePill();
   renderGraph();
   renderInspector();
   renderZones();
@@ -164,32 +170,72 @@ function renderFamilyNotices() {
   container.innerHTML = `<p><strong>${summary.collapsed_member_count} physical members grouped</strong><span>${state.familyMode === "include_candidates" ? "Includes exploratory families · inspect before use." : "Family membership is not proof of a family-wide join."}</span></p>${summary.stale_graphs.map(graph => `<p><strong>Stale family omitted</strong><span>${escapeHtml(graph)} · Physical objects remain visible.</span></p>`).join("")}`;
 }
 
-function renderObjectList() {
+function bindObjectListEvents() {
+  if (state.objectListBound) return;
+  const list = $("#object-list");
+  if (!list) return;
+  state.objectListBound = true;
+  list.addEventListener("click", event => {
+    const more = event.target.closest("#load-more-objects");
+    if (more) {
+      state.objectListLimit += 200;
+      renderObjectList(false);
+      return;
+    }
+    if (event.target.closest("[data-object-check]")) return;
+    const row = event.target.closest(".object-row");
+    if (row) selectObject(row.dataset.object);
+  });
+  list.addEventListener("keydown", event => {
+    if ((event.key !== "Enter" && event.key !== " ") || event.target.closest("[data-object-check]")) return;
+    const row = event.target.closest(".object-row");
+    if (row) { event.preventDefault(); selectObject(row.dataset.object); }
+  });
+  list.addEventListener("change", event => {
+    const input = event.target.closest("[data-object-check]");
+    if (input && typeof toggleObjectContextSelection === "function") {
+      toggleObjectContextSelection(input.dataset.objectCheck);
+    }
+  });
+  list.addEventListener("dragstart", event => {
+    const row = event.target.closest(".object-row[draggable='true']");
+    if (row) event.dataTransfer.setData("text/tarel-object", row.dataset.object);
+  });
+}
+
+function renderObjectList(resetLimit = true) {
   if (typeof projectSearchActive === "function" && projectSearchActive()) {
     renderProjectSearch();
     return;
   }
+  bindObjectListEvents();
+  if (resetLimit) state.objectListLimit = 150;
   const needle = $("#object-search").value.trim().toLowerCase();
   const objects = visibleObjects().filter(item =>
     (state.objectKind === "all" || item.type === state.objectKind) &&
+    (typeof matchesHealthFilter !== "function" || matchesHealthFilter(item)) &&
     (!needle || item.label.toLowerCase().includes(needle) || annotationText(item).includes(needle))
   );
-  $("#object-list").innerHTML = objects.map(item => {
+  const shown = objects.slice(0, state.objectListLimit);
+  const remaining = objects.length - shown.length;
+  $("#object-list").innerHTML = shown.map(item => {
     const memberships = focusMembership(item.id);
     const logical = ["derived_relation", "object_family"].includes(item.type);
     const family = item.type === "object_family";
     const objectState = item.state || item.annotation?.state || "missing";
+    const ref = !logical && typeof objectContextRef === "function" ? objectContextRef(item) : "";
+    const checked = ref && typeof queryTools !== "undefined" && queryTools.selectedObjects.has(ref);
+    const micro = typeof healthMicroBadges === "function" ? healthMicroBadges(item) : "";
     return `
-    <button class="object-row${item.id === state.selectedId ? " is-active" : ""}" data-object="${escapeAttr(item.id)}" draggable="${logical ? "false" : "true"}">
+    <div class="object-row${item.id === state.selectedId ? " is-active" : ""}" data-object="${escapeAttr(item.id)}" role="button" tabindex="0" draggable="${logical ? "false" : "true"}">
+      ${logical ? '<span class="hit-check-spacer"></span>' : `<input type="checkbox" class="row-check" data-object-check="${escapeAttr(ref)}" aria-label="Select ${escapeAttr(item.name)} for context" ${checked ? "checked" : ""} />`}
       <span class="kind-icon">${family ? "F" : logical ? "D" : item.type === "view" ? "V" : "T"}</span>
       <span class="object-copy"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.graph)} · ${escapeHtml(item.namespace)} · ${item.fields.length} fields${family ? ` · ${item.object_family.member_count} members` : ""}${memberships.length ? ` · ${memberships.length} focus${memberships.length === 1 ? "" : "es"}` : ""}</small></span>
-      <i class="state-dot ${escapeAttr(objectState)}" title="${escapeAttr(objectState)}"></i>
-    </button>`;
-  }).join("") || '<div class="empty-state"><p>No matching objects.</p></div>';
-  $$(".object-row").forEach(row => {
-    row.addEventListener("click", () => selectObject(row.dataset.object));
-    if (row.draggable) row.addEventListener("dragstart", event => event.dataTransfer.setData("text/tarel-object", row.dataset.object));
-  });
+      <span class="row-tail">${micro}<i class="state-dot ${escapeAttr(objectState)}" title="${escapeAttr(objectState)}"></i></span>
+    </div>`;
+  }).join("") + (remaining > 0
+    ? `<div class="list-more-row"><button id="load-more-objects" type="button" class="quiet-button">Show ${Math.min(200, remaining).toLocaleString()} more · ${remaining.toLocaleString()} remaining</button></div>`
+    : "") || '<div class="empty-state"><p>No matching objects.</p></div>';
 }
 
 function renderFocuses() {
@@ -305,10 +351,20 @@ function initializeScopeFilters() {
 
 function renderScopeFilters() {
   const labels = {systems: "Systems", areas: "Areas", graphs: "Graphs", schemas: "Schemas", zones: "Zones"};
-  $("#scope-filters").innerHTML = Object.entries(state.scopeFacets)
+  const totalCheckboxes = Object.values(state.scopeFacets).reduce((sum, values) => sum + values.length, 0);
+  const searchHtml = totalCheckboxes > 15
+    ? `<label class="focus-search scope-filter-search"><span>⌕</span><input id="scope-filter-search" type="search" placeholder="Filter systems, graphs, schemas…" autocomplete="off" /></label>`
+    : "";
+  $("#scope-filters").innerHTML = searchHtml + Object.entries(state.scopeFacets)
     .filter(([, values]) => values.length)
-    .map(([facet, values]) => `<section class="scope-group"><header><strong>${labels[facet]}</strong><button data-scope-all="${facet}">All</button></header>${values.map(value => `<label><input type="checkbox" data-scope-facet="${facet}" value="${escapeAttr(value)}" ${state.scopeFilters[facet].has(value) ? "checked" : ""}/><span>${escapeHtml(value)}</span></label>`).join("")}</section>`)
+    .map(([facet, values]) => `<section class="scope-group"><header><strong>${labels[facet]}</strong><button data-scope-all="${facet}">All</button></header>${values.map(value => `<label data-scope-label="${escapeAttr(value.toLowerCase())}"><input type="checkbox" data-scope-facet="${facet}" value="${escapeAttr(value)}" ${state.scopeFilters[facet].has(value) ? "checked" : ""}/><span>${escapeHtml(value)}</span></label>`).join("")}</section>`)
     .join("");
+  $("#scope-filter-search")?.addEventListener("input", event => {
+    const q = event.target.value.trim().toLowerCase();
+    $$("#scope-filters label[data-scope-label]").forEach(label => {
+      label.hidden = Boolean(q) && !label.dataset.scopeLabel.includes(q);
+    });
+  });
   $$('[data-scope-facet]').forEach(input => input.addEventListener("change", () => {
     const selected = state.scopeFilters[input.dataset.scopeFacet];
     input.checked ? selected.add(input.value) : selected.delete(input.value);
@@ -359,6 +415,9 @@ function applyVisualScope() {
     setPanel("inspector", false);
   }
   renderScopeFilters();
+  if (typeof renderHealthFilterBar === "function") renderHealthFilterBar();
+  if (typeof renderActiveFilterPills === "function") renderActiveFilterPills();
+  if (typeof syncSearchScopePill === "function") syncSearchScopePill();
   renderObjectList();
   renderGraph();
   renderInspector();
@@ -414,6 +473,13 @@ function renderGraph() {
   const data = state.data;
   const scopedObjects = visibleObjects();
   updateCanvasNavigation();
+  if (typeof systemBlocksActive === "function" && systemBlocksActive() && typeof renderSystemBlocksCanvas === "function") {
+    renderSystemBlocksCanvas(scopedObjects, state.canvasMode);
+    state.lineagePathActive = false;
+    updateLineagePathControls();
+    return;
+  }
+  if (typeof renderBlockExpansionBar === "function") renderBlockExpansionBar();
   if (state.canvasMode === "space" && state.structureLevel === "systems") {
     renderSystemOverview(scopedObjects);
     return;
@@ -474,6 +540,15 @@ function renderGraph() {
       {selector: ".dimmed", style: {"opacity": .42}},
       {selector: ".zone-focus", style: {"background-color": "#252547", "border-color": "#818cf8", "opacity": 1}},
       {selector: ".trace-focus", style: {"opacity": 1, "border-color": "#10b981", "border-width": 3}},
+      {selector: ".search-dimmed", style: {"opacity": .2}},
+      {selector: ".search-neighbor", style: {"opacity": .72, "border-color": "#818cf8"}},
+      {selector: ".search-spotlight", style: {"opacity": 1, "border-color": "#6366f1", "border-width": 3}},
+      {selector: ".health-empty", style: {"border-style": "dashed", "border-color": "#94a3b8", "border-width": 2, "opacity": .52}},
+      {selector: ".health-orphan", style: {"border-color": "#f59e0b", "border-width": 3}},
+      {selector: ".health-isolated-unannotated", style: {"border-color": "#f43f5e", "border-style": "dotted", "border-width": 2.5}},
+      {selector: ".health-ok", style: {"border-color": "#10b981", "border-width": 2}},
+      {selector: ".health-filter-dim", style: {"opacity": .2}},
+      {selector: ".health-filter-match", style: {"opacity": 1, "border-width": 3}},
     ],
   });
   bindCanvasZoom();
@@ -496,6 +571,10 @@ function renderGraph() {
   bindLineageCanvas();
   if (state.selectedId && state.cy.$id(state.selectedId).length) state.cy.$id(state.selectedId).select();
   if (state.traceOnCanvas && state.trace) setTimeout(focusTrace, 0);
+  if (typeof applyHealthCanvasDecorations === "function") applyHealthCanvasDecorations(state.cy);
+  if (typeof applySearchSpotlight === "function" && typeof projectSearchActive === "function" && projectSearchActive() && queryTools.searchResult?.results?.hits) {
+    applySearchSpotlight(queryTools.searchResult.results.hits);
+  }
   state.lineagePathActive = false;
   updateLineagePathControls();
   const focusCount = state.focusSelection?.focuses.length || 0;
@@ -561,7 +640,7 @@ function resolveReference(reference) {
 
 function selectObject(id) {
   state.selectedId = id;
-  renderObjectList();
+  renderObjectList(false);
   renderInspector();
   setPanel("objects", false);
   setPanel("inspector", true);
@@ -571,7 +650,7 @@ function selectObject(id) {
 // Select without re-laying out the canvas: the graph keeps its position and zoom.
 function inspectObject(id) {
   state.selectedId = id;
-  renderObjectList();
+  renderObjectList(false);
   renderInspector();
   setPanel("objects", false);
   setPanel("inspector", true);
@@ -637,6 +716,8 @@ function renderInspector() {
   const fieldState = uniformFieldState(item.fields);
   $("#inspector").innerHTML = `
     ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label, item.id)}
+    ${typeof healthInspectorSummary === "function" ? healthInspectorSummary(item) : ""}
+    ${typeof inspectorSearchMatchCard === "function" ? inspectorSearchMatchCard(item) : ""}
     ${sourceChangeNotice(item.source_change)}
     ${annotation ? `<section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation.description)}</p>
       ${annotation.synonyms?.length ? fieldDetail("Synonyms", annotation.synonyms.join(" · ")) : ""}
@@ -947,11 +1028,17 @@ async function saveSourceSemantic(event) {
   } catch (error) { toast(error.message); }
 }
 
-function renderZones() {
+function renderZones(force = false) {
   const contexts = [];
   for (const workspace of state.data.workspaces) for (const system of workspace.systems) for (const zone of system.zones) contexts.push({workspace, system, zone});
-  $("#zones-panel").hidden = !contexts.length && !canWrite("graph");
+  const panel = $("#zones-panel");
+  panel.hidden = !contexts.length && !canWrite("graph");
   $("#zone-count").textContent = String(contexts.length);
+  if (!force && !panel.open) {
+    state.zonesDirty = true;
+    return;
+  }
+  state.zonesDirty = false;
   $("#zone-list").innerHTML = contexts.map((context, index) => `
     <article class="zone-card" data-zone-index="${index}"><header><strong>${escapeHtml(context.zone.name)}</strong><small>${context.zone.members.length}</small></header><p>${escapeHtml(context.zone.description || `${context.workspace.name} · ${context.system.name}`)}</p><div class="zone-members">${context.zone.members.map(member => { const object = objectForZoneMember(member); return `<button class="zone-member" data-focus-object="${escapeAttr(object?.id || "")}">${escapeHtml(object?.name || `${member.graph}:${member.object_id}`)}</button>`; }).join("")}</div></article>`).join("") || '<div class="zone-card"><strong>No zones yet</strong><p>Create one to group objects across schemas.</p></div>';
   $$(".zone-member").forEach(button => button.addEventListener("click", () => selectObject(button.dataset.focusObject)));
@@ -1509,7 +1596,11 @@ $("#fit-graph").addEventListener("click", focusSelected);
 $("#show-all").addEventListener("click", () => {
   if (state.canvasMode === "architecture") state.canvasMode = "space";
   state.traceOnCanvas = false;
-  state.structureLevel = "objects";
+  if (state.canvasMode === "lineage" && typeof blockState !== "undefined") {
+    blockState.lineageOverview = false;
+  } else {
+    state.structureLevel = "objects";
+  }
   withCanvasBusy(visibleObjects().length, renderGraph);
 });
 $("#toggle-entity-resolution").addEventListener("change", event => { state.showEntityResolution = event.target.checked; renderGraph(); });
@@ -1539,11 +1630,14 @@ $("#manual-job-form").addEventListener("submit", createManualJob);
 $("#manual-hop-form").addEventListener("submit", createManualHop);
 $("#close-lineage-dialog").addEventListener("click", () => $("#lineage-dialog").close());
 $("#new-zone").addEventListener("click", openZoneDialog);
+$("#zones-panel").addEventListener("toggle", () => { if ($("#zones-panel").open && state.zonesDirty) renderZones(true); });
 $("#zone-form").addEventListener("submit", createZone);
 $("#close-zone").addEventListener("click", () => $("#zone-dialog").close());
 $("#cancel-zone").addEventListener("click", () => $("#zone-dialog").close());
 
 initializeEstateNavigation();
 initializeArchitectureActions();
+if (typeof initializeHealthSignals === "function") initializeHealthSignals();
+if (typeof initializeCompactRetrieval === "function") initializeCompactRetrieval();
 if (typeof initializeQueryTools === "function") initializeQueryTools();
 load().catch(error => { setFooter("Failed"); document.body.innerHTML = `<div class="empty-state"><h1>TAREL UI could not start</h1><p>${escapeHtml(error.message)}</p></div>`; });

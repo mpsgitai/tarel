@@ -34,8 +34,9 @@ from tarel.ui.payloads.families import (
 )
 from tarel.ui.payloads.focus import browser_focus_selection, focus_physical_objects
 from tarel.ui.payloads.lineage import browser_lineages
-from tarel.ui.payloads.lineage_flows import browser_lineage_flows
+from tarel.ui.payloads.lineage_flows import LineageFlowModel
 from tarel.ui.payloads.logical import logical_topology_payloads, reference_mapping_edge_payloads
+from tarel.ui.payloads.signals import attach_object_signals, extract_observed_rows
 from tarel.workspaces.contracts import WorkspaceDocument
 from tarel.workspaces.scope import ResolvedScope
 
@@ -117,8 +118,11 @@ def browser_workspace(
     objects = payload["objects"]
     edges = payload["edges"]
     if isinstance(objects, list) and isinstance(edges, list):
-        edges.extend(_workspace_relationship_payloads(workspace, objects))
-        edges.sort(key=lambda item: str(item["id"]))
+        workspace_edges = _workspace_relationship_payloads(workspace, objects)
+        if workspace_edges:
+            edges.extend(workspace_edges)
+            edges.sort(key=lambda item: str(item["id"]))
+            attach_object_signals(payload, lineage_loaded=bool(payload.get("lineage_documents")))
     return payload
 
 
@@ -173,6 +177,7 @@ def _browser_payload(
     collapsed_fields: set[tuple[str, str]] = set()
     visible_fields: set[tuple[str, str]] = set()
     allowed_objects: set[tuple[str, str]] = set()
+    observed_rows_by_id: dict[str, int | None] = {}
     for graph in sorted(graphs, key=lambda item: item.name):
         nodes = graph.node_by_id()
         objects = [
@@ -205,6 +210,10 @@ def _browser_payload(
                 if parent in fields_by_object:
                     fields_by_object[parent].append(node)
                     visible_fields.add((graph.name, node.id))
+        for node in objects:
+            observed_rows_by_id[browser_id(graph.name, node.id)] = extract_observed_rows(
+                node.metadata
+            )
         physical_payloads = [
             _object_payload(
                 node,
@@ -272,6 +281,10 @@ def _browser_payload(
 
     documents = tuple(lineage_documents)
     selected_lineages = tuple(item.name for item in documents) or lineage_names
+    lineage_model = LineageFlowModel(documents, object_payloads)
+    full_lineage_edges = tuple(
+        (edge.source, edge.target) for edge in lineage_model.edges.values()
+    )
     revisions = {graph.name: graph_revision(graph) for graph in graphs}
     revision = (
         next(iter(revisions.values()))
@@ -319,7 +332,7 @@ def _browser_payload(
         "graph": first.name,
         "graphs": graph_payloads,
         "lineage_documents": browser_lineages(documents),
-        "lineage_flows": browser_lineage_flows(documents, object_payloads),
+        "lineage_flows": lineage_model.payload(),
         "lineages": list(selected_lineages),
         "logical_topology_notices": [
             {
@@ -395,6 +408,12 @@ def _browser_payload(
             )
             if family_mode is not None else selection
         )
+    attach_object_signals(
+        payload,
+        observed_rows_by_id=observed_rows_by_id,
+        lineage_loaded=bool(documents),
+        lineage_edges=full_lineage_edges,
+    )
     return payload
 
 

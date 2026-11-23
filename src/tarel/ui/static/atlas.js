@@ -36,8 +36,46 @@
     reference_mapping: "Reference mapping", entity_resolution_candidate: "Identity hint", lineage: "Data flow", process: "Process step"};
   // Entity cards: the height encodes the field count (capped), so a table's shape
   // is readable even when its text is too small to read.
-  const CARD = {w: 232, head: 46, row: 20, pad: 10, rows: 6};
-  const TIER = {far: .2, near: .55};
+  const CARD = {w: 264, head: 50, row: 20, pad: 10, rows: 6};
+  const TIER = {far: .22, near: .55};
+
+  function shortSystemTag(item) {
+    if (!item) return "";
+    const g = String(item.graph || "").toLowerCase();
+    const s = String(item.system || "").toLowerCase();
+    const area = String(item.area || "").toLowerCase();
+    const base = s.includes("adventureworks") || g.includes("adventureworks") ? "AW"
+      : s.includes("wideworld") || s === "wwi" || g.includes("wwi") ? "WWI"
+      : s.includes("lakehouse") || g.includes("lakehouse") ? "LKH"
+      : s.includes("contoso") ? "CNT"
+      : s.includes("kapitalmarkt") ? "KAP"
+      : (item.system || item.graph || "")
+          .replace(/^(sql|pg|duckdb|sqlite|ddl|mongo|files|download)-/i, "")
+          .split(/[-_\s]+/).filter(Boolean).map(w => w.slice(0, 3)).join("").slice(0, 5).toUpperCase();
+    const role = g.includes("powerbi") || area.includes("powerbi") ? "BI"
+      : g.includes("dw") || area.includes("dwh") ? "DW"
+      : g.includes("lt") ? "LT"
+      : area.includes("mart") ? "MRT"
+      : area.includes("staging") ? "STG"
+      : area.includes("vorsystem") || g.includes("oltp") ? "OLTP"
+      : "";
+    return role ? `${base}·${role}` : base;
+  }
+
+  function objectCardLabel(item, degree) {
+    const name = String(item?.name || item?.label || "");
+    const tag = shortSystemTag(item);
+    const cols = item?.fields?.length || 0;
+    const links = (degree?.out || 0) + (degree?.in || 0);
+    const sig = item?.signals;
+    const flags = [];
+    if (sig?.population === "empty") flags.push("0 rows");
+    if (sig?.lineage === "orphan") flags.push("⊘ no lineage");
+    else if (sig?.lineage === "connected") flags.push("⇄ lineage");
+    if (sig?.annotation === "reviewed") flags.push("✓");
+    const line2 = [tag ? `[${tag}]` : "", `${cols} cols`, links ? `${links} FKs` : "0 FKs"].filter(Boolean).join(" · ");
+    return flags.length ? `${name}\n${line2}\n${flags.join(" · ")}` : `${name}\n${line2}`;
+  }
 
   const element = id => document.getElementById(id);
   const appState = () => (typeof state === "undefined" ? null : state);
@@ -142,7 +180,7 @@
 
   // ---------- canvas state ----------
   // `surface` is what is shown; `preferred` survives Architecture, which has no table.
-  let current = null, ui = null, view = {tier: 2, zoom: 1}, layered = false, surface = "graph", preferred = "graph";
+  let current = null, ui = null, view = {tier: 2, zoom: 1, cards: false}, layered = false, surface = "graph", preferred = "graph";
   const listeners = new WeakMap();
   const tierFor = zoom => zoom < TIER.far ? 0 : zoom < TIER.near ? 1 : 2;
   const quantized = zoom => 2 ** (Math.round(Math.log2(Math.max(zoom, 1e-4)) * 2) / 2);
@@ -154,7 +192,7 @@
   }
 
   function enrich(cy, t) {
-    const {objects, edges} = indexData();
+    const {objects, edges, degree} = indexData();
     const compact = compactCards(cy);
     cy.batch(() => {
       cy.nodes().forEach(node => {
@@ -162,13 +200,18 @@
         if (OBJECT_TYPES.has(type)) {
           const item = objects.get(node.id());
           const height = compact ? COMPACT_H : cardHeight(item);
+          const deg = degree.get(node.id()) || {out: 0, in: 0};
           node.data({atObject: 1, atCompact: compact ? 1 : undefined, atW: CARD.w, atH: height, atSkel: skeleton(compact ? 1 : rowCount(item), height, t),
-            atName: String(node.data("label") ?? ""), atTone: TYPE_CLASS[type] || "neutral"});
+            atName: String(node.data("label") ?? ""), atCardLabel: item ? objectCardLabel(item, deg) : String(node.data("label") ?? ""),
+            atTone: TYPE_CLASS[type] || "neutral"});
         } else if (PROCESS_TYPES.has(type)) {
           const name = String(node.data("label") ?? "");
           node.data({atW: Math.round(Math.max(128, Math.min(270, name.length * 7.2 + 48))), atH: 34, atName: name});
         } else if (type === "asset") node.data({atW: 34, atH: 34, atName: String(node.data("label") ?? "")});
         else if (type === "system-summary") node.data({atW: SYSTEM_CARD.w, atH: SYSTEM_CARD.h});
+        else if (type === "system-block") node.data({atW: 244, atH: 112});
+        else if (type === "graph-block") node.data({atW: 224, atH: 92});
+        else if (type === "asset-group") node.data({atW: 212, atH: 76});
         else if (type === "architecture-card") node.data({atW: 228, atH: 104});
         else if (type === "architecture-anchor") node.data({atW: 1, atH: 1});
         else if (GROUP_TYPES.has(type) || type === "architecture-layer") {
@@ -410,7 +453,10 @@
     cy.stop(true, false);
     if (kind === "lineage" && restoreLineageLayout(cy)) { cy.scratch("_atlasLayered", true); return; }
     if (kind === "structure") arrangeStructure(cy);
-    else if (kind === "lineage") arrangeLineage(cy);
+    else if (kind === "lineage") {
+      if (cy.nodes('[type = "group-system"]').length) arrangeStructure(cy);
+      else arrangeLineage(cy);
+    }
     else if (kind === "systems") arrangeSystems(cy);
     cy.scratch("_atlasLayered", layered);
     const focus = cy.elements(".trace-focus");
@@ -467,7 +513,7 @@
   const groupWidth = ele => ele.data("atGW") || 400;
   const groupFont = (px, ele) => Math.min(px / view.zoom, Math.max(11, groupWidth(ele) / 8));
 
-  function stylesheet(t, tier, kind) {
+  function stylesheet(t, tier, kind, cardsOn = false) {
     const far = tier === 0, near = tier === 2;
     const flow = Boolean(current?.scratch("_atlasLayered"));
     const stops = (color) => ({"background-fill": "linear-gradient", "background-gradient-direction": "to-right",
@@ -478,15 +524,21 @@
         "z-index-compare": "manual", "z-index": 10, "text-events": "no"}},
       {selector: "node[atW]", style: {"width": "data(atW)", "height": "data(atH)"}},
 
-      // Entity cards: type stripe, name in the header, field skeleton; the HTML layer takes over close up.
-      {selector: "node[atObject]", style: far ? {"background-color": t.neutralTint, "border-color": t.neutral} : {
-        "background-image": "data(atSkel)", "background-fit": "none", "background-clip": "node", "background-width": CARD.w,
-        "background-height": "data(atH)", "background-position-x": 0, "background-position-y": 0, "background-image-opacity": 1,
-        "label": near ? "" : "data(atName)", "text-valign": "top", "text-halign": "center", "text-margin-y": 31,
-        "font-family": t.mono, "font-size": 13, "font-weight": 600, "text-max-width": CARD.w - 30, "text-wrap": "ellipsis", "color": t.ink}},
-      {selector: 'node[atObject][atTone = "table"]', style: far ? {"background-color": t.tableTint, "border-color": t.table} : stops(t.table)},
-      {selector: 'node[atObject][atTone = "view"]', style: far ? {"background-color": t.viewTint, "border-color": t.view} : stops(t.view)},
-      {selector: 'node[atObject][atTone = "neutral"]', style: far ? {} : stops(t.neutral)},
+      // Entity cards: type stripe, name + system tag + stats visible at every zoom; HTML layer takes over close up.
+      {selector: "node[atObject]", style: far ? {
+        "background-color": t.surface, "border-color": t.lineStrong, "border-width": 2.4,
+        "label": "data(atCardLabel)", "text-valign": "center", "text-halign": "center",
+        "font-family": t.sans, "font-size": 19, "font-weight": 600, "line-height": 1.32,
+        "text-max-width": CARD.w - 22, "text-wrap": "wrap", "color": t.ink, "min-zoomed-font-size": 3.5,
+      } : {
+        "background-color": t.surface, "border-color": t.lineStrong, "border-width": 1.4,
+        "label": near ? "" : "data(atCardLabel)", "text-valign": "center", "text-halign": "center",
+        "font-family": t.sans, "font-size": 13.5, "font-weight": 600, "line-height": 1.35,
+        "text-max-width": CARD.w - 26, "text-wrap": "wrap", "color": t.ink, "min-zoomed-font-size": 4,
+      }},
+      {selector: 'node[atObject][atTone = "table"]', style: stops(t.table)},
+      {selector: 'node[atObject][atTone = "view"]', style: stops(t.view)},
+      {selector: 'node[atObject][atTone = "neutral"]', style: stops(t.neutral)},
       {selector: 'node[type = "derived_relation"]', style: {"border-style": "dashed"}},
       {selector: 'node[type = "object_family"]', style: {"border-style": "double", "border-width": 3}},
       {selector: 'node[type = "object_family"][state = "candidate"]', style: {"border-style": "dashed", "border-width": 1.5, "border-color": t.warn}},
@@ -516,11 +568,24 @@
         "background-color": t.surface2, "background-opacity": .9, "text-transform": "none", "font-family": t.mono, "font-weight": 400, "color": t.ink3,
         "border-width": ele => view.zoom < .15 ? 0 : 1}},
 
-      // Summary and architecture cards: drawn by the HTML layer when legible.
-      {selector: 'node[type = "system-summary"], node[type = "architecture-card"]', style: {"corner-radius": 10, "background-color": t.surface,
-        "border-color": t.lineStrong, "label": tier >= 1 ? "" : "data(label)", "font-size": 14, "text-wrap": "wrap", "text-max-width": 200,
+      // Summary and architecture cards: drawn by the HTML layer when legible, otherwise Cytoscape keeps labels visible.
+      {selector: 'node[type = "system-summary"]', style: {"corner-radius": 10, "background-color": t.surface,
+        "border-color": t.lineStrong, "label": cardsOn ? "" : "data(label)", "font-size": 16, "font-weight": 600, "text-wrap": "wrap", "text-max-width": 210,
         "text-valign": "center", "color": t.ink}},
-      {selector: 'node[type = "architecture-card"]', style: {"border-color": "data(color)", "border-width": 1.5}},
+      {selector: 'node[type = "architecture-card"]', style: {"corner-radius": 10, "background-color": t.surface,
+        "border-color": "data(color)", "border-width": 1.5, "label": cardsOn ? "" : "data(label)", "font-size": 16, "font-weight": 600, "text-wrap": "wrap", "text-max-width": 206,
+        "text-valign": "center", "color": t.ink}},
+      {selector: 'node[type = "system-block"]', style: {"corner-radius": 10, "background-color": t.surface,
+        "border-color": t.accent, "border-width": 2, "label": cardsOn ? "" : "data(label)", "font-family": t.sans, "font-size": 15, "font-weight": 600,
+        "text-wrap": "wrap", "text-max-width": 218, "text-valign": "center", "color": t.ink, "line-height": 1.35}},
+      {selector: 'node[type = "system-block"][giant = 1]', style: {"border-color": t.warn, "border-width": 2.2}},
+      {selector: 'node[type = "graph-block"]', style: {"corner-radius": 8, "background-color": t.surface2,
+        "border-color": t.accent, "border-width": 1.6, "border-style": "dashed", "label": cardsOn ? "" : "data(label)", "font-family": t.mono, "font-size": 13, "font-weight": 600,
+        "text-wrap": "wrap", "text-max-width": 200, "text-valign": "center", "color": t.ink, "line-height": 1.35}},
+      {selector: 'node[type = "graph-block"][tooLarge = 1]', style: {"border-color": t.warn}},
+      {selector: 'node[type = "asset-group"]', style: {"corner-radius": 8, "background-color": t.surface2,
+        "border-color": t.neutral, "border-width": 1.5, "border-style": "dashed", "label": cardsOn ? "" : "data(label)", "font-family": t.sans, "font-size": 13, "font-weight": 600,
+        "text-wrap": "wrap", "text-max-width": 190, "text-valign": "center", "color": t.ink2, "line-height": 1.3}},
       {selector: "node[proxy]", style: {"border-style": "dashed"}},
       {selector: 'node[type = "architecture-layer"]', style: {"padding": 30, "font-size": 13, "text-margin-y": -10, "text-transform": "none",
         "background-color": t.group, "background-opacity": .65, "label": "data(atGroup)", "text-wrap": "wrap",
@@ -547,6 +612,17 @@
       {selector: 'edge[state = "draft"]', style: {"line-style": "dashed", "line-color": t.warn, "target-arrow-color": t.warn}},
       // Data flow: the state stays readable by line style, and width counts the processes.
       {selector: 'edge[flowEdge][processCount]', style: {"width": ele => (far ? 1 : 1.6) + Math.min(3, ele.data("processCount") - 1) * .9}},
+      // Weighted cross-system / cross-graph bundles: thickness scales logarithmically with flow count.
+      {selector: 'edge[type = "bundle-lineage"], edge[type = "bundle-relation"]', style: {
+        "curve-style": "bezier", "width": "data(bundleWidth)", "line-color": t.accent, "target-arrow-color": t.accent,
+        "target-arrow-shape": "triangle", "arrow-scale": 1.15, "label": "data(label)", "font-family": t.sans, "font-size": 11.5,
+        "font-weight": 600, "color": t.ink, "text-background-color": t.surface, "text-background-opacity": 1,
+        "text-background-padding": 4, "text-background-shape": "round-rectangle", "text-border-color": t.lineStrong,
+        "text-border-width": 1, "text-border-opacity": 1, "opacity": .92, "z-index": 15}},
+      {selector: 'edge[type = "bundle-lineage"][state = "draft"], edge[type = "bundle-lineage"][state = "review_required"]', style: {
+        "line-style": "dashed", "line-dash-pattern": [7, 4], "line-color": t.warn, "target-arrow-color": t.warn}},
+      {selector: 'edge[type = "bundle-lineage"][state = "validated"]', style: {
+        "line-style": "solid", "line-color": t.ok, "target-arrow-color": t.ok}},
       {selector: 'edge[state = "review_required"]', style: {"line-style": "solid", "line-color": t.warn, "target-arrow-color": t.warn}},
       {selector: 'edge[flowEdge][state = "validated"]', style: {"line-style": "solid", "line-color": t.ok, "target-arrow-color": t.ok}},
       {selector: 'edge[?indirect]', style: {"line-style": "dotted", "line-dash-pattern": [2, 4], "target-arrow-fill": "hollow"}},
@@ -578,6 +654,13 @@
       {selector: ".arch-muted", style: {"opacity": .18}},
       {selector: "edge:selected, edge.arch-hover", style: {"label": "data(label)", "width": 3, "opacity": 1, "line-color": t.accent, "target-arrow-color": t.accent}},
       {selector: "node.arch-spotlight", style: {"border-width": 3, "border-color": t.accent, "underlay-color": t.accent, "underlay-opacity": .16, "underlay-padding": 8}},
+      {selector: ".search-dimmed, .health-filter-dim", style: {"opacity": .16}},
+      {selector: "node.search-neighbor", style: {"opacity": .78, "border-color": t.accent, "border-width": 1.6}},
+      {selector: "node.search-spotlight, node.health-filter-match", style: {"opacity": 1, "border-color": t.accent, "border-width": 3, "underlay-color": t.accent, "underlay-opacity": .16, "underlay-padding": 7}},
+      {selector: "node.health-empty", style: {"border-style": "dashed", "border-color": t.ink3, "border-width": far ? 4.5 : 2.5, "opacity": .62}},
+      {selector: "node.health-orphan", style: {"border-color": t.warn, "border-width": far ? 5 : 3, "underlay-color": t.warn, "underlay-opacity": .16, "underlay-padding": 6}},
+      {selector: "node.health-isolated-unannotated", style: {"border-style": "dotted", "border-color": t.err, "border-width": far ? 4.5 : 3}},
+      {selector: "node.health-ok", style: {"border-color": t.ok, "border-width": far ? 4.5 : 2.5}},
     ];
   }
 
@@ -635,15 +718,17 @@
       const fields = cardFields(item);
       const shown = fields.length > CARD.rows ? fields.slice(0, CARD.rows) : fields;
       const tone = TYPE_CLASS[type] || "neutral";
+      const sysTag = shortSystemTag(item);
+      const sysBadge = sysTag ? `<span class="at-sys-badge" title="${esc(`${item?.system || ""} · ${item?.graph || ""}`)}">${esc(sysTag)}</span>` : "";
+      const micro = typeof healthMicroBadges === "function" ? healthMicroBadges(item) : "";
       const meta = [item?.namespace, item?.annotation?.role].filter(Boolean).join(" · ") || TYPE_LABELS[type];
       if (node.data("atCompact")) {
-        const degree = indexData().degree.get(node.id()) || {out: 0, in: 0};
-        return {className: `at-card at-compact at-type-${tone}`, html: `<header><span class="at-ticon">${typeIcon(type)}</span><span class="at-title"><strong>${esc(node.data("label"))}</strong><small>${esc(meta)}</small></span>${objectState(item) === "missing" ? "" : pill(objectState(item))}</header><p class="at-compact-meta">${plural(fields.length, "field")} · ${fields.filter(f => f.pk).length ? `key ${esc(fields.filter(f => f.pk).map(f => f.name).join(", "))}` : "no declared key"}</p>`};
+        return {className: `at-card at-compact at-type-${tone}`, html: `<header><span class="at-ticon">${typeIcon(type)}</span><span class="at-title"><strong>${esc(node.data("label"))}</strong><small>${sysBadge}${esc(meta)}</small></span>${micro}${objectState(item) === "missing" ? "" : pill(objectState(item))}</header><p class="at-compact-meta">${plural(fields.length, "field")} · ${fields.filter(f => f.pk).length ? `key ${esc(fields.filter(f => f.pk).map(f => f.name).join(", "))}` : "no declared key"}</p>`};
       }
       const rows = shown.map(field => `<li><span class="at-key${field.pk ? " is-pk" : field.fk ? " is-fk" : ""}">${field.pk ? "PK" : field.fk ? "FK" : ""}</span><span class="at-fname">${esc(field.name)}</span><span class="at-ftype">${esc(String(field.type || "").toLowerCase())}</span><i class="at-fstate at-tone-${status(field.state).tone}"></i></li>`).join("")
         + (fields.length > CARD.rows ? `<li class="at-more">+ ${plural(fields.length - CARD.rows, "more field")}</li>` : "")
         + (!fields.length ? '<li class="at-more">No fields loaded</li>' : "");
-      return {className: `at-card at-type-${tone}`, html: `<header><span class="at-ticon">${typeIcon(type)}</span><span class="at-title"><strong>${esc(node.data("label"))}</strong><small>${esc(meta)}</small></span>${objectState(item) === "missing" ? "" : pill(objectState(item))}</header><ol>${rows}</ol>`};
+      return {className: `at-card at-type-${tone}`, html: `<header><span class="at-ticon">${typeIcon(type)}</span><span class="at-title"><strong>${esc(node.data("label"))}</strong><small>${sysBadge}${esc(meta)}</small></span>${micro}${objectState(item) === "missing" ? "" : pill(objectState(item))}</header><ol>${rows}</ol>`};
     }
     if (type === "system-summary") {
       const name = node.data("system");
@@ -660,6 +745,41 @@
         <div class="at-system-count"><b>${objects.length.toLocaleString()}</b><span>${objects.length === 1 ? "object" : "objects"}</span></div>
         <div class="at-bar" role="img" aria-label="${esc(parts.map(part => part.text).join(", "))}">${bar}</div>
         <p class="at-bar-key">${key}</p>`};
+    }
+    if (type === "system-block") {
+      const name = node.data("system");
+      const count = Number(node.data("objectCount") || 0);
+      const graphs = Number(node.data("graphCount") || 0);
+      const internal = Number(node.data("internalCount") || 0);
+      const giant = Boolean(node.data("giant"));
+      const ok = Number(node.data("reviewedCount") || 0);
+      const warn = Number(node.data("draftCount") || 0);
+      const none = Number(node.data("missingCount") || 0);
+      const total = Math.max(1, ok + warn + none);
+      const bar = [["ok", ok], ["warn", warn], ["none", none]]
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => `<i class="at-seg at-seg-${k}" data-w="${Math.max(3, Math.round(v / total * 100))}"></i>`).join("");
+      const sub = [`${graphs} graph${graphs === 1 ? "" : "s"}`, internal ? `${internal} internal` : ""].filter(Boolean).join(" · ");
+      return {className: `at-card at-system at-sysblock${giant ? " is-giant" : ""}`, html: `
+        <header><span class="at-title"><strong>${esc(name)}</strong></span><span class="at-expand-pill${giant ? " is-giant" : ""}">${giant ? "+ Graphs" : "+ Expand"}</span></header>
+        <div class="at-system-count"><b>${count.toLocaleString()}</b><span>${count === 1 ? "object" : "objects"}</span><small class="at-block-sub">${esc(sub)}</small></div>
+        <div class="at-bar">${bar}</div>`};
+    }
+    if (type === "graph-block") {
+      const graph = node.data("graph");
+      const count = Number(node.data("objectCount") || 0);
+      const internal = Number(node.data("internalCount") || 0);
+      const tooLarge = Boolean(node.data("tooLarge"));
+      return {className: `at-card at-graphblock${tooLarge ? " is-large" : ""}`, html: `
+        <header><span class="at-title"><strong>${esc(graph)}</strong></span><span class="at-expand-pill${tooLarge ? " is-giant" : ""}">${tooLarge ? "↗ Table" : "+ Tables"}</span></header>
+        <div class="at-graphblock-meta"><b>${count.toLocaleString()}</b> objects${internal ? ` · ${internal} internal` : ""}</div>`};
+    }
+    if (type === "asset-group") {
+      const group = node.data("groupName");
+      const count = Number(node.data("assetCount") || 0);
+      return {className: "at-card at-assetgroup", html: `
+        <header><span class="at-title"><small>External sources</small><strong>${esc(group)}</strong></span></header>
+        <div class="at-graphblock-meta"><b>${count}</b> external assets</div>`};
     }
     if (type === "architecture-card") {
       const members = node.data("members") || [];
@@ -699,13 +819,14 @@
     ui.cards.clear();
   }
 
-  const cardNodes = cy => cy.nodes('[atObject], [type = "system-summary"], [type = "architecture-card"]');
+  const cardNodes = cy => cy.nodes('[atObject], [type = "system-summary"], [type = "system-block"], [type = "graph-block"], [type = "asset-group"], [type = "architecture-card"]');
 
   function cardsWanted(cy) {
     const kind = kindOf(cy);
     const zoom = cy.zoom();
     if (kind === "systems") return zoom >= .3;
     if (kind === "architecture") return zoom >= .42;
+    if (cy.nodes('[type = "system-block"], [type = "graph-block"], [type = "asset-group"]').length) return zoom >= .32;
     return zoom >= TIER.near;
   }
 
@@ -737,6 +858,15 @@
       card.classList.toggle("is-hover", node.hasClass("at-hover"));
       card.classList.toggle("is-trace", node.hasClass("trace-focus"));
       card.classList.toggle("is-spotlight", node.hasClass("arch-spotlight"));
+      card.classList.toggle("search-spotlight", node.hasClass("search-spotlight"));
+      card.classList.toggle("search-neighbor", node.hasClass("search-neighbor"));
+      card.classList.toggle("search-dimmed", node.hasClass("search-dimmed"));
+      card.classList.toggle("health-empty", node.hasClass("health-empty"));
+      card.classList.toggle("health-orphan", node.hasClass("health-orphan"));
+      card.classList.toggle("health-isolated-unannotated", node.hasClass("health-isolated-unannotated"));
+      card.classList.toggle("health-ok", node.hasClass("health-ok"));
+      card.classList.toggle("health-filter-match", node.hasClass("health-filter-match"));
+      card.classList.toggle("health-filter-dim", node.hasClass("health-filter-dim"));
     });
     for (const [id, card] of ui.cards) if (!wanted.has(id)) { card.remove(); ui.cards.delete(id); }
   }
@@ -757,16 +887,17 @@
     if (ui) ui.idle = setTimeout(() => { if (current === cy && !cy.destroyed()) { applyZoomDetail(cy); refreshCards(); } }, 120);
     scheduleMinimap();
     const level = cardsWanted(cy);
-    if (ui && level !== !ui.layer.hidden) scheduleCards();
+    if (ui && level !== !ui.layer.hidden) { applyZoomDetail(cy); scheduleCards(); }
   }
 
   function applyZoomDetail(cy, force = false) {
-    const zoom = cy.zoom(), tier = tierFor(zoom);
+    const zoom = cy.zoom(), tier = tierFor(zoom), cardsOn = cardsWanted(cy);
     const zoomChanged = Math.abs(Math.log2(quantized(zoom) / view.zoom)) > .01;
-    if (!force && tier === view.tier && !zoomChanged) return;
+    const cardsChanged = cardsOn !== view.cards;
+    if (!force && tier === view.tier && !zoomChanged && !cardsChanged) return;
     const tierChanged = tier !== view.tier;
-    view = {tier, zoom: quantized(zoom)};
-    if (force || tierChanged) cy.style(stylesheet(tokens(), tier, kindOf(cy)));
+    view = {tier, zoom: quantized(zoom), cards: cardsOn};
+    if (force || tierChanged || cardsChanged) cy.style(stylesheet(tokens(), tier, kindOf(cy), cardsOn));
     else cy.nodes(":parent").updateStyle();
   }
 
@@ -955,7 +1086,10 @@
     if (!s?.data) return [];
     const {degree} = indexData();
     const objects = (typeof visibleObjects === "function" ? visibleObjects() : s.data.objects)
-      .filter(item => s.objectKind === "all" || item.type === s.objectKind);
+      .filter(item =>
+        (s.objectKind === "all" || item.type === s.objectKind) &&
+        (typeof matchesHealthFilter !== "function" || matchesHealthFilter(item))
+      );
     return objects.map(item => {
       const d = degree.get(item.id) || {out: 0, in: 0}, st = objectState(item);
       return {id: item.id, item, type: item.type, typeLabel: TYPE_LABELS[item.type] || item.type, name: item.name || item.label,
@@ -1096,7 +1230,7 @@
     const s = appState();
     if (!s?.data) return;
     s.selectedId = id;
-    renderObjectList();
+    renderObjectList(false);
     renderInspector();
     setPanel("inspector", true);
     if (s.cy && !s.cy.destroyed()) { s.cy.nodes().unselect(); s.cy.$id(id).select(); }
@@ -1330,18 +1464,20 @@
 
   // ---------- shell ----------
   function ensureShell() {
-    if (element("at-command")) return;
+    if (element("at-mode")) return;
     const brand = document.querySelector(".brand");
     const mark = document.createElement("span");
     mark.className = "at-logo"; mark.setAttribute("aria-hidden", "true");
     mark.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.6"/><circle cx="18" cy="7" r="2.6"/><circle cx="12" cy="17.5" r="2.6"/><path d="M8.4 8.2 10.6 15M15.6 8.2 13.4 15M8.6 7h6.8"/></svg>';
     brand.prepend(mark);
-    const command = document.createElement("button");
-    command.id = "at-command"; command.type = "button"; command.className = "at-command";
-    command.setAttribute("aria-haspopup", "dialog");
-    command.innerHTML = `${ICON.search}<span>Search objects, fields, actions…</span><kbd>Ctrl K</kbd>`;
-    command.addEventListener("click", openPalette);
-    document.querySelector(".topbar").insertBefore(command, document.querySelector(".session-meta"));
+    if (!document.querySelector(".topbar-search")) {
+      const command = document.createElement("button");
+      command.id = "at-command"; command.type = "button"; command.className = "at-command";
+      command.setAttribute("aria-haspopup", "dialog");
+      command.innerHTML = `${ICON.search}<span>Search objects, fields, actions…</span><kbd>Ctrl K</kbd>`;
+      command.addEventListener("click", openPalette);
+      document.querySelector(".topbar").insertBefore(command, document.querySelector(".session-meta"));
+    }
     const toggle = document.createElement("button");
     toggle.id = "at-mode"; toggle.type = "button"; toggle.className = "at-mode";
     toggle.addEventListener("click", () => setDark(!document.body.classList.contains("at-dark")));
@@ -1371,6 +1507,8 @@
       if (!active()) return;
       const architecture = appState()?.canvasMode === "architecture";
       switcher.hidden = architecture;
+      const lensGroup = element("canvas-lens-group");
+      if (lensGroup) lensGroup.hidden = architecture;
       if (architecture && surface === "table") setSurface(preferred, false);
     }).observe(document.querySelector(".canvas-mode"), {subtree: true, attributes: true, attributeFilter: ["class"]});
   }
@@ -1401,8 +1539,9 @@
   function restyle(cy) {
     const t = tokens();
     enrich(cy, t);
-    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom())};
-    cy.style(stylesheet(t, view.tier, kindOf(cy)));
+    const cardsOn = cardsWanted(cy);
+    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom()), cards: cardsOn};
+    cy.style(stylesheet(t, view.tier, kindOf(cy), cardsOn));
     clearCards();
     refreshCards();
     scheduleMinimap();
@@ -1424,8 +1563,9 @@
     const kind = kindOf(cy);
     const t = tokens();
     enrich(cy, t);
-    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom())};
-    cy.style(stylesheet(t, view.tier, kind));
+    const cardsOn = cardsWanted(cy);
+    view = {tier: tierFor(cy.zoom()), zoom: quantized(cy.zoom()), cards: cardsOn};
+    cy.style(stylesheet(t, view.tier, kind, cardsOn));
     arrange(cy, kind);
     measureGroups(cy);
     applyZoomDetail(cy, true);

@@ -142,6 +142,7 @@ class _Handler(BaseHTTPRequestHandler):
             "estate_navigation.js",
             "architecture.js", "architecture_actions.js", "architecture.css",
             "atlas.css", "atlas.js", "lineage_flows.js",
+            "health_signals.js", "compact_retrieval.js", "system_blocks.js",
         }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return

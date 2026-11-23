@@ -299,10 +299,9 @@ for (const forbidden of ['focuses','object_ids','graphs','schemas','query_sql','
   assert.equal(queryTools.searchResult.results.hits[0].id, 'new');
   assert.ok($('#object-list').innerHTML.includes('New result'));
   assert.ok(!$('#object-list').innerHTML.includes('Old result'));
-  assert.ok($('#object-list').innerHTML.includes('Graph: sales'));
-  assert.ok($('#object-list').innerHTML.includes('<details class="search-reasons">'));
-  assert.ok($('#object-list').innerHTML.includes('Why this match'));
-  assert.ok($('#object-list').innerHTML.includes('clear display filters'));
+  assert.ok($('#object-list').innerHTML.includes('sales'));
+  assert.ok($('#object-list').innerHTML.includes('compact-hit'));
+  assert.ok($('#object-list').innerHTML.includes('data-context-hit'));
 })()
 """)
 

@@ -31,13 +31,14 @@ function systemOverviewColumns(count, width, height) {
 }
 
 function updateCanvasNavigation() {
-  const overview = state.canvasMode === "space" && state.structureLevel === "systems";
+  const overview = (state.canvasMode === "space" && state.structureLevel === "systems")
+    || (state.canvasMode === "lineage" && typeof blockState !== "undefined" && blockState.lineageOverview && !state.traceOnCanvas && !state.lineageProcessNodes);
   $("#show-systems").classList.toggle("is-active", overview);
   $("#show-systems").setAttribute("aria-pressed", String(overview));
   $("#show-all").classList.toggle("is-active", !overview);
   $("#show-all").setAttribute("aria-pressed", String(!overview));
-  $("#system-jump").hidden = !overview;
-  $("#graph-canvas").setAttribute("aria-label", overview ? "System overview; select a system to inspect its objects" : "Interactive schema graph");
+  $("#system-jump").hidden = !(state.canvasMode === "space" && state.structureLevel === "systems");
+  $("#graph-canvas").setAttribute("aria-label", overview ? "System blocks overview; select a system to expand its objects" : "Interactive schema graph");
 }
 
 function bindCanvasZoom() {
@@ -92,6 +93,12 @@ function zoomCanvas(factor) {
 }
 
 function showSystems() {
+  if (state.canvasMode === "lineage" && typeof blockState !== "undefined") {
+    blockState.lineageOverview = true;
+    state.traceOnCanvas = false;
+    renderGraph();
+    return;
+  }
   state.canvasMode = "space";
   state.structureLevel = "systems";
   state.traceOnCanvas = false;
@@ -109,6 +116,11 @@ function showSystems() {
 }
 
 function openSystem(name) {
+  if (!name) return;
+  if (typeof toggleExpandSystem === "function" && typeof systemBlocksActive === "function" && systemBlocksActive()) {
+    toggleExpandSystem(name, true);
+    return;
+  }
   const summary = systemSummaries(visibleObjects()).find(item => item.name === name);
   if (!summary) return;
   state.systemOverviewScope = new Set(state.scopeFilters.systems);
@@ -120,6 +132,11 @@ function openSystem(name) {
 function ensureObjectCanvas() {
   if (state.canvasMode === "space" && state.structureLevel === "systems") {
     state.structureLevel = "objects";
+    renderGraph();
+    return;
+  }
+  if (state.canvasMode === "lineage" && typeof blockState !== "undefined" && blockState.lineageOverview) {
+    blockState.lineageOverview = false;
     renderGraph();
   }
 }
