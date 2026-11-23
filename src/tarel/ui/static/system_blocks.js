@@ -585,8 +585,13 @@ function renderSystemBlocksCanvas(scopedObjects, mode) {
   }
   renderBlockExpansionBar(result);
 
+  const flowsMeta = isLineage && typeof baseLineageFlows === "function" ? baseLineageFlows() : null;
+  const displayedFlows = isLineage && typeof activeLineageFlows === "function" ? activeLineageFlows().edges.length : 0;
+  const truncatedNote = flowsMeta?.truncated
+    ? ` · ⚠ truncated: showing ${displayedFlows.toLocaleString()} of ${Number(flowsMeta.total_edges || displayedFlows).toLocaleString()} flows`
+    : "";
   $("#canvas-title").textContent = isLineage ? "Lineage · system flow map" : "Structure · system blocks";
   $("#canvas-subtitle").textContent = isLineage
-    ? `${result.systemCount} system${result.systemCount === 1 ? "" : "s"} · ${result.bundleCount} bundled flow${result.bundleCount === 1 ? "" : "s"}${result.nativeEdgeCount ? ` · ${result.nativeEdgeCount} table flows` : ""} · Click a block to expand or a thick line for details`
+    ? `${result.systemCount} system${result.systemCount === 1 ? "" : "s"} · ${result.bundleCount} bundled flow${result.bundleCount === 1 ? "" : "s"}${result.nativeEdgeCount ? ` · ${result.nativeEdgeCount} table flows` : ""}${truncatedNote} · Click a block to expand or a thick line for details`
     : `${result.systemCount} systems · ${result.objectCount.toLocaleString()} objects${result.bundleCount ? ` · ${result.bundleCount} cross-system bundles` : ""} · Click a system block to expand`;
 }

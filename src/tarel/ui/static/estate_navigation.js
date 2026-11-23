@@ -133,6 +133,11 @@ function ensureObjectCanvas() {
   if (state.canvasMode === "space" && state.structureLevel === "systems") {
     state.structureLevel = "objects";
     renderGraph();
+    return;
+  }
+  if (state.canvasMode === "lineage" && typeof blockState !== "undefined" && blockState.lineageOverview) {
+    blockState.lineageOverview = false;
+    renderGraph();
   }
 }
 

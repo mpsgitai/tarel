@@ -203,6 +203,7 @@ function scheduleProjectSearch() {
     renderObjectList();
     return;
   }
+  if (typeof window !== "undefined" && window.innerWidth <= 720 && typeof setPanel === "function") setPanel("objects", true);
   renderProjectSearch();
   if (queryTools.requireSubmit) return;
   queryTools.searchTimer = setTimeout(runProjectSearch, 300);

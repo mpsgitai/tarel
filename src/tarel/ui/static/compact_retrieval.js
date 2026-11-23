@@ -338,6 +338,7 @@ function initializeCompactRetrieval() {
       if (input) {
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (typeof window !== "undefined" && window.innerWidth <= 720 && typeof setPanel === "function") setPanel("objects", true);
         input.focus();
         input.select();
       }
