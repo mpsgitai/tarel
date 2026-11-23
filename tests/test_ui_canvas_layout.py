@@ -257,6 +257,7 @@ function setSurface(){surface = kind === 'architecture' ? 'graph' : preferred;
 function ensureUi(){} function clearCards(){} function tokens(){return {};}
 function kindOf(){return kind;} function enrich(){} function tierFor(){return 1;}
 function quantized(){return 1;} function stylesheet(){return [];}
+function cardsWanted(){return false;}
 function arrange(){} function measureGroups(){} function applyZoomDetail(){}
 function legendFor(){return '';} function applyFocus(){} function refreshCards(){}
 function scheduleMinimap(){} function checkEmpty(){}
