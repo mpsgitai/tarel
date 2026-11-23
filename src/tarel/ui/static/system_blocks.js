@@ -315,11 +315,11 @@ function buildSystemBlockElements(scopedObjects, mode) {
     const src = repOf.get(edge.source);
     const tgt = repOf.get(edge.target);
     if (!src || !tgt) continue;
-    if (src === tgt) {
+    const bothReal = src === edge.source && tgt === edge.target && !assetIds.has(src) && !assetIds.has(tgt);
+    if (src === tgt && !bothReal) {
       internalCounts.set(src, (internalCounts.get(src) || 0) + 1);
       continue;
     }
-    const bothReal = src === edge.source && tgt === edge.target && !assetIds.has(src) && !assetIds.has(tgt);
     if (bothReal) {
       if (isLineage) {
         nativeEdges.push({

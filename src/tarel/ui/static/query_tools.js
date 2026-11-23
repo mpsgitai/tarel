@@ -259,7 +259,14 @@ function renderProjectSearch() {
     $("#retry-project-search").addEventListener("click", runProjectSearch);
     return;
   }
-  const hits = queryTools.searchResult?.results.hits || [];
+  const rawHits = queryTools.searchResult?.results.hits || [];
+  const healthActive = typeof healthState !== "undefined" && healthState.filter !== "all" && typeof matchesHealthFilter === "function";
+  const hits = healthActive
+    ? rawHits.filter(hit => {
+        const obj = searchHitObject(hit);
+        return obj ? matchesHealthFilter(obj) : false;
+      })
+    : rawHits;
   if (queryTools.requireSubmit && !queryTools.searchResult) {
     status.textContent = "Press Enter or Search to run the selected models.";
     $("#object-list").innerHTML = '<div class="empty-state compact"><p>Search is started explicitly for cloud models and rerankers.</p></div>';
