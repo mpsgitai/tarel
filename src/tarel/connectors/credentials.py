@@ -84,6 +84,10 @@ def _resolve_secret(name: str, reference: object, config_dir: Path | None) -> st
             raise ConnectorFailure(
                 "secret_not_resolved", f"Secret file for [{name}] could not be read: {path}"
             ) from None
+        except UnicodeDecodeError:
+            raise ConnectorFailure(
+                "secret_not_resolved", f"Secret file for [{name}] is not UTF-8 text: {path}"
+            ) from None
         if not secret:
             raise ConnectorFailure(
                 "secret_not_resolved", f"Secret file for [{name}] is empty: {path}"

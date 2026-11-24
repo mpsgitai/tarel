@@ -65,6 +65,19 @@ class CredentialResolutionTests(TestCase):
         assert credential is not None
         self.assertEqual(credential.secret, " s3cr3t ")
 
+    def test_non_utf8_secret_file_is_a_connector_failure(self) -> None:
+        with TemporaryDirectory() as directory:
+            Path(directory, "sql.secret").write_bytes("s3cr3t".encode("utf-16"))
+            with self.assertRaises(ConnectorFailure) as raised:
+                resolve_credential(
+                    "sqlserver",
+                    {"auth": "password", "secret": "file:sql.secret"},
+                    SQLSERVER,
+                    config_dir=Path(directory),
+                )
+        self.assertEqual(raised.exception.code, "secret_not_resolved")
+        self.assertNotIn("s3cr3t", str(raised.exception))
+
     def test_failures_name_the_reference_but_never_a_value(self) -> None:
         cases = [
             ({"auth": "token"}, SQLSERVER, "unsupported_auth"),

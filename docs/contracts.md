@@ -63,7 +63,7 @@ secret = "env:DWH_PASSWORD"    # or file:secrets/dwh.txt, relative to the config
 | Rule | Behavior |
 | --- | --- |
 | Methods | `password` and `integrated`. A connector accepts only the methods its manifest lists in `auth`; an empty list means URL login only. |
-| Secret sources | `env:VARIABLE` and `file:path`. There is no command source: a writable config file must not be able to run code. A secret file loses only its trailing line break. |
+| Secret sources | `env:VARIABLE` and `file:path`. There is no command source: a writable config file must not be able to run code. A secret file is read as UTF-8 and loses only its trailing line break. |
 | One login source | A connector refuses a password both in the URL and through `auth`. `integrated` takes no user or secret. |
 | Disclosure | `Credential.secret` and request URLs never appear in `repr`, results, or errors. Failures name the reference (`env:…`, file path), never its value. |
 | Errors | `unsupported_auth`, `invalid_config`, `secret_not_resolved`; connection failures stay connector-specific. |
