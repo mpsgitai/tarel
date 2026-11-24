@@ -9,4 +9,5 @@ capabilities = ["probe", "discover_catalog", "sample_rows", "profile_object", "p
 dependencies = ["pymssql"]
 permissions = ["read"]
 dialect = "tsql"
+auth = ["password", "integrated"]
 references = ["references/authoring.md", "references/dialect.md"]

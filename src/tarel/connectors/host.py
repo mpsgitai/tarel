@@ -42,11 +42,20 @@ def check_connector(name: str) -> ConnectorCheck:
         extra=manifest.extra,
         dialect=manifest.dialect,
         references=manifest.references,
+        auth=manifest.auth,
     )
 
 
 def load_manifest(name: str) -> ConnectorManifest:
     manifest_path = _BUILTIN_MANIFESTS.get(name)
+    if manifest_path is not None and tuple(
+        entry_points().select(group="tarel.connectors", name=name)
+    ):
+        raise ConnectorFailure(
+            "ambiguous_connector",
+            f"An installed package also provides the built-in connector {name}. "
+            "Uninstall it or give it another name.",
+        )
     if manifest_path is None:
         entry_point = _installed_entry_point(name)
         module_name, separator, _factory_name = entry_point.value.partition(":")
@@ -97,11 +106,12 @@ def load_connector(name: str) -> Connector:
     check = check_connector(name)
     if not check.available:
         missing = ", ".join(check.missing_dependencies)
-        raise ConnectorFailure(
-            "missing_dependency",
-            f"Connector {name} requires {missing}. "
-            f"Install with `pip install tarel[{manifest.extra}]`.",
+        hint = (
+            f"Install with `pip install tarel[{manifest.extra}]`."
+            if name in _BUILTIN_MANIFESTS
+            else "Reinstall the package that provides this connector."
         )
+        raise ConnectorFailure("missing_dependency", f"Connector {name} requires {missing}. {hint}")
 
     try:
         if name in _BUILTIN_MANIFESTS:

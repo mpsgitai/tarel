@@ -12,6 +12,34 @@ class ConnectorFailure(TarelError):
     """A connector failure safe to present at the CLI boundary."""
 
 
+# Login methods a connector may accept through a Credential. A connector that declares none
+# receives no Credential and reads its login from the URL alone.
+AUTH_METHODS = ("password", "integrated")
+
+
+@dataclass(frozen=True, slots=True)
+class Credential:
+    """A login the host resolved from configuration; the secret never appears in repr or output.
+
+    ``integrated`` means the identity of the running process (Windows SSPI, Kerberos ticket),
+    so it carries neither a user nor a secret.
+    """
+
+    method: str
+    username: str | None = None
+    secret: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.method not in AUTH_METHODS:
+            raise ConnectorFailure("unsupported_auth", f"Unknown login method: {self.method}")
+        if self.method == "integrated" and (self.username or self.secret):
+            raise ConnectorFailure(
+                "invalid_config", "Integrated login takes neither a user nor a secret."
+            )
+        if self.method == "password" and not self.secret:
+            raise ConnectorFailure("invalid_config", "Password login requires a secret.")
+
+
 @dataclass(frozen=True, slots=True)
 class ConnectorManifest:
     contract_version: int
@@ -25,6 +53,7 @@ class ConnectorManifest:
     permissions: tuple[str, ...]
     dialect: str | None
     references: tuple[str, ...]
+    auth: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> ConnectorManifest:
@@ -45,6 +74,7 @@ class ConnectorManifest:
                 permissions=_string_tuple(connector, "permissions"),
                 dialect=_optional_string(connector, "dialect"),
                 references=_optional_string_tuple(connector, "references"),
+                auth=_optional_string_tuple(connector, "auth"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConnectorFailure("invalid_manifest", "Manifest contains invalid fields.") from exc
@@ -63,6 +93,11 @@ class ConnectorManifest:
             raise ConnectorFailure(
                 "invalid_manifest",
                 "Connector must declare the discover_catalog capability.",
+            )
+        if any(method not in AUTH_METHODS for method in manifest.auth):
+            raise ConnectorFailure(
+                "invalid_manifest",
+                f"Connector auth methods must be among: {', '.join(AUTH_METHODS)}.",
             )
         if any(permission != "read" for permission in manifest.permissions):
             raise ConnectorFailure(
@@ -84,9 +119,11 @@ class ConnectorCheck:
     extra: str
     dialect: str | None
     references: tuple[str, ...]
+    auth: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "auth": list(self.auth),
             "available": self.available,
             "capabilities": list(self.capabilities),
             "dialect": self.dialect,
@@ -104,6 +141,7 @@ class ConnectorCheck:
 class ProbeRequest:
     url: str = field(repr=False)
     database: str | None = None
+    credential: Credential | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +176,7 @@ class CatalogRequest:
     url: str = field(repr=False)
     database: str | None = None
     namespace: str | None = None
+    credential: Credential | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +271,7 @@ class SampleRequest:
     namespace: str
     object_name: str
     limit: int = 3
+    credential: Credential | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,6 +353,7 @@ class ObjectProfileRequest:
     row_limit: int = 10_000
     small_domain_limit: int = 20
     include_values: bool = False
+    credential: Credential | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +411,7 @@ class RelationshipProbeRequest:
     database: str | None
     pairs: tuple[RelationshipPair, ...]
     row_limit: int = 10_000
+    credential: Credential | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

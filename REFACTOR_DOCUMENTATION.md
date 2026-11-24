@@ -739,15 +739,17 @@ Connector use cases: check, probe, discover, sample and profile a configured sou
 - **Input:** parameters `config_path: Path | None`, `database: str | None`, `include_values: bool`, `limit: int`, `name: str`, `namespace: str | None`, `namespace: str`, `object_name: str`, `output: Path | None`, `path: Path | None`, `row_limit: int`, `section: dict[str, Any]` …; loads stored documents; reads environment variables
 - **Processing:**
     - `check_connector_use_case`: check connector (use case); returns `ConnectorCheck`. Calls `check_connector`.
-    - `probe_connector_use_case`: probe connector (use case); returns `ProbeResult`. Calls `load_connector`, `ProbeRequest`; raises `ConnectorFailure`.
-    - `discover_catalog_use_case`: discover catalog (use case); returns `CatalogResult`. Calls `load_connector`, `CatalogRequest`; raises `ConnectorFailure`.
-    - `sample_connector_use_case`: sample connector (use case); returns `SampleResult`. Calls `load_connector`, `SampleRequest`; raises `ConnectorFailure`.
-    - `profile_connector_use_case`: profile connector (use case); returns `ObjectProfileResult`. Calls `load_connector`, `ObjectProfileRequest`; raises `ConnectorFailure`.
+    - `ConfiguredConnector`: A loaded connector with its resolved target; URL and login never appear in repr.
+    - `configured_connector`: configured connector; returns `ConfiguredConnector`. Calls `load_connector`, `resolve_credential`; raises `ConnectorFailure`.
+    - `probe_connector_use_case`: probe connector (use case); returns `ProbeResult`. Calls `ProbeRequest`.
+    - `discover_catalog_use_case`: discover catalog (use case); returns `CatalogResult`. Calls `CatalogRequest`.
+    - `sample_connector_use_case`: sample connector (use case); returns `SampleResult`. Calls `SampleRequest`.
+    - `profile_connector_use_case`: profile connector (use case); returns `ObjectProfileResult`. Calls `ObjectProfileRequest`; raises `ConnectorFailure`.
     - `scaffold_connector_use_case`: scaffold connector (use case); returns `ScaffoldResult`. Calls `scaffold_connector`.
     - `read_config`: read config; returns `dict[str, Any]`. Raises `ConnectorFailure`.
     - `connection_url`: connection url; returns `str`. Raises `ConnectorFailure`.
-- **Output:** returns `CatalogResult`, `ConnectorCheck`, `ObjectProfileResult`, `ProbeResult`, `SampleResult`, `ScaffoldResult`, `dict[str, Any]`, `str`
-- **Uses:** `tarel.connectors.authoring`, `tarel.connectors.contracts`, `tarel.connectors.host`
+- **Output:** returns `CatalogResult`, `ConfiguredConnector`, `ConnectorCheck`, `ObjectProfileResult`, `ProbeResult`, `SampleResult`, `ScaffoldResult`, `dict[str, Any]`, `str`
+- **Uses:** `tarel.connectors.authoring`, `tarel.connectors.contracts`, `tarel.connectors.credentials`, `tarel.connectors.host`
 - **Used by:** `tarel.annotations.application`, `tarel.cli.connector`, `tarel.graph.application`, `tarel.relationships.application`, `tarel.sdk.connectors`, `tarel.sdk.setup`, `tarel.sources.application`
 
 ### `src/tarel/connectors/authoring.py`
@@ -782,14 +784,15 @@ Small contracts shared by TAREL and source connectors.
 - **Input:** parameters `data: dict[str, Any]`, `request: CatalogRequest`, `request: ObjectProfileRequest`, `request: ProbeRequest`, `request: RelationshipProbeRequest`, `request: SampleRequest`
 - **Processing:**
     - `ConnectorFailure`: A connector failure safe to present at the CLI boundary.
+    - `Credential`: A login the host resolved from configuration; the secret never appears in repr or output.
     - `ConnectorManifest`: record with fields contract_version, name, version, source_type, entrypoint, extra, capabilities, dependencies ….
     - `ConnectorManifest.from_mapping`: from mapping; returns `ConnectorManifest`.
     - `ConnectorCheck`: record with fields name, version, source_type, available, capabilities, permissions, missing_dependencies, extra ….
     - `ConnectorCheck.to_dict`: to dict; returns `dict[str, object]`.
-    - `ProbeRequest`: record with fields url, database.
+    - `ProbeRequest`: record with fields url, database, credential.
     - `ProbeResult`: record with fields connector, source_type, server_name, database_name, product_version, product_level, edition, capabilities ….
     - `ProbeResult.to_dict`: to dict; returns `dict[str, object]`.
-    - `CatalogRequest`: record with fields url, database, namespace.
+    - `CatalogRequest`: record with fields url, database, namespace, credential.
     - `CatalogField`: record with fields name, position, data_type, nullable, description, is_primary_key.
     - `CatalogField.to_dict`: to dict; returns `dict[str, object]`.
     - `CatalogObject`: record with fields namespace, name, kind, fields, description, primary_key.
@@ -798,19 +801,19 @@ Small contracts shared by TAREL and source connectors.
     - `CatalogRelationship.to_dict`: to dict; returns `dict[str, object]`.
     - `CatalogResult`: record with fields connector, source_type, catalog, dialect, objects, relationships.
     - `CatalogResult.to_dict`: to dict; returns `dict[str, object]`.
-    - `SampleRequest`: record with fields url, database, namespace, object_name, limit.
+    - `SampleRequest`: record with fields url, database, namespace, object_name, limit, credential.
     - `SampleResult`: record with fields connector, catalog, namespace, object_name, selected_fields, omitted_fields, ordered_by, rows ….
     - `SampleResult.to_dict`: to dict; returns `dict[str, object]`.
     - `ValueCount`: record with fields value, count.
     - `ValueCount.to_dict`: to dict; returns `dict[str, object]`.
     - `ColumnProfile`: record with fields name, data_type, status, reason, non_null_count, null_count, distinct_count, min_value ….
     - `ColumnProfile.to_dict`: to dict; returns `dict[str, object]`.
-    - `ObjectProfileRequest`: record with fields url, database, namespace, object_name, row_limit, small_domain_limit, include_values.
+    - `ObjectProfileRequest`: record with fields url, database, namespace, object_name, row_limit, small_domain_limit, include_values, credential.
     - `ObjectProfileResult`: record with fields connector, catalog, namespace, object_name, row_limit, rows_profiled, complete, ordered_by ….
     - `ObjectProfileResult.to_dict`: to dict; returns `dict[str, object]`.
     - `RelationshipPair`: record with fields from_namespace, from_object, from_field, to_namespace, to_object, to_field.
     - `RelationshipPair.to_dict`: to dict; returns `dict[str, str]`.
-    - `RelationshipProbeRequest`: record with fields url, database, pairs, row_limit.
+    - `RelationshipProbeRequest`: record with fields url, database, pairs, row_limit, credential.
     - `RelationshipPairProfile`: record with fields pair, source_non_null_count, source_distinct_count, target_non_null_count, target_distinct_count, overlap_count, profile_row_limit.
     - `RelationshipPairProfile.source_coverage`: source coverage; returns `float`.
     - `RelationshipPairProfile.target_coverage`: target coverage; returns `float`.
@@ -828,7 +831,18 @@ Small contracts shared by TAREL and source connectors.
     - `RelationshipProbeConnector.probe_relationships`: probe relationships; returns `RelationshipProbeResult`.
 - **Output:** returns `CatalogResult`, `ConnectorManifest`, `ObjectProfileResult`, `ProbeResult`, `RelationshipProbeResult`, `SampleResult`, `dict[str, object]`, `dict[str, str]`, `float`
 - **Uses:** `tarel.errors`
-- **Used by:** `tarel.annotations.application`, `tarel.annotations.tasks`, `tarel.cli._output`, `tarel.cli.connector`, `tarel.cli.relationship`, `tarel.connectors.application`, `tarel.connectors.authoring`, `tarel.connectors.catalog`, `tarel.connectors.host`, `tarel.connectors.sqlite.connector`, `tarel.connectors.sqlserver.connector`, `tarel.enrichment`, `tarel.graph.application`, `tarel.graph.build`, `tarel.relationships.application`, `tarel.relationships.core`, `tarel.sdk.annotation`, `tarel.sdk.connectors`, `tarel.sdk.graph`, `tarel.sdk.relationship`, `tarel.sdk.sources`, `tarel.sources.application`
+- **Used by:** `tarel.annotations.application`, `tarel.annotations.tasks`, `tarel.cli._output`, `tarel.cli.connector`, `tarel.cli.relationship`, `tarel.connectors.application`, `tarel.connectors.authoring`, `tarel.connectors.catalog`, `tarel.connectors.credentials`, `tarel.connectors.host`, `tarel.connectors.sqlite.connector`, `tarel.connectors.sqlserver.connector`, `tarel.enrichment`, `tarel.graph.application`, `tarel.graph.build`, `tarel.relationships.application`, `tarel.relationships.core`, `tarel.sdk.annotation`, `tarel.sdk.connectors`, `tarel.sdk.graph`, `tarel.sdk.relationship`, `tarel.sdk.sources`, `tarel.sources.application`
+
+### `src/tarel/connectors/credentials.py`
+
+Resolve the login of a configured connector section without exposing its secret.
+
+- **Input:** parameters `config_dir: Path | None`, `manifest: ConnectorManifest`, `name: str`, `section: dict[str, Any]`; reads environment variables; reads files
+- **Processing:**
+    - `resolve_credential`: Return the configured login, or None when the URL alone carries it. Calls `Credential`; raises `ConnectorFailure`.
+- **Output:** returns `Credential | None`
+- **Uses:** `tarel.connectors.contracts`
+- **Used by:** `tarel.connectors.application`
 
 ### `src/tarel/connectors/host.py`
 
@@ -841,7 +855,7 @@ Explicit loading and checking of trusted connector manifests.
     - `load_connector`: load connector; returns `Connector`. Raises `ConnectorFailure`.
 - **Output:** returns `Connector`, `ConnectorCheck`, `ConnectorManifest`
 - **Uses:** `tarel.connectors.contracts`
-- **Used by:** `tarel.connectors.application`, `tarel.relationships.application`, `tarel.sources.application`
+- **Used by:** `tarel.connectors.application`, `tarel.sources.application`
 
 ### `src/tarel/connectors/sqlite/__init__.py`
 
@@ -3194,7 +3208,7 @@ Relationship use cases: add, check, discover and review join relationships in a 
     - `list_relationships_use_case`: list relationships (use case); returns `tuple[GraphEdge, ...]`. Calls `relationship_candidates`; uses the graph store.
     - `decide_relationship_use_case`: decide relationship (use case); returns `RelationshipChangeResult`. Calls `decide_relationship`, `graph_revision`; uses the graph store.
 - **Output:** returns `RelationshipChangeResult`, `RelationshipDiscoveryResult`, `RelationshipPairProfile`, `tuple[GraphEdge, ...]`; saves documents to a store
-- **Uses:** `tarel.connectors.application`, `tarel.connectors.contracts`, `tarel.connectors.host`, `tarel.focus.application`, `tarel.focus.contracts`, `tarel.focus.core`, `tarel.graph.contracts`, `tarel.graph.revision`, `tarel.relationships.core`, `tarel.runtime`
+- **Uses:** `tarel.connectors.application`, `tarel.connectors.contracts`, `tarel.focus.application`, `tarel.focus.contracts`, `tarel.focus.core`, `tarel.graph.contracts`, `tarel.graph.revision`, `tarel.relationships.core`, `tarel.runtime`
 - **Used by:** `tarel.cli.relationship`, `tarel.sdk.relationship`
 
 ### `src/tarel/relationships/core.py`
