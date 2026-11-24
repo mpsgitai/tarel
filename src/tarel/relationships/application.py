@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from tarel.connectors.application import connection_url, read_config
+from tarel.connectors.application import configured_connector
 from tarel.connectors.contracts import (
     ConnectorFailure,
     RelationshipPair,
@@ -14,7 +14,6 @@ from tarel.connectors.contracts import (
     RelationshipProbeConnector,
     RelationshipProbeRequest,
 )
-from tarel.connectors.host import load_connector
 from tarel.focus.application import load_current_focus
 from tarel.focus.contracts import FocusFailure
 from tarel.focus.core import expand_graph_objects_one_hop, graph_object_ids
@@ -191,14 +190,8 @@ def _probe_relationship_pairs(
     config_path: Path | None,
     row_limit: int,
 ) -> tuple[RelationshipPairProfile, ...]:
-    config = read_config(config_path)
-    section = config.get(graph.connector, {})
-    if not isinstance(section, dict):
-        raise ConnectorFailure(
-            "invalid_config",
-            f"Configuration section [{graph.connector}] must be a table.",
-        )
-    connector = load_connector(graph.connector)
+    source = configured_connector(graph.connector, config_path=config_path, database=graph.catalog)
+    connector = source.connector
     if "probe_relationships" not in connector.manifest.capabilities or not hasattr(
         connector, "probe_relationships"
     ):
@@ -209,10 +202,11 @@ def _probe_relationship_pairs(
     profiler = cast(RelationshipProbeConnector, connector)
     result = profiler.probe_relationships(
         RelationshipProbeRequest(
-            url=connection_url(graph.connector, section),
-            database=graph.catalog,
+            url=source.url,
+            database=source.database,
             pairs=pairs,
             row_limit=row_limit,
+            credential=source.credential,
         )
     )
     return result.profiles

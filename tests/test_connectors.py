@@ -116,3 +116,20 @@ class ConnectorTests(TestCase):
             load_manifest("vendor")
 
         self.assertEqual(raised.exception.code, "ambiguous_connector")
+
+    def test_installed_package_cannot_shadow_a_builtin_connector(self) -> None:
+        shadow = EntryPoint(
+            name="sqlserver",
+            value="vendor.connector:create_connector",
+            group="tarel.connectors",
+        )
+        installed = Mock()
+        installed.select.return_value = (shadow,)
+
+        with (
+            patch("tarel.connectors.host.entry_points", return_value=installed),
+            self.assertRaises(ConnectorFailure) as raised,
+        ):
+            load_manifest("sqlserver")
+
+        self.assertEqual(raised.exception.code, "ambiguous_connector")

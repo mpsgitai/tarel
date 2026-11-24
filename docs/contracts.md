@@ -7,6 +7,7 @@ Use the [CLI reference](cli-reference.md) for syntax and defaults and [Architect
 | Boundary | Producer and consumer | Definition |
 | --- | --- | --- |
 | Connector observations | Connector → graph builder | [CatalogRequest / CatalogResult](../src/tarel/connectors/contracts.py) |
+| Connector login | Private config section → host → connector request | [Credential and manifest `auth`](../src/tarel/connectors/contracts.py), [resolution](../src/tarel/connectors/credentials.py) |
 | Provider request and response | TAREL → configured structured provider → domain validator | [StructuredRequest / StructuredProvider](../src/tarel/providers/contracts.py) |
 | Graph and annotation | Catalog/proposal → persisted graph and review | [Graph records](../src/tarel/graph/contracts.py), [annotation records](../src/tarel/annotations/contracts.py) |
 | Static lineage input | Harness/importer → lineage builder | [LineageInput](../src/tarel/lineage/source.py), [stored records](../src/tarel/lineage/contracts.py) |
@@ -18,6 +19,7 @@ The linked Python definitions are authoritative for exact field types and valida
 
 ## Topics
 
+- [Connector login](#connector-login)
 - [Workspaces and scopes](#workspaces-and-scopes)
 - [Graph storage and selective reads](#graph-storage-and-selective-reads)
 - [Schema changes and stale claims](#schema-changes-and-stale-claims)
@@ -38,6 +40,38 @@ The linked Python definitions are authoritative for exact field types and valida
 - [Logical joins](#logical-joins)
 - [Semantic concepts](#semantic-concepts)
 - [Browser scope and review](#browser-scope-and-review)
+
+## Connector login
+
+A connector section in the private `--config` TOML names its target in `url` (or
+`TAREL_<NAME>_URL`). Without `auth`, the URL alone carries the login, exactly as before. With
+`auth`, the host resolves a typed `Credential` and passes it on every connector request; the URL then
+holds no password.
+
+```toml
+[sqlserver]
+url = "mssql+pymssql://localhost/ContosoRetailDW"
+auth = "integrated"            # identity of the running process: Windows SSPI or Kerberos
+
+[warehouse]
+url = "mssql+pymssql://dwh.example:1433/DWH"
+auth = "password"
+username = "tarel_reader"      # optional when the URL names the user
+secret = "env:DWH_PASSWORD"    # or file:secrets/dwh.txt, relative to the config file
+```
+
+| Rule | Behavior |
+| --- | --- |
+| Methods | `password` and `integrated`. A connector accepts only the methods its manifest lists in `auth`; an empty list means URL login only. |
+| Secret sources | `env:VARIABLE` and `file:path`. There is no command source: a writable config file must not be able to run code. A secret file is read as UTF-8 and loses only its trailing line break. |
+| One login source | A connector refuses a password both in the URL and through `auth`. `integrated` takes no user or secret. |
+| Disclosure | `Credential.secret` and request URLs never appear in `repr`, results, or errors. Failures name the reference (`env:…`, file path), never its value. |
+| Errors | `unsupported_auth`, `invalid_config`, `secret_not_resolved`; connection failures stay connector-specific. |
+
+The built-in SQL Server connector accepts both methods. Integrated login lets pymssql use the
+process identity; on Windows this was checked with SSPI against SQL Server 2025, while Kerberos on
+Linux depends on the FreeTDS build and a valid ticket. `tarel connector check NAME` lists the
+accepted methods under `auth`.
 
 ## Workspaces and scopes
 

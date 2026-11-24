@@ -6,7 +6,7 @@ import datetime as dt
 import decimal
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -19,6 +19,7 @@ from tarel.connectors.contracts import (
     ColumnProfile,
     ConnectorFailure,
     ConnectorManifest,
+    Credential,
     ObjectProfileRequest,
     ObjectProfileResult,
     ProbeRequest,
@@ -209,8 +210,8 @@ _MAX_SAMPLE_TOTAL_CHARS = 20_000
 class _ConnectionTarget:
     host: str
     port: int
-    username: str
-    password: str
+    username: str | None = field(repr=False)
+    password: str | None = field(repr=False)
     database: str
 
 
@@ -235,8 +236,7 @@ class SqlServerConnector:
             connection = pymssql.connect(
                 server=target.host,
                 port=str(target.port),
-                user=target.username,
-                password=target.password,
+                **_login(target),
                 database=target.database,
                 login_timeout=5,
                 timeout=15,
@@ -292,8 +292,7 @@ class SqlServerConnector:
             connection = pymssql.connect(
                 server=target.host,
                 port=str(target.port),
-                user=target.username,
-                password=target.password,
+                **_login(target),
                 database=target.database,
                 login_timeout=5,
                 timeout=30,
@@ -358,8 +357,7 @@ class SqlServerConnector:
             connection = pymssql.connect(
                 server=target.host,
                 port=str(target.port),
-                user=target.username,
-                password=target.password,
+                **_login(target),
                 database=target.database,
                 login_timeout=5,
                 timeout=30,
@@ -437,8 +435,7 @@ class SqlServerConnector:
             connection = pymssql.connect(
                 server=target.host,
                 port=str(target.port),
-                user=target.username,
-                password=target.password,
+                **_login(target),
                 database=target.database,
                 login_timeout=5,
                 timeout=30,
@@ -537,8 +534,7 @@ class SqlServerConnector:
             connection = pymssql.connect(
                 server=target.host,
                 port=str(target.port),
-                user=target.username,
-                password=target.password,
+                **_login(target),
                 database=target.database,
                 login_timeout=5,
                 timeout=30,
@@ -606,11 +602,9 @@ def _parse_target(
             "unsupported_url",
             "SQL Server currently requires an mssql+pymssql connection URL.",
         )
-    if not parsed.hostname or parsed.username is None or parsed.password is None:
-        raise ConnectorFailure(
-            "invalid_url",
-            "SQL Server URL requires host, username, and password.",
-        )
+    if not parsed.hostname:
+        raise ConnectorFailure("invalid_url", "SQL Server URL requires a host.")
+    username, password = _login_parts(request.credential, parsed.username, parsed.password)
 
     configured_database = unquote(parsed.path.lstrip("/"))
     database = request.database or configured_database
@@ -625,10 +619,47 @@ def _parse_target(
     return _ConnectionTarget(
         host=parsed.hostname,
         port=port,
-        username=unquote(parsed.username),
-        password=unquote(parsed.password),
+        username=username,
+        password=password,
         database=database,
     )
+
+
+def _login_parts(
+    credential: Credential | None,
+    url_username: str | None,
+    url_password: str | None,
+) -> tuple[str | None, str | None]:
+    """Choose one login source: the URL alone, or a configured credential with a bare URL."""
+    if credential is None:
+        if url_username is None or url_password is None:
+            raise ConnectorFailure(
+                "invalid_url",
+                "SQL Server URL requires username and password, or configure auth.",
+            )
+        return unquote(url_username), unquote(url_password)
+    if url_password is not None:
+        raise ConnectorFailure(
+            "invalid_config",
+            "Configure the SQL Server login either in the URL or through auth, not both.",
+        )
+    if credential.method == "integrated":
+        if url_username is not None:
+            raise ConnectorFailure(
+                "invalid_config", "Integrated SQL Server login takes no user in the URL."
+            )
+        return None, None
+    username = credential.username or (unquote(url_username) if url_username else None)
+    if username is None:
+        raise ConnectorFailure("invalid_config", "SQL Server password login requires a username.")
+    return username, credential.secret
+
+
+def _login(target: _ConnectionTarget) -> dict[str, str]:
+    # Without user and password pymssql logs in as the process identity (SSPI or Kerberos).
+    if target.username is None:
+        return {}
+    return {"user": target.username, "password": target.password or ""}
 
 
 def _optional_text(value: Any) -> str | None:

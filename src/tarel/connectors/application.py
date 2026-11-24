@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,8 +12,10 @@ from tarel.connectors.authoring import ScaffoldResult, scaffold_connector
 from tarel.connectors.contracts import (
     CatalogRequest,
     CatalogResult,
+    Connector,
     ConnectorCheck,
     ConnectorFailure,
+    Credential,
     ObjectProfileConnector,
     ObjectProfileRequest,
     ObjectProfileResult,
@@ -21,11 +24,40 @@ from tarel.connectors.contracts import (
     SampleRequest,
     SampleResult,
 )
+from tarel.connectors.credentials import resolve_credential
 from tarel.connectors.host import check_connector, load_connector
 
 
 def check_connector_use_case(name: str) -> ConnectorCheck:
     return check_connector(name)
+
+
+@dataclass(frozen=True, slots=True)
+class ConfiguredConnector:
+    """A loaded connector with its resolved target; URL and login never appear in repr."""
+
+    connector: Connector
+    url: str = field(repr=False)
+    database: str | None
+    credential: Credential | None = field(repr=False)
+
+
+def configured_connector(
+    name: str,
+    *,
+    config_path: Path | None,
+    database: str | None = None,
+) -> ConfiguredConnector:
+    config = read_config(config_path)
+    section = config.get(name, {})
+    if not isinstance(section, dict):
+        raise ConnectorFailure("invalid_config", f"Configuration section [{name}] must be a table.")
+    url = connection_url(name, section)
+    selected_database = database or _optional_string(section.get("default_database"))
+    connector = load_connector(name)
+    config_dir = config_path.expanduser().resolve().parent if config_path is not None else None
+    credential = resolve_credential(name, section, connector.manifest, config_dir=config_dir)
+    return ConfiguredConnector(connector, url, selected_database, credential)
 
 
 def probe_connector_use_case(
@@ -34,15 +66,10 @@ def probe_connector_use_case(
     config_path: Path | None = None,
     database: str | None = None,
 ) -> ProbeResult:
-    config = read_config(config_path)
-    section = config.get(name, {})
-    if not isinstance(section, dict):
-        raise ConnectorFailure("invalid_config", f"Configuration section [{name}] must be a table.")
-
-    url = connection_url(name, section)
-    selected_database = database or _optional_string(section.get("default_database"))
-    connector = load_connector(name)
-    return connector.probe(ProbeRequest(url=url, database=selected_database))
+    source = configured_connector(name, config_path=config_path, database=database)
+    return source.connector.probe(
+        ProbeRequest(url=source.url, database=source.database, credential=source.credential)
+    )
 
 
 def discover_catalog_use_case(
@@ -52,16 +79,14 @@ def discover_catalog_use_case(
     database: str | None = None,
     namespace: str | None = None,
 ) -> CatalogResult:
-    config = read_config(config_path)
-    section = config.get(name, {})
-    if not isinstance(section, dict):
-        raise ConnectorFailure("invalid_config", f"Configuration section [{name}] must be a table.")
-
-    url = connection_url(name, section)
-    selected_database = database or _optional_string(section.get("default_database"))
-    connector = load_connector(name)
-    return connector.discover_catalog(
-        CatalogRequest(url=url, database=selected_database, namespace=namespace)
+    source = configured_connector(name, config_path=config_path, database=database)
+    return source.connector.discover_catalog(
+        CatalogRequest(
+            url=source.url,
+            database=source.database,
+            namespace=namespace,
+            credential=source.credential,
+        )
     )
 
 
@@ -74,20 +99,15 @@ def sample_connector_use_case(
     object_name: str,
     limit: int,
 ) -> SampleResult:
-    config = read_config(config_path)
-    section = config.get(name, {})
-    if not isinstance(section, dict):
-        raise ConnectorFailure("invalid_config", f"Configuration section [{name}] must be a table.")
-    url = connection_url(name, section)
-    selected_database = database or _optional_string(section.get("default_database"))
-    connector = load_connector(name)
-    return connector.sample_rows(
+    source = configured_connector(name, config_path=config_path, database=database)
+    return source.connector.sample_rows(
         SampleRequest(
-            url=url,
-            database=selected_database,
+            url=source.url,
+            database=source.database,
             namespace=namespace,
             object_name=object_name,
             limit=limit,
+            credential=source.credential,
         )
     )
 
@@ -103,13 +123,8 @@ def profile_connector_use_case(
     small_domain_limit: int = 20,
     include_values: bool = False,
 ) -> ObjectProfileResult:
-    config = read_config(config_path)
-    section = config.get(name, {})
-    if not isinstance(section, dict):
-        raise ConnectorFailure("invalid_config", f"Configuration section [{name}] must be a table.")
-    url = connection_url(name, section)
-    selected_database = database or _optional_string(section.get("default_database"))
-    connector = load_connector(name)
+    source = configured_connector(name, config_path=config_path, database=database)
+    connector = source.connector
     if "profile_object" not in connector.manifest.capabilities or not hasattr(
         connector, "profile_object"
     ):
@@ -120,13 +135,14 @@ def profile_connector_use_case(
     profiler = cast(ObjectProfileConnector, connector)
     return profiler.profile_object(
         ObjectProfileRequest(
-            url=url,
-            database=selected_database,
+            url=source.url,
+            database=source.database,
             namespace=namespace,
             object_name=object_name,
             row_limit=row_limit,
             small_domain_limit=small_domain_limit,
             include_values=include_values,
+            credential=source.credential,
         )
     )
 
