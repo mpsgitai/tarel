@@ -53,6 +53,18 @@ class CredentialResolutionTests(TestCase):
         assert credential is not None
         self.assertEqual(credential.secret, "s3cr3t")
 
+    def test_file_secret_keeps_surrounding_spaces(self) -> None:
+        with TemporaryDirectory() as directory:
+            Path(directory, "sql.secret").write_text(" s3cr3t \r\n", encoding="utf-8")
+            credential = resolve_credential(
+                "sqlserver",
+                {"auth": "password", "secret": "file:sql.secret"},
+                SQLSERVER,
+                config_dir=Path(directory),
+            )
+        assert credential is not None
+        self.assertEqual(credential.secret, " s3cr3t ")
+
     def test_failures_name_the_reference_but_never_a_value(self) -> None:
         cases = [
             ({"auth": "token"}, SQLSERVER, "unsupported_auth"),

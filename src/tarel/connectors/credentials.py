@@ -78,7 +78,8 @@ def _resolve_secret(name: str, reference: object, config_dir: Path | None) -> st
         if not path.is_absolute() and config_dir is not None:
             path = config_dir / path
         try:
-            secret = path.read_text(encoding="utf-8").strip()
+            # Only the line ending an editor adds; spaces can be part of a password.
+            secret = path.read_text(encoding="utf-8").rstrip("\r\n")
         except OSError:
             raise ConnectorFailure(
                 "secret_not_resolved", f"Secret file for [{name}] could not be read: {path}"
