@@ -202,12 +202,13 @@ class Dialog:
     def ask_hub(self) -> Path | None:
         self.heading(2, "TAREL hub")
         self.say("     Folder of your TAREL hub checkout, for connectors beyond the core.")
-        self.say(f"     {self.style.dim('Press Enter without a folder to use only the core.')}")
-        self.say("")
         default = os.environ.get("TAREL_HUB", "")
+        hint = "Type none to use only the core." if default else "Press Enter to use only the core."
+        self.say(f"     {self.style.dim(hint)}")
+        self.say("")
         while True:
             answer = self.prompt("Hub folder", default)
-            if not answer:
+            if not answer or answer.lower() == "none":
                 self.done("Core only")
                 return None
             hub = Path(answer).expanduser().resolve()

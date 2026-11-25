@@ -29,7 +29,8 @@ A short dialog asks three things:
    line it prints; `tarel bundle profile` shows that command. It needs only Python. You can
    also choose the system yourself or use this computer.
 2. **The TAREL hub.** The folder of a hub checkout, for connectors beyond the core. The
-   environment variable `TAREL_HUB` sets the default. Press Enter to use only the core.
+   environment variable `TAREL_HUB` sets the default. Type `none` (or press Enter without a
+   default) to use only the core.
 3. **What to include.** Data sources and extras, from the core and from the hub catalog.
 
 After a summary, TAREL downloads the wheels, pins them by hash, tests the bundle, and writes

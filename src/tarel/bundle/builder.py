@@ -205,6 +205,14 @@ def _write_licenses(wheels: Path, bundle: Path) -> None:
                     continue
                 if "licenses" in parts[1:-1] or _LICENSE_FILE.match(parts[-1]):
                     inner = parts[2:] if parts[1] == "licenses" else parts[1:]
+                    if any(
+                        part in ("", ".", "..") or ":" in part or "\\" in part for part in inner
+                    ):
+                        # A wheel is untrusted input; nothing in it may write outside licenses/.
+                        raise BundleFailure(
+                            "bundle_wheel_unsafe_path",
+                            f"{path.name} contains an unsafe file name: {member}.",
+                        )
                     target = bundle / "licenses" / name / Path(*inner)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(archive.read(member))

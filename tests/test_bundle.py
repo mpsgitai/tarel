@@ -281,6 +281,15 @@ class ResolveTests(unittest.TestCase):
             names = sorted(path.name.split("-")[0] for path in wheels.glob("*.whl"))
         self.assertEqual(names, ["app", "base", "lib", "speedup"])
 
+    def test_patch_level_markers_count_for_any_patch_release(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            wheels = Path(folder)
+            write_wheel(wheels, "app", "1.0", ('helper; python_full_version >= "3.12.1"',))
+            write_wheel(wheels, "helper", "1.0")
+            complete_for_target(wheels, ["app"], WINDOWS, lambda _: None)
+            names = sorted(path.name.split("-")[0] for path in wheels.glob("*.whl"))
+        self.assertEqual(names, ["app", "helper"])
+
     def test_url_dependencies_are_refused(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             wheels = Path(folder)
@@ -363,7 +372,9 @@ class BundleFileTests(unittest.TestCase):
 
 
 class DialogTests(unittest.TestCase):
-    def run_dialog(self, answers: list[str], folder: Path) -> tuple[list[str], mock.MagicMock]:
+    def run_dialog(
+        self, answers: list[str], folder: Path, environ: dict[str, str] | None = None
+    ) -> tuple[list[str], mock.MagicMock]:
         transcript: list[str] = []
         replies = iter(answers)
 
@@ -386,7 +397,7 @@ class DialogTests(unittest.TestCase):
             folder=folder,
         )
         with (
-            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.dict("os.environ", environ or {}, clear=True),
             mock.patch(
                 "tarel.cli._bundle_dialog.build_bundle_use_case", return_value=report
             ) as build,
@@ -451,6 +462,17 @@ class DialogTests(unittest.TestCase):
         self.assertIn("No TAREL hub catalog", text)
         self.assertIn("2 hub packages found", text)
 
+    def test_none_clears_a_configured_hub(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            moved = {"TAREL_HUB": str(Path(folder) / "moved")}
+            # this computer, a stale TAREL_HUB rejected, then none; defaults; confirm.
+            answers = ["3", "", "none", "", "", ""]
+            transcript, build = self.run_dialog(answers, Path(folder), moved)
+        self.assertIsNone(build.call_args.args[0].hub)
+        text = "\n".join(transcript)
+        self.assertIn("Type none to use only the core.", text)
+        self.assertIn("Core only", text)
+
     def test_ascii_consoles_get_ascii_symbols(self) -> None:
         stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
         style = Style.for_stream(stream)
@@ -459,6 +481,19 @@ class DialogTests(unittest.TestCase):
 
 
 class FailureTests(unittest.TestCase):
+    def test_license_files_cannot_escape_the_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            bundle = Path(folder) / "a" / "b" / "bundle"
+            wheels = bundle / "wheels"
+            wheels.mkdir(parents=True)
+            with zipfile.ZipFile(wheels / "evil-1.0-py3-none-any.whl", "w") as archive:
+                archive.writestr("evil-1.0.dist-info/licenses/../../../escaped.txt", "x")
+            with self.assertRaises(BundleFailure) as caught:
+                builder._write_licenses(wheels, bundle)
+            escaped = list(Path(folder).rglob("escaped.txt"))
+        self.assertEqual(caught.exception.code, "bundle_wheel_unsafe_path")
+        self.assertEqual(escaped, [])
+
     def test_pip_errors_hide_credentials(self) -> None:
         failed = mock.Mock(
             returncode=1,

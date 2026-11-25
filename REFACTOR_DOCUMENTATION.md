@@ -307,12 +307,13 @@ Run pip as a subprocess of the current interpreter, with failures turned into Bu
 
 Complete a wheel folder for the target's environment markers.
 
-- **Input:** parameters `download: Callable[[list[str]], None]`, `local: Iterable[str]`, `roots: Iterable[str]`, `target: Target`, `wheel: Path`, `wheels: Path`
+- **Input:** parameters `download: Callable[[list[str]], None]`, `local: Iterable[str]`, `patch: str`, `roots: Iterable[str]`, `target: Target`, `wheel: Path`, `wheels: Path`
 - **Processing:**
+    - `marker_environments`: marker environments; returns `tuple[dict[str, str], ...]`.
     - `marker_environment`: marker environment; returns `dict[str, str]`.
     - `complete_for_target`: Download until the closure of ``roots`` is complete, then delete unused wheels. Raises `BundleFailure`.
     - `wheel_metadata`: wheel metadata; returns `Any`. Raises `BundleFailure`.
-- **Output:** returns `Any`, `dict[str, str]`; deletes files
+- **Output:** returns `Any`, `dict[str, str]`, `tuple[dict[str, str], ...]`; deletes files
 - **Uses:** `tarel.bundle.contracts`
 - **Used by:** `tarel.bundle.builder`
 

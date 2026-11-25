@@ -39,7 +39,17 @@ _MACHINES = {
 }
 
 
-def marker_environment(target: Target) -> dict[str, str]:
+# A target is known as "3.12", not its patch release. Markers are evaluated for the first and
+# for a late patch release, and a dependency counts if either needs it: an extra wheel is
+# harmless, a missing one breaks the offline install.
+_PATCHES = ("0", "99")
+
+
+def marker_environments(target: Target) -> tuple[dict[str, str], ...]:
+    return tuple(marker_environment(target, patch) for patch in _PATCHES)
+
+
+def marker_environment(target: Target, patch: str = "0") -> dict[str, str]:
     sys_platform, system, os_name = _SYSTEMS[target.os]
     return {
         "sys_platform": sys_platform,
@@ -47,11 +57,10 @@ def marker_environment(target: Target) -> dict[str, str]:
         "os_name": os_name,
         "platform_machine": _MACHINES[(target.os, target.arch)],
         "python_version": target.python,
-        # The patch level is unknown; .0 is the conservative reading of "3.12".
-        "python_full_version": f"{target.python}.0",
+        "python_full_version": f"{target.python}.{patch}",
         "implementation_name": "cpython",
         "platform_python_implementation": "CPython",
-        "implementation_version": f"{target.python}.0",
+        "implementation_version": f"{target.python}.{patch}",
         "platform_release": "",
         "platform_version": "",
         "extra": "",
@@ -92,13 +101,13 @@ def complete_for_target(
     every constraint named, instead of producing a bundle that cannot install.
     """
     packaging = _packaging()
-    environment = marker_environment(target)
+    environments = marker_environments(target)
     roots = tuple(roots)
     protected = {_normalize(name) for name in local}
     walk: _Walk | None = None
     for _ in range(_MAX_ROUNDS):
         index = _index(wheels, packaging)
-        walk = _closure(index, roots, environment, packaging)
+        walk = _closure(index, roots, environments, packaging)
         if not walk.missing:
             for name, wheel in index.items():
                 if name not in walk.needed:
@@ -141,7 +150,7 @@ def _explain(walk: _Walk) -> str:
 def _closure(
     index: dict[str, _Wheel],
     roots: tuple[str, ...],
-    environment: dict[str, str],
+    environments: tuple[dict[str, str], ...],
     packaging: Any,
 ) -> _Walk:
     """Walk the closure of ``roots`` with the target's markers."""
@@ -177,7 +186,9 @@ def _closure(
             dependency = requirement_type(text)
             marker = dependency.marker
             if marker is None or any(
-                marker.evaluate({**environment, "extra": extra}) for extra in active_extras
+                marker.evaluate({**environment, "extra": extra})
+                for environment in environments
+                for extra in active_extras
             ):
                 queue.append((dependency, label))
     missing: dict[str, str] = {}
