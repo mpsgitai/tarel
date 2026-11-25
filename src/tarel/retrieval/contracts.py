@@ -69,6 +69,32 @@ class EmbeddingBackend(Protocol):
         ...
 
 
+class RerankerBackend(Protocol):
+    """The only reranker behavior required by TAREL retrieval."""
+
+    def score(self, query: str, texts: tuple[str, ...]) -> tuple[float, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ModelSpec:
+    """Declarative pinned model download link supplied by a retrieval plugin."""
+
+    name: str
+    filename: str
+    url: str
+    sha256: str
+    size: int
+    source: str
+    task: str = "embedding"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDownloadResult:
+    path: Path
+    spec: ModelSpec
+    reused: bool
+
+
 @dataclass(frozen=True, slots=True)
 class IndexMetadata:
     contract_version: str

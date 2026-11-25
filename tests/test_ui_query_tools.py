@@ -24,7 +24,7 @@ from tests.test_object_families import _graph as _family_graph
 from tests.test_ui import _graph
 
 # Patch targets: where the use cases look these names up.
-LOCAL_EMBEDDING = "tarel.retrieval.application.LlamaCppEmbedding"
+LOCAL_EMBEDDING = "tarel.retrieval.application._create_local_embedder"
 LOAD_PROVIDER = "tarel.annotations.application.load_provider"
 LOAD_CONNECTOR = "tarel.connectors.application.load_connector"
 

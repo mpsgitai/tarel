@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 
 from tarel.atomic import write_atomic
 from tarel.retrieval.contracts import RetrievalFailure
-from tarel.retrieval.local import DEFAULT_MODEL_NAME, default_model_path, model_spec
+from tarel.retrieval.local import DEFAULT_MODEL_NAME, default_model_path
+from tarel.retrieval.plugins import installed_local_model_specs
 
 if TYPE_CHECKING:
     from tarel.runtime import TarelRuntime
@@ -59,12 +60,18 @@ class RetrievalSettings:
             raise RetrievalFailure("invalid_retrieval_settings", "Invalid model choice.")
         if type(self.rerank_depth) is not int or not 1 <= self.rerank_depth <= 100:
             raise RetrievalFailure("invalid_retrieval_settings", "Rerank depth must be 1–100.")
+        specs = installed_local_model_specs()
         for task, choice in (("embedding", self.embedding), ("reranker", self.reranker)):
-            if (
-                choice is not None and choice.provider == "local"
-                and model_spec(choice.model).task != task
-            ):
-                raise RetrievalFailure("invalid_retrieval_settings", "Model has the wrong task.")
+            if choice is not None and choice.provider == "local" and specs:
+                spec = specs.get(choice.model)
+                if spec is None:
+                    raise RetrievalFailure(
+                        "unknown_model", f"Unknown local retrieval model: {choice.model}"
+                    )
+                if spec.task != task:
+                    raise RetrievalFailure(
+                        "invalid_retrieval_settings", "Model has the wrong task."
+                    )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

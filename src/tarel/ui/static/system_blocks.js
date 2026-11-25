@@ -136,6 +136,25 @@ function buildSystemBlockElements(scopedObjects, mode) {
 
   // Group objects by system and graph.
   const systems = new Map();
+  if (!isLineage) {
+    for (const workspace of state.data?.workspaces || []) {
+      for (const system of workspace.systems || []) {
+        if (!system?.name || systems.has(system.name)) continue;
+        if (state.scopeFilters?.systems?.size && !state.scopeFilters.systems.has(system.name)) continue;
+        const graphMap = new Map();
+        for (const graphName of system.graphs || []) graphMap.set(graphName, []);
+        systems.set(system.name, {
+          name: system.name,
+          objects: [],
+          graphs: graphMap,
+          areas: new Set((system.areas || []).map(a => a.name).filter(Boolean)),
+          reviewed: 0,
+          draft: 0,
+          missing: 0,
+        });
+      }
+    }
+  }
   for (const item of activeObjects) {
     const sys = blockSystemName(item);
     if (!systems.has(sys)) {

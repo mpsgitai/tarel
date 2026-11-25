@@ -328,9 +328,27 @@ function focusMembership(id) {
   return state.focusSelection?.members.find(item => item.id === id)?.focuses || [];
 }
 
+function workspaceSystemNames() {
+  const names = [];
+  for (const workspace of state.data?.workspaces || []) {
+    for (const system of workspace.systems || []) {
+      if (system?.name) names.push(system.name);
+    }
+  }
+  return names;
+}
+
+function emptyWorkspaceSystems(objects) {
+  const populated = new Set((objects || []).map(item => item.system).filter(Boolean));
+  return unique(workspaceSystemNames()).filter(name => !populated.has(name));
+}
+
 function initializeScopeFilters() {
   const facets = {
-    systems: unique(state.data.objects.map(item => item.system).filter(Boolean)),
+    systems: unique([
+      ...state.data.objects.map(item => item.system).filter(Boolean),
+      ...workspaceSystemNames(),
+    ]),
     areas: unique(state.data.objects.map(item => item.area_ref).filter(Boolean)),
     graphs: unique(state.data.objects.map(item => item.graph)),
     schemas: unique(state.data.objects.map(item => item.schema_ref)),
@@ -581,8 +599,12 @@ function renderGraph() {
   $("#canvas-title").textContent = focusCount
     ? `Report filter · ${focusCount} report${focusCount === 1 ? "" : "s"}`
     : state.canvasMode === "space" ? "Information space" : state.lineageProcessNodes ? "Processes & data" : "Data flow";
+  const emptySystems = emptyWorkspaceSystems(objects);
+  const emptySuffix = emptySystems.length
+    ? ` · ${emptySystems.length} empty system${emptySystems.length === 1 ? "" : "s"} (${emptySystems.join(", ")})`
+    : "";
   $("#canvas-subtitle").textContent = state.canvasMode === "space"
-    ? `${objects.length} objects · ${graphRelationshipSummary(graphEdgesForView(objectIds))} · ${lanes.length} schema spaces`
+    ? `${objects.length} objects · ${graphRelationshipSummary(graphEdgesForView(objectIds))} · ${lanes.length} schema spaces${emptySuffix}`
     : `${objects.length} graph objects · ${activeLineageFlows().edges.length} data flows${baseLineageFlows().truncated ? ` of ${baseLineageFlows().total_edges}` : ""}${focusCount ? ` · ${state.focusSelection.origins.length} origins` : ` · ${data.lineages.length} documents`}`;
 }
 

@@ -42,7 +42,7 @@ class ExplicitUIRuntimeTests(TestCase):
 
             missing = backend.read("/api/index/status")
             with patch(
-                "tarel.retrieval.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+                "tarel.retrieval.application._create_local_embedder", return_value=_FakeEmbedding(),
             ):
                 updated = backend.mutate("/api/index/build", {})
             ready = backend.read("/api/index/status")
@@ -74,7 +74,7 @@ class ExplicitUIRuntimeTests(TestCase):
             )
 
             with patch(
-                "tarel.retrieval.application.LlamaCppEmbedding", return_value=_FakeEmbedding(),
+                "tarel.retrieval.application._create_local_embedder", return_value=_FakeEmbedding(),
             ):
                 result = backend.mutate("/api/index/build", {})
             with self.assertRaises(UIFailure) as raised:

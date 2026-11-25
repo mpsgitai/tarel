@@ -15,7 +15,7 @@ from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResul
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphDocument
 from tarel.object_families import FamilyAttribute, ObjectFamily, ObjectFamilyFailure
-from tarel.retrieval.local import LOCAL_EMBEDDING_INPUT
+LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 from tarel.runtime import TarelRuntime
 from tarel.sdk import Tarel
 from tarel.workspaces.core import create_workspace, define_system
@@ -59,7 +59,9 @@ class ObjectFamilyApplicationTests(TestCase):
         graph_before = self.sdk.graph.load("commerce").to_dict()
         model = self.project / "test-embedding.gguf"
         model.write_bytes(b"deterministic test model")
-        with patch("tarel.retrieval.application.LlamaCppEmbedding", return_value=_Embedding()):
+        with patch(
+            "tarel.retrieval.application._create_local_embedder", return_value=_Embedding()
+        ):
             index = self.sdk.index.build("commerce", model_path=model)
             index_before = index.path.read_bytes()
             packet = self.sdk.context.graph("commerce", "sales_2024_01", model_path=model)

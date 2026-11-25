@@ -19,7 +19,7 @@ from tarel.retrieval.catalog import list_models
 from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.local import DEFAULT_MODEL_NAME, sha256_file
 from tarel.retrieval.remote import HTTPEmbedding, HTTPRetrievalClient, indexed_rows, rerank_remote
-from tarel.retrieval.rerank import LocalQwenReranker, rerank_results
+from tarel.retrieval.rerank import rerank_results
 from tarel.retrieval.settings import index_namespace, load_settings, snapshot_runtime
 from tarel.sdk import ModelChoice, RetrievalSettings, Tarel
 from tarel.ui.backend import (
@@ -34,7 +34,7 @@ from tests.test_retrieval import _FakeEmbedding, _retrieval_graph
 from tests.test_retrieval_workflow import _focus
 
 # Patch targets: where the use cases look these names up.
-LOCAL_EMBEDDING = "tarel.retrieval.application.LlamaCppEmbedding"
+LOCAL_EMBEDDING = "tarel.retrieval.application._create_local_embedder"
 HTTP_EMBEDDING = "tarel.retrieval.application.HTTPEmbedding"
 RESOLVE_MODEL_PATH = "tarel.retrieval.application.resolve_model_path"
 
@@ -249,7 +249,7 @@ class RetrievalSelectionTests(TestCase):
                         payload = json.loads(machine.getvalue())
                         if command == "models":
                             self.assertEqual(payload["provider"], "local")
-                            self.assertIn(DEFAULT_MODEL_NAME, text.getvalue())
+                            self.assertIn("Embedding models (local):", text.getvalue())
                         else:
                             self.assertEqual(payload, Tarel(Path(temporary) / ".tarel")
                                              .retrieval.settings().to_dict())
@@ -376,7 +376,7 @@ class RetrievalSelectionTests(TestCase):
             sdk.runtime.graph_store().save(graph)
             with (
                 patch("tarel.retrieval.local.sha256_file", wraps=sha256_file) as hashed,
-                patch("tarel.retrieval.rerank.LocalQwenReranker") as factory,
+                patch("tarel.retrieval.rerank._create_local_reranker") as factory,
             ):
                 factory.return_value.score.return_value = (0.9, 0.1)
                 for _ in range(2):
@@ -432,13 +432,40 @@ class RetrievalSelectionTests(TestCase):
             factory.return_value.embed_query.assert_not_called()
 
     def test_local_catalog_separates_embedding_and_reranker(self):
-        embedding = list_models()
-        reranker = list_models(task="reranker")
-        self.assertEqual([row["id"] for row in embedding["models"]], [DEFAULT_MODEL_NAME])
-        self.assertEqual(len(reranker["models"]), 1)
-        self.assertTrue(reranker["models"][0]["downloadable"])
-        with self.assertRaises(RetrievalFailure):
-            RetrievalSettings(embedding=ModelChoice(model=reranker["models"][0]["id"]))
+        from tarel.retrieval.contracts import ModelSpec
+
+        specs = {
+            DEFAULT_MODEL_NAME: ModelSpec(
+                name=DEFAULT_MODEL_NAME,
+                filename="embed.gguf",
+                url="https://models.example.test/embed.gguf",
+                sha256="0" * 64,
+                size=10,
+                source="https://models.example.test/embed",
+                task="embedding",
+            ),
+            "qwen3-reranker-0.6b-q4-k-m": ModelSpec(
+                name="qwen3-reranker-0.6b-q4-k-m",
+                filename="rerank.gguf",
+                url="https://models.example.test/rerank.gguf",
+                sha256="1" * 64,
+                size=10,
+                source="https://models.example.test/rerank",
+                task="reranker",
+            ),
+        }
+        with (
+            patch("tarel.retrieval.catalog.installed_local_model_specs", return_value=specs),
+            patch("tarel.retrieval.local.installed_local_model_specs", return_value=specs),
+            patch("tarel.retrieval.settings.installed_local_model_specs", return_value=specs),
+        ):
+            embedding = list_models()
+            reranker = list_models(task="reranker")
+            self.assertEqual([row["id"] for row in embedding["models"]], [DEFAULT_MODEL_NAME])
+            self.assertEqual(len(reranker["models"]), 1)
+            self.assertTrue(reranker["models"][0]["downloadable"])
+            with self.assertRaises(RetrievalFailure):
+                RetrievalSettings(embedding=ModelChoice(model=reranker["models"][0]["id"]))
 
     def test_invalid_settings_fail_before_persistence(self):
         for payload in (
@@ -802,44 +829,15 @@ class HTTPRetrievalTests(TestCase):
                     rerank_remote(choice, "revenue", ("sales",))
 
 
-class LocalRerankerTests(TestCase):
-    def test_reads_only_final_native_logits_and_bounds_long_documents(self):
-        class FakeLlama:
-            ctx = object()
+class LocalRerankerPluginTests(TestCase):
+    def test_missing_local_reranker_plugin_raises_clear_error(self):
+        from tarel.retrieval.plugins import load_local_reranker_plugin
 
-            def __init__(self, **kwargs):
-                self.arguments = kwargs
-                self.evaluations = []
-
-            def tokenize(self, value, **kwargs):
-                if value == b"no":
-                    return [0]
-                if value == b"yes":
-                    return [1]
-                return [2] * len(value)
-
-            def reset(self):
-                pass
-
-            def eval(self, tokens):
-                self.evaluations.append(tokens)
-
-            @property
-            def scores(self):
-                raise AssertionError("The unused Python scores buffer must not be read.")
-
-        calls = []
-
-        def logits(context, row):
-            calls.append((context, row))
-            return [0.0, 2.0]
-
-        module = SimpleNamespace(Llama=FakeLlama, llama_get_logits_ith=logits)
-        with patch.dict("sys.modules", {"llama_cpp": module}):
-            ranker = LocalQwenReranker(Path("model.gguf"), n_threads=4)
-            scores = ranker.score("revenue", ("x" * 10_000,))
-        self.assertGreater(scores[0], 0.8)
-        self.assertEqual(calls, [(ranker.model.ctx, -1)])
-        self.assertEqual(len(ranker.model.evaluations[0]), 4096)
-        self.assertFalse(ranker.model.arguments["logits_all"])
-        self.assertEqual(ranker.model.arguments["n_gpu_layers"], 0)
+        with (
+            patch("tarel.retrieval.plugins.entry_points") as eps,
+            self.assertRaises(RetrievalFailure) as raised,
+        ):
+            eps.return_value.select.return_value = ()
+            load_local_reranker_plugin()
+        self.assertEqual(raised.exception.code, "missing_local_rag_dependency")
+        self.assertIn("tarel-retrieval-llamacpp", str(raised.exception))

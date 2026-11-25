@@ -238,7 +238,9 @@ def run_lineage_analysis_use_case(
             runtime=runtime,
         )
 
-    from tarel.lineage.sqlglot_adapter import analyze_with_sqlglot
+    from tarel.lineage.analyzers import load_lineage_analyzer
+
+    static_analyzer = load_lineage_analyzer("sqlglot")
 
     store = resolve_runtime(runtime).lineage_store()
     document = store.load(name)
@@ -256,7 +258,7 @@ def run_lineage_analysis_use_case(
             progress,
             f"definition {task_number}/{len(selected)}: {task.definition_name} [sqlglot]",
         )
-        result = analyze_with_sqlglot(definition, dialect=dialect)
+        result = static_analyzer.analyze(definition, dialect=dialect)
         if result.complete and result.analysis is not None:
             try:
                 document = apply_lineage_proposal(
@@ -267,9 +269,9 @@ def run_lineage_analysis_use_case(
                         "definition_id": task.definition_id,
                         "task_id": task.id,
                     },
-                    analyzer="sqlglot",
+                    analyzer=static_analyzer.name,
                     analyzer_version=(
-                        f"{result.adapter_version}+sqlglot.{result.sqlglot_version}"
+                        f"{result.adapter_version}+{static_analyzer.name}.{result.engine_version}"
                     ),
                     dialect=result.dialect,
                 )
@@ -287,8 +289,8 @@ def run_lineage_analysis_use_case(
             document,
             definition.id,
             code=failure_code,
-            provider="sqlglot",
-            model=result.sqlglot_version,
+            provider=static_analyzer.name,
+            model=result.engine_version,
         )
         path = store.save(document)
         _report(progress, f"  unresolved [{failure_code}]")

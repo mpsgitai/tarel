@@ -26,17 +26,17 @@ from tarel.connectors.contracts import (
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import AnnotationEvidence, GraphAnnotation
 from tarel.retrieval.bm25 import rank_bm25
-from tarel.retrieval.contracts import RankedDocument, RetrievalDocument, RetrievalFailure
+from tarel.retrieval.contracts import (
+    ModelSpec,
+    RankedDocument,
+    RetrievalDocument,
+    RetrievalFailure,
+)
 from tarel.retrieval.documents import build_retrieval_documents
 from tarel.retrieval.index import (
     FileRetrievalIndex,
 )
 from tarel.retrieval.local import (
-    EMBEDDING_TOKEN_CAPACITY,
-    LOCAL_EMBEDDING_INPUT,
-    MODEL_SPECS,
-    LlamaCppEmbedding,
-    ModelSpec,
     download_model,
     qwen_embedding_query,
 )
@@ -49,7 +49,8 @@ from tarel.sdk import Tarel
 from tarel.workspaces.core import create_workspace, define_system
 
 # Patch targets: where the use cases look these names up.
-LOCAL_EMBEDDING = "tarel.retrieval.application.LlamaCppEmbedding"
+LOCAL_EMBEDDING = "tarel.retrieval.application._create_local_embedder"
+LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 
 
 class RetrievalTests(TestCase):
@@ -528,10 +529,17 @@ class RetrievalTests(TestCase):
                         active -= 1
                     return [1.0, 0.0]
 
-            backend = object.__new__(LlamaCppEmbedding)
-            backend._model_path = model
-            backend._model = NativeProbe()
-            backend._embedding_lock = threading.Lock()
+            class _LockedBackend(_FakeEmbedding):
+                def __init__(self) -> None:
+                    self._lock = threading.Lock()
+                    self._probe = NativeProbe()
+
+                def embed_query(self, text: str) -> tuple[float, ...]:
+                    with self._lock:
+                        vec = self._probe.embed(text)
+                    return (float(vec[0]), float(vec[1]))
+
+            backend = _LockedBackend()
             sdk.runtime._embedding_backends.clear()
             sdk.runtime.embedding_backend(
                 model, None, model_sha256, lambda: backend,
@@ -1283,7 +1291,10 @@ class RetrievalTests(TestCase):
                 source="local test fixture",
             )
             with (
-                patch.dict(MODEL_SPECS, {"fixture": spec}),
+                patch(
+                    "tarel.retrieval.local.installed_local_model_specs",
+                    return_value={"fixture": spec},
+                ),
                 patch("urllib.request.urlopen", return_value=BytesIO(payload)),
             ):
                 downloaded = download_model(name="fixture", target=target)
@@ -1303,7 +1314,10 @@ class RetrievalTests(TestCase):
         )
         with (
             TemporaryDirectory(dir=Path.cwd()) as temporary_directory,
-            patch.dict(MODEL_SPECS, {"unsafe": spec}),
+            patch(
+                "tarel.retrieval.local.installed_local_model_specs",
+                return_value={"unsafe": spec},
+            ),
             self.assertRaisesRegex(RetrievalFailure, "HTTPS source URL"),
         ):
             download_model(
@@ -1311,112 +1325,14 @@ class RetrievalTests(TestCase):
                 target=Path(temporary_directory) / "model.gguf",
             )
 
-    def test_llama_cpp_embeds_document_batches_as_single_sequences(self) -> None:
-        texts = tuple(f"document-{number} " * 180 for number in range(1, 4))
-        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
-            model_path = Path(temporary_directory) / "model.gguf"
-            model_path.write_bytes(b"test model")
-            runtime = _StrictLlama()
-            with patch.dict(
-                sys.modules,
-                {"llama_cpp": SimpleNamespace(Llama=lambda **kwargs: runtime)},
-            ):
-                embedder = LlamaCppEmbedding(model_path, n_threads=2)
-
-            vectors = embedder.embed_documents(texts, batch_size=3)
-
-        self.assertEqual(runtime.calls, list(texts))
-        self.assertEqual(vectors, ((0.6, 0.8),) * 3)
-
-    def test_llama_cpp_runtime_separates_token_capacity_from_document_batches(self) -> None:
-        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
-            model_path = Path(temporary_directory) / "model.gguf"
-            model_path.write_bytes(b"test model")
-            runtime = _StrictLlama()
-            settings: dict[str, object] = {}
-
-            def create(**kwargs: object) -> _StrictLlama:
-                settings.update(kwargs)
-                return runtime
-
-            with patch.dict(sys.modules, {"llama_cpp": SimpleNamespace(Llama=create)}):
-                embedder = LlamaCppEmbedding(model_path)
-
-            embedder.embed_documents(("one", "two", "three"), batch_size=1)
-            embedder.embed_query("one question")
-
-        # Batch size must not change the capacity a single document gets.
-        self.assertEqual(settings["n_ctx"], EMBEDDING_TOKEN_CAPACITY)
-        self.assertEqual(settings["n_batch"], EMBEDDING_TOKEN_CAPACITY)
-        self.assertLess(settings["n_ubatch"], EMBEDDING_TOKEN_CAPACITY)
-        self.assertEqual(runtime.truncate, [False] * 4)
-
-    def test_llama_cpp_refuses_overlong_input_instead_of_shortening_it(self) -> None:
-        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
-            model_path = Path(temporary_directory) / "model.gguf"
-            model_path.write_bytes(b"test model")
-            runtime = _StrictLlama()
-            with patch.dict(
-                sys.modules,
-                {"llama_cpp": SimpleNamespace(Llama=lambda **kwargs: runtime)},
-            ):
-                embedder = LlamaCppEmbedding(model_path)
-
-        fits = "word " * EMBEDDING_TOKEN_CAPACITY
-        embedder.embed_documents((fits,), batch_size=1)
-        self.assertEqual(len(runtime.calls), 1)
-
-        too_long = fits + "PROTECTED_LAST_WORD"
-        with self.assertRaises(RetrievalFailure) as document:
-            embedder.embed_documents(("short", too_long), batch_size=2)
-        with self.assertRaises(RetrievalFailure) as query:
-            embedder.embed_query(too_long)
-
-        for raised in (document.exception, query.exception):
-            self.assertEqual(raised.code, "embedding_input_too_long")
-            self.assertIn(str(EMBEDDING_TOKEN_CAPACITY), str(raised))
-            self.assertNotIn("PROTECTED_LAST_WORD", str(raised))
-        self.assertIn("Document 2 of 2", str(document.exception))
-        self.assertIn("Query with its retrieval instruction", str(query.exception))
-        self.assertNotIn(too_long, runtime.calls)
-
-    def test_query_budget_includes_the_retrieval_instruction(self) -> None:
-        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
-            model_path = Path(temporary_directory) / "model.gguf"
-            model_path.write_bytes(b"test model")
-            runtime = _StrictLlama()
-            with patch.dict(
-                sys.modules,
-                {"llama_cpp": SimpleNamespace(Llama=lambda **kwargs: runtime)},
-            ):
-                embedder = LlamaCppEmbedding(model_path)
-
-        instruction = embedder.token_count(qwen_embedding_query(""))
-        self.assertGreater(instruction, 0)
-        question = "word " * (EMBEDDING_TOKEN_CAPACITY - instruction)
-        embedder.embed_query(question)
-        with self.assertRaises(RetrievalFailure) as raised:
-            embedder.embed_query(question + "word")
-        self.assertEqual(raised.exception.code, "embedding_input_too_long")
-
-    def test_llama_cpp_batch_failure_identifies_position_without_text(self) -> None:
-        protected_text = "PROTECTED_DOCUMENT_VALUE"
-        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
-            model_path = Path(temporary_directory) / "model.gguf"
-            model_path.write_bytes(b"test model")
-            runtime = _StrictLlama(fail_on=protected_text)
-            with patch.dict(
-                sys.modules,
-                {"llama_cpp": SimpleNamespace(Llama=lambda **kwargs: runtime)},
-            ):
-                embedder = LlamaCppEmbedding(model_path)
-
-            with self.assertRaises(RetrievalFailure) as raised:
-                embedder.embed_documents(("safe", protected_text), batch_size=2)
-
-        self.assertEqual(raised.exception.code, "embedding_failed")
-        self.assertIn("document 2 of 2", str(raised.exception).casefold())
-        self.assertNotIn(protected_text, str(raised.exception))
+    def test_missing_local_retrieval_plugin_raises_clear_error(self) -> None:
+        with (
+            patch("tarel.retrieval.local.installed_local_model_specs", return_value={}),
+            self.assertRaises(RetrievalFailure) as raised,
+        ):
+            download_model()
+        self.assertEqual(raised.exception.code, "missing_local_rag_dependency")
+        self.assertIn("tarel-retrieval-llamacpp", str(raised.exception))
 
 
 class _FakeEmbedding:

@@ -385,6 +385,11 @@ def _graph_objects(graph: GraphDocument) -> tuple[GraphNode, ...]:
     )
 
 
+def _looks_like_connection_url(value: str) -> bool:
+    stripped = value.strip()
+    return "://" in stripped
+
+
 def _config_path(
     source: SourceProfile,
     *,
@@ -401,7 +406,20 @@ def _config_path(
                 "source_config_not_resolved",
                 f"Source config environment reference is not set: {value}",
             )
-        return Path(resolved).expanduser()
+        if _looks_like_connection_url(resolved):
+            raise SourceFailure(
+                "invalid_config_reference",
+                f"Source config environment reference env:{value} looks like a connection URL, "
+                "not a TOML file path. Point --config-ref env:VAR to a .toml file, "
+                "or omit --config-ref to use the connector's TAREL_<CONNECTOR>_URL variable.",
+            )
+        path = Path(resolved).expanduser()
+        if not path.is_file():
+            raise SourceFailure(
+                "config_not_found",
+                f"Configuration file referenced by env:{value} was not found.",
+            )
+        return path
     root = (runtime.root if runtime is not None else Path.cwd() / ".tarel").resolve()
     path = (root / value).resolve()
     if not path.is_relative_to(root):

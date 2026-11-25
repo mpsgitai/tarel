@@ -22,7 +22,7 @@ from tarel.lineage.source import (
     SourceMaterialization,
     SourceStep,
 )
-from tarel.retrieval.local import LOCAL_EMBEDDING_INPUT
+LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 from tarel.sdk import Tarel, WorkspaceScope
 from tarel.workspaces.contracts import WorkspaceFailure
 from tarel.workspaces.core import create_workspace, define_system
@@ -178,8 +178,12 @@ class SDKTests(TestCase):
                 for mode in ("lexical", "bm25")
             }
             with patch(
-                "tarel.lineage.application.LlamaCppEmbedding",
-                return_value=_Embedding(),
+                "tarel.lineage.application.load_local_embedding_plugin",
+                return_value=type(
+                    "_Plugin",
+                    (),
+                    {"create_embedder": staticmethod(lambda *a, **k: _Embedding())},
+                )(),
             ):
                 for mode in ("vector", "hybrid"):
                     searches[mode] = sdk.lineage.find_workspace(
@@ -306,7 +310,22 @@ class SDKTests(TestCase):
             right.write_text(packet.canonical_json(), encoding="utf-8")
             comparison = sdk.context.diff(left, right)
             impact = sdk.context.impact(left, graph="demo")
-            model_status = sdk.model.status(model_path=root / "missing.gguf")
+            from tarel.retrieval.contracts import ModelSpec
+
+            spec = ModelSpec(
+                name="qwen3-embedding-0.6b-q4-k-m",
+                filename="qwen3-embedding-0.6b-q4-k-m.gguf",
+                url="https://models.example.test/embed.gguf",
+                sha256="0" * 64,
+                size=10,
+                source="https://models.example.test/embed",
+                task="embedding",
+            )
+            with patch(
+                "tarel.retrieval.local.installed_local_model_specs",
+                return_value={spec.name: spec},
+            ):
+                model_status = sdk.model.status(model_path=root / "missing.gguf")
 
         self.assertEqual(created.path, root / "state/workspaces/enterprise/workspace.json")
         self.assertEqual([item.label for item in zone.objects], ["mart.Sales"])
@@ -380,7 +399,9 @@ class SDKTests(TestCase):
             sdk.runtime.graph_store().save(graph)
             embedding = _Embedding()
             progress: list[tuple[int, int, str]] = []
-            with patch("tarel.retrieval.application.LlamaCppEmbedding", return_value=embedding):
+            with patch(
+                "tarel.retrieval.application._create_local_embedder", return_value=embedding
+            ):
                 built = sdk.index.build(
                     "demo",
                     model_path=model,

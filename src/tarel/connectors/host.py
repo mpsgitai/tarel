@@ -24,6 +24,13 @@ _BUILTIN_MANIFESTS = {
 }
 
 
+def list_connectors() -> tuple[ConnectorCheck, ...]:
+    """Return checks for built-in and installed connectors without importing drivers."""
+    names = set(_BUILTIN_MANIFESTS)
+    names.update(ep.name for ep in entry_points().select(group="tarel.connectors"))
+    return tuple(check_connector(name) for name in sorted(names))
+
+
 def check_connector(name: str) -> ConnectorCheck:
     manifest = load_manifest(name)
     missing = tuple(

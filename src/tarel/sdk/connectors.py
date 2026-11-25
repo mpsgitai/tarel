@@ -7,6 +7,7 @@ from pathlib import Path
 from tarel.connectors.application import (
     check_connector_use_case,
     discover_catalog_use_case,
+    list_connectors_use_case,
     probe_connector_use_case,
     profile_connector_use_case,
     sample_connector_use_case,
@@ -24,6 +25,9 @@ class ConnectorAPI:
     """Call connectors directly without applying a named source permission policy."""
 
     __slots__ = ()
+
+    def list(self) -> tuple[ConnectorCheck, ...]:
+        return list_connectors_use_case()
 
     def check(self, name: str) -> ConnectorCheck:
         return check_connector_use_case(name)
