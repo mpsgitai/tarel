@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -134,6 +135,9 @@ def _components(args: argparse.Namespace) -> int:
 
 
 def _recipe(args: argparse.Namespace) -> Recipe:
+    # Only `build` takes --tarel-from; `plan` has nothing to build locally.
+    local = getattr(args, "tarel_from", None)
+    tarel_from = local.resolve() if local is not None else None
     chosen = tuple(
         part.strip() for value in args.components for part in value.split(",") if part.strip()
     )
@@ -144,7 +148,9 @@ def _recipe(args: argparse.Namespace) -> Recipe:
             )
         recipe = load_recipe_use_case(args.recipe)
         if args.hub is not None:
-            recipe = Recipe(recipe.target, recipe.components, recipe.tarel_version, args.hub)
+            recipe = dataclasses.replace(recipe, hub=args.hub)
+        if tarel_from is not None:
+            recipe = dataclasses.replace(recipe, tarel_from=tarel_from)
         return recipe
     if not args.target:
         raise BundleFailure(
@@ -155,6 +161,7 @@ def _recipe(args: argparse.Namespace) -> Recipe:
         components=chosen,
         tarel_version=__version__,
         hub=args.hub,
+        tarel_from=tarel_from,
     )
 
 
@@ -179,7 +186,6 @@ def _build(args: argparse.Namespace, recipe: Recipe) -> int:
         recipe,
         output.resolve(),
         replace=args.replace,
-        tarel_from=args.tarel_from,
         on_step=(lambda step: print(f"  {step} ...", flush=True)) if text else (lambda _: None),
     )
     if args.save_recipe is not None:

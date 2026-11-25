@@ -141,6 +141,8 @@ class Recipe:
     components: tuple[str, ...]
     tarel_version: str
     hub: Path | None = None
+    # A local TAREL wheel or checkout that replaces the PyPI release; a rebuild must use it too.
+    tarel_from: Path | None = None
 
     def to_toml(self) -> str:
         lines = [
@@ -152,6 +154,8 @@ class Recipe:
         ]
         if self.hub is not None:
             lines.append(f"hub = {_toml_string(str(self.hub))}")
+        if self.tarel_from is not None:
+            lines.append(f"tarel_from = {_toml_string(str(self.tarel_from))}")
         lines += ["", "[target]"]
         lines += [f"{key} = {_toml_string(value)}" for key, value in self.target.to_dict().items()]
         return "\n".join(lines) + "\n"
@@ -175,11 +179,13 @@ class Recipe:
         if not isinstance(target, dict):
             raise BundleFailure("bundle_recipe_invalid", "Recipe needs a [target] table.")
         hub = data.get("hub")
+        tarel_from = data.get("tarel_from")
         return cls(
             target=Target.from_dict(target),
             components=tuple(components),
             tarel_version=str(data.get("tarel", "")),
             hub=Path(hub) if isinstance(hub, str) and hub else None,
+            tarel_from=Path(tarel_from) if isinstance(tarel_from, str) and tarel_from else None,
         )
 
 

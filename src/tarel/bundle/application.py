@@ -41,7 +41,6 @@ def build_bundle_use_case(
     output: Path,
     *,
     replace: bool = False,
-    tarel_from: Path | None = None,
     on_step: StepCallback = lambda _: None,
 ) -> BundleReport:
     """Build the bundle for ``recipe`` into the ZIP file ``output``."""
@@ -54,7 +53,7 @@ def build_bundle_use_case(
     if not output.parent.is_dir():
         raise BundleFailure("bundle_output_folder", f"Folder does not exist: {output.parent}.")
     plan = plan_bundle_use_case(recipe)
-    return build_bundle(plan, output, tarel_from=tarel_from, on_step=on_step)
+    return build_bundle(plan, output, tarel_from=recipe.tarel_from, on_step=on_step)
 
 
 def default_output(recipe: Recipe, folder: Path) -> Path:

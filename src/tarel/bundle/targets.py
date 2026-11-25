@@ -79,8 +79,15 @@ def parse_profile(line: str) -> Target:
             )
         glibc = ".".join(version.split(".")[:2])
     if os_name == "macos" and mac_version != "-":
-        macos = f"{mac_version.split('.')[0]}.0"
+        macos = macos_baseline(mac_version)
     return Target(os=os_name, arch=arch, python=python, glibc=glibc, macos=macos)
+
+
+def macos_baseline(version: str) -> str:
+    """The wheel-tag version of a macOS release: 10.x keeps its minor, 11 and later do not."""
+    major, _, rest = version.partition(".")
+    minor = rest.split(".")[0] if major == "10" and rest else "0"
+    return f"{major}.{minor}"
 
 
 def _os_from_platform(build_platform: str) -> OperatingSystem:

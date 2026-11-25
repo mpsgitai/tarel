@@ -228,7 +228,7 @@ Offline install bundles: TAREL, chosen hub packages, and their wheels for one ta
 
 Use cases for offline bundles. The CLI dialog and the plain commands both call only these.
 
-- **Input:** parameters `folder: Path`, `hub: Path | None`, `on_step: StepCallback`, `output: Path`, `path: Path`, `recipe: Recipe`, `replace: bool`, `tarel_from: Path | None`; reads files
+- **Input:** parameters `folder: Path`, `hub: Path | None`, `on_step: StepCallback`, `output: Path`, `path: Path`, `recipe: Recipe`, `replace: bool`; reads files
 - **Processing:**
     - `list_components_use_case`: list components (use case); returns `tuple[Component, ...]`. Calls `available_components`.
     - `plan_bundle_use_case`: Resolve the recipe into exact requirements without downloading anything. Calls `select_components`, `BundlePlan`, `available_components`, `pip_platforms`; raises `BundleFailure`.
@@ -307,7 +307,7 @@ Run pip as a subprocess of the current interpreter, with failures turned into Bu
 
 Complete a wheel folder for the target's environment markers.
 
-- **Input:** parameters `download: Callable[[list[str]], None]`, `roots: Iterable[str]`, `target: Target`, `wheel: Path`, `wheels: Path`
+- **Input:** parameters `download: Callable[[list[str]], None]`, `local: Iterable[str]`, `roots: Iterable[str]`, `target: Target`, `wheel: Path`, `wheels: Path`
 - **Processing:**
     - `marker_environment`: marker environment; returns `dict[str, str]`.
     - `complete_for_target`: Download until the closure of ``roots`` is complete, then delete unused wheels. Raises `BundleFailure`.
@@ -320,11 +320,12 @@ Complete a wheel folder for the target's environment markers.
 
 Describe a target machine and translate it into the wheel platform tags pip understands.
 
-- **Input:** parameters `host: Target`, `line: str`, `target: Target`, `text: str`
+- **Input:** parameters `host: Target`, `line: str`, `target: Target`, `text: str`, `version: str`
 - **Processing:**
     - `host_profile`: The profile line this machine would print; lets "same as this machine" share one parser.
     - `host_target`: host target; returns `Target`.
     - `parse_profile`: Read the line printed by :data:`PROFILE_COMMAND`. Calls `Target`; raises `BundleFailure`.
+    - `macos_baseline`: The wheel-tag version of a macOS release: 10.x keeps its minor, 11 and later do not.
     - `parse_target`: Read ``host``, a profile line, or a slug such as ``linux-x86_64-py3.12-glibc2.28``. Calls `Target`; raises `BundleFailure`.
     - `pip_platforms`: Every platform tag a wheel may carry and still install on ``target``, best first. Raises `BundleFailure`.
     - `can_test_install`: True when a bundle for ``target`` can really be installed on ``host`` as a test.

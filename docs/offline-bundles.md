@@ -46,7 +46,8 @@ tarel bundle build --recipe tarel-offline-0.0.5-windows-x86_64-py3.12.toml
 
 `--tarel-from PATH` bundles an unreleased TAREL wheel or source checkout instead of the PyPI
 release. Locally built wheels, from `--tarel-from` and from the hub, always replace a downloaded
-wheel of the same project, even when both carry the same version number.
+wheel of the same project, even when both carry the same version number. A saved recipe keeps the
+`--tarel-from` path, so `--recipe` rebuilds from the same source.
 
 `--target` accepts `host`, a pasted profile line, or a short name such as
 `windows-x86_64-py3.12`, `linux-arm64-py3.13-glibc2.31`, or `macos-arm64-py3.12-macos14.0`.
@@ -73,16 +74,20 @@ transfer path, as for any other file brought into the network.
 
 - **Dependencies for the target, not for this computer.** `pip download --platform` picks wheels
   for the target but evaluates environment markers such as `sys_platform == "win32"` for the
-  computer it runs on. TAREL therefore walks the dependency closure with the target's markers,
-  downloads what is missing, and removes what the target would never install.
+  computer it runs on. TAREL therefore downloads each package without its dependencies, walks
+  the dependency closure with the target's markers, downloads what is missing, and removes what
+  the target would never install. Every version constraint on a package counts, from every
+  package that needs it.
 - **Wheels only.** Source distributions are refused, so nothing is compiled on the target.
 - **Native libraries inside the wheel.** When a hub package offers a `binary` extra (for example
   PostgreSQL's bundled libpq), the bundle always takes it; an offline target cannot install
   system libraries later.
+- **Every file against the target.** Each wheel is checked against the target's tags, Python
+  version, and hash, even when a real install follows: a newer computer also accepts wheels that
+  need a newer glibc or macOS than the target has.
 - **A real install where possible.** When this computer matches the target (system, processor,
-  Python, and a glibc or macOS version at least as new), the bundle is installed offline into a
-  fresh virtual environment and every included package is imported. Otherwise each file is
-  checked against the target's tags and Python version, and the report says the bundle was
-  only resolved. Install it once on a matching test computer before rollout.
+  Python, and a glibc or macOS version at least as new), the bundle is also installed offline
+  into a fresh virtual environment and every included package is imported. Otherwise the report
+  says the bundle was only resolved. Install it once on a matching test computer before rollout.
 - **Repeatable.** The same recipe and the same upstream wheels give a byte-identical ZIP file:
   sorted entries and fixed timestamps. The bundle records no build time, host name, or path.

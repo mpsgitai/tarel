@@ -75,6 +75,9 @@ def build_bundle(
             run_pip(
                 [
                     "download",
+                    # complete_for_target picks dependencies with the target's markers; pip would
+                    # resolve them for this machine and fail on, or fetch, host-only packages.
+                    "--no-deps",
                     "--dest",
                     str(wheels),
                     "--find-links",
@@ -88,7 +91,13 @@ def build_bundle(
         on_step(f"Downloading packages for {plan.target.label}")
         download(list(plan.requirements))
         _prefer_local(local, wheels)
-        complete_for_target(wheels, plan.requirements, plan.target, download)
+        complete_for_target(
+            wheels,
+            plan.requirements,
+            plan.target,
+            download,
+            local=[_project_of(path) for path in local.glob("*.whl")],
+        )
 
         on_step("Pinning every file by its SHA-256 hash")
         packages = _write_lock(wheels, root / "bundle" / "requirements.lock")
@@ -212,12 +221,14 @@ def _check_install(plan: BundlePlan, root: Path, on_step: StepCallback) -> Insta
         "-r",
         str(bundle / "requirements.lock"),
     ]
+    on_step("Checking every file against the target")
+    # Always, even before a real install: a newer host also accepts wheels that need a newer
+    # glibc or macOS than the target. pip evaluates markers for this Python even here, so
+    # dependencies stay with complete_for_target; the dry run proves tags, Requires-Python and
+    # hashes per file.
+    dry_run = ["--dry-run", "--no-deps", "--ignore-installed", "--target", str(root / "dry")]
+    run_pip([*install, *dry_run, *target_arguments(plan.target)], code="bundle_check_failed")
     if not can_test_install(plan.target, host_target()):
-        on_step("Checking that the bundle resolves offline for the target")
-        # pip evaluates markers for this Python even here, so dependencies stay with
-        # complete_for_target; the dry run proves tags, Requires-Python and hashes per file.
-        dry_run = ["--dry-run", "--no-deps", "--ignore-installed", "--target", str(root / "dry")]
-        run_pip([*install, *dry_run, *target_arguments(plan.target)], code="bundle_check_failed")
         return "resolved"
 
     on_step("Installing into a clean environment, without internet")

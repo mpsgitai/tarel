@@ -23,7 +23,7 @@ from tarel.bundle.application import (
     save_recipe_use_case,
 )
 from tarel.bundle.catalog import available_components, hub_components
-from tarel.bundle.contracts import BundleFailure, BundleReport, Recipe, Target
+from tarel.bundle.contracts import BundleFailure, BundlePlan, BundleReport, Recipe, Target
 from tarel.bundle.pip import run_pip
 from tarel.bundle.resolve import complete_for_target
 from tarel.bundle.targets import (
@@ -100,6 +100,9 @@ class TargetTests(unittest.TestCase):
         self.assertEqual((linux.arch, linux.glibc, linux.slug), ("arm64", "2.31", linux.slug))
         mac = parse_profile("tarel-target:1 cpython macosx-11.0-arm64 3.12 arm64 - 14.5")
         self.assertEqual(mac.macos, "14.0")
+        intel = parse_profile("tarel-target:1 cpython macosx-10.9-x86_64 3.12 x86_64 - 10.15.7")
+        self.assertEqual(intel.macos, "10.15")
+        self.assertEqual(pip_platforms(intel), ("macosx_10_15_x86_64",))
 
     def test_profile_rejections_are_explained(self) -> None:
         cases = {
@@ -155,8 +158,31 @@ class RecipeAndPlanTests(unittest.TestCase):
             components=("sqlserver", "postgres"),
             tarel_version=__version__,
             hub=Path('C:\\hub "x"'),
+            tarel_from=Path("/src/tarel"),
         )
         self.assertEqual(Recipe.from_toml(recipe.to_toml()), recipe)
+
+    def test_saved_recipe_rebuilds_with_the_same_local_tarel(self) -> None:
+        calls: list[Path | None] = []
+
+        def fake_build(
+            plan: BundlePlan, output: Path, *, tarel_from: Path | None, on_step: object
+        ) -> BundleReport:
+            calls.append(tarel_from)
+            return BundleReport(output, 1, plan.target, (), "resolved", ())
+
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch("tarel.bundle.application.build_bundle", side_effect=fake_build),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            root = Path(folder)
+            recipe = root / "r.toml"
+            common = ["--format", "json", "--replace"]
+            first = ["--target", "windows-x86_64-py3.12", "--tarel-from", str(root / "src")]
+            main(["bundle", "build", *first, "--save-recipe", str(recipe), *common])
+            main(["bundle", "build", "--recipe", str(recipe), *common])
+        self.assertEqual(calls, [(root / "src").resolve()] * 2)
 
     def test_plan_resolves_core_extras_and_hub_packages(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -227,13 +253,30 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(fetched, [["speedup", "tzdata"]])
         self.assertEqual(names, ["app", "lib", "speedup", "tzdata"])
 
-    def test_version_conflict_is_refused(self) -> None:
+    def test_every_edge_constrains_the_chosen_wheel(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            wheels = Path(folder)
+            write_wheel(wheels, "app", "1.0", ("lib>=1", 'winhelper; sys_platform == "win32"'))
+            write_wheel(wheels, "winhelper", "1.0", ("lib>=2",))
+            write_wheel(wheels, "lib", "1.0")
+            fetched: list[list[str]] = []
+
+            def download(requirements: list[str]) -> None:
+                fetched.append(requirements)
+                write_wheel(wheels, "lib", "2.5")
+
+            complete_for_target(wheels, ["app"], WINDOWS, download)
+            names = sorted(path.name for path in wheels.glob("lib-*"))
+        self.assertEqual(fetched, [["lib>=1,>=2"]])
+        self.assertEqual(names, ["lib-2.5-py3-none-any.whl"])
+
+    def test_a_local_wheel_that_fails_a_constraint_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             wheels = Path(folder)
             write_wheel(wheels, "app", "1.0", ("lib>=3",))
             write_wheel(wheels, "lib", "2.0")
             with self.assertRaises(BundleFailure) as caught:
-                complete_for_target(wheels, ["app"], WINDOWS, lambda _: None)
+                complete_for_target(wheels, ["app"], WINDOWS, lambda _: None, local=["lib"])
         self.assertEqual(caught.exception.code, "bundle_resolve_conflict")
 
 
@@ -399,13 +442,30 @@ class FailureTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as folder,
             mock.patch("tarel.bundle.builder.ensure_pip"),
-            mock.patch("tarel.bundle.builder.run_pip", side_effect=missing),
+            mock.patch("tarel.bundle.builder.run_pip", side_effect=missing) as run,
             self.assertRaises(BundleFailure) as caught,
         ):
             builder.build_bundle(
                 plan, Path(folder) / "b.zip", tarel_from=None, on_step=lambda _: None
             )
         self.assertIn("no wheel for Windows · x86-64 · Python 3.12", str(caught.exception))
+        # pip would resolve dependencies for this machine; the target walk picks them instead.
+        self.assertIn("--no-deps", run.call_args.args[0])
+
+    def test_files_are_checked_against_the_target_before_a_host_install(self) -> None:
+        plan = plan_bundle_use_case(Recipe(WINDOWS, (), __version__))
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch("tarel.bundle.builder.can_test_install", return_value=True),
+            mock.patch("tarel.bundle.builder.run_pip") as run,
+            mock.patch("tarel.bundle.builder._run"),
+        ):
+            result = builder._check_install(plan, Path(folder), lambda _: None)
+        self.assertEqual(result, "installed")
+        first, second = (call.args[0] for call in run.call_args_list)
+        self.assertIn("--dry-run", first)
+        self.assertIn("win_amd64", first)
+        self.assertNotIn("--dry-run", second)
 
     def test_build_refuses_bad_outputs(self) -> None:
         recipe = Recipe(WINDOWS, (), __version__)
