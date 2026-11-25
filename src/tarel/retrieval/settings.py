@@ -65,10 +65,11 @@ class RetrievalSettings:
             if choice is not None and choice.provider == "local" and specs:
                 spec = specs.get(choice.model)
                 if spec is None:
-                    raise RetrievalFailure(
-                        "unknown_model", f"Unknown local retrieval model: {choice.model}"
-                    )
-                if spec.task != task:
+                    if choice.model != DEFAULT_MODEL_NAME or task != "embedding":
+                        raise RetrievalFailure(
+                            "unknown_model", f"Unknown local retrieval model: {choice.model}"
+                        )
+                elif spec.task != task:
                     raise RetrievalFailure(
                         "invalid_retrieval_settings", "Model has the wrong task."
                     )

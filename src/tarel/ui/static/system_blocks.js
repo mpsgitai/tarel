@@ -138,12 +138,16 @@ function buildSystemBlockElements(scopedObjects, mode) {
   const systems = new Map();
   if (!isLineage) {
     const selectedSystems = state.scopeFilters?.systems;
+    const selectedGraphs = state.scopeFilters?.graphs;
     for (const workspace of state.data?.workspaces || []) {
       for (const system of workspace.systems || []) {
         if (!system?.name || systems.has(system.name)) continue;
         if (selectedSystems instanceof Set && !selectedSystems.has(system.name)) continue;
         const graphMap = new Map();
-        for (const graphName of system.graphs || []) graphMap.set(graphName, []);
+        for (const graphName of system.graphs || []) {
+          if (selectedGraphs instanceof Set && !selectedGraphs.has(graphName)) continue;
+          graphMap.set(graphName, []);
+        }
         systems.set(system.name, {
           name: system.name,
           objects: [],
