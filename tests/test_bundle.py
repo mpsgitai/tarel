@@ -117,6 +117,7 @@ class TargetTests(unittest.TestCase):
             "tarel-target:1 cpython linux-x86_64 3.12 x86_64 - -": "bundle_profile_libc",
             "tarel-target:1 cpython win-amd64 3.10 AMD64 - -": "bundle_target_python",
             "tarel-target:1 cpython win32 3.12 AMD64 - -": "bundle_profile_arch",
+            "tarel-target:1 cpython win-amd64 3.13t AMD64 - -": "bundle_profile_python",
         }
         for line, code in cases.items():
             with self.subTest(line=line), self.assertRaises(BundleFailure) as caught:
@@ -324,6 +325,26 @@ class ResolveTests(unittest.TestCase):
         self.assertIn("shared: ", message)
         self.assertIn("foo 2.0 needs shared>=2", message)
         self.assertIn("bar 1.0 needs shared<2", message)
+
+    def test_a_replaced_wheel_no_longer_constrains_its_old_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            wheels = Path(folder)
+            write_wheel(wheels, "app", "1.0", ("b", "a"))
+            write_wheel(wheels, "a", "2.0", ("shared>=2",))
+            write_wheel(wheels, "b", "1.0", ("a<2", "shared<2"))
+            fetched: list[list[str]] = []
+            releases = {"a<2": ("a", "1.0", ("shared<2",)), "shared<2": ("shared", "1.5", ())}
+
+            def download(requirements: list[str]) -> None:
+                fetched.append(requirements)
+                for requirement in requirements:
+                    write_wheel(wheels, *releases[requirement])
+
+            complete_for_target(wheels, ["app"], WINDOWS, download)
+            names = sorted(path.name for path in wheels.glob("*.whl"))
+        self.assertEqual(fetched, [["a<2", "shared<2"]])
+        self.assertIn("a-1.0-py3-none-any.whl", names)
+        self.assertIn("shared-1.5-py3-none-any.whl", names)
 
     def test_a_local_wheel_that_fails_a_constraint_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

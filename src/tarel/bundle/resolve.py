@@ -122,6 +122,10 @@ def complete_for_target(
                 )
             # A newer download replaces it; two wheels of one project would be ambiguous.
             index[name].path.unlink()
+        if walk.stale:
+            # Walk again without the discarded versions first: their own dependencies must not
+            # constrain what is downloaded next.
+            continue
         try:
             download(sorted(walk.missing.values()))
         except BundleFailure as exc:

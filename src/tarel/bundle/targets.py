@@ -16,7 +16,8 @@ PROFILE_PREFIX = "tarel-target:1"
 PROFILE_COMMAND = (
     'python -c "import platform as p,sys,sysconfig as s;'
     "print('tarel-target:1',sys.implementation.name,s.get_platform(),"
-    "'.'.join(map(str,sys.version_info[:2])),p.machine(),"
+    "'.'.join(map(str,sys.version_info[:2]))+('t' if s.get_config_var('Py_GIL_DISABLED') else ''),"
+    "p.machine(),"
     "'-'.join(p.libc_ver()),p.mac_ver()[0] or '-')\""
 )
 
@@ -35,6 +36,8 @@ def host_profile() -> str:
     """The profile line this machine would print; lets "same as this machine" share one parser."""
     libc = "-".join(platform.libc_ver())
     python = ".".join(map(str, sys.version_info[:2]))
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        python += "t"
     return " ".join(
         (
             PROFILE_PREFIX,
@@ -64,6 +67,12 @@ def parse_profile(line: str) -> Target:
     if implementation != "cpython":
         raise BundleFailure(
             "bundle_profile_python", f"Only CPython targets are supported, not {implementation}."
+        )
+    if python.endswith("t"):
+        # Free-threaded CPython needs cp3XXt wheels, which few native packages publish yet.
+        raise BundleFailure(
+            "bundle_profile_python",
+            f"The target runs free-threaded Python {python}; use the regular build there.",
         )
     arch = _arch_from_platform(build_platform, machine)
     os_name = _os_from_platform(build_platform)

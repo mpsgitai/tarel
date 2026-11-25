@@ -5597,7 +5597,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `architecture_unavailable` | [ui/backend.py](../src/tarel/ui/backend.py#L468) |
 | `batch_failed` | [annotations/runner.py](../src/tarel/annotations/runner.py#L103) |
 | `bundle_component_unknown` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L128) |
-| `bundle_direct_reference` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L167) |
+| `bundle_direct_reference` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L171) |
 | `bundle_hub_clash` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L114) |
 | `bundle_hub_invalid` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L68) |
 | `bundle_hub_missing` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L64) |
@@ -5608,29 +5608,29 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `bundle_output_exists` | [bundle/application.py](../src/tarel/bundle/application.py#L50) |
 | `bundle_output_folder` | [bundle/application.py](../src/tarel/bundle/application.py#L54) |
 | `bundle_output_suffix` | [bundle/application.py](../src/tarel/bundle/application.py#L48) |
-| `bundle_pip_unavailable` | [bundle/pip.py](../src/tarel/bundle/pip.py#L25), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L265) |
-| `bundle_profile_arch` | [bundle/targets.py](../src/tarel/bundle/targets.py#L106), [bundle/targets.py](../src/tarel/bundle/targets.py#L110) |
-| `bundle_profile_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L59) |
-| `bundle_profile_libc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L75) |
-| `bundle_profile_os` | [bundle/targets.py](../src/tarel/bundle/targets.py#L122) |
-| `bundle_profile_python` | [bundle/targets.py](../src/tarel/bundle/targets.py#L65) |
+| `bundle_pip_unavailable` | [bundle/pip.py](../src/tarel/bundle/pip.py#L25), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L269) |
+| `bundle_profile_arch` | [bundle/targets.py](../src/tarel/bundle/targets.py#L115), [bundle/targets.py](../src/tarel/bundle/targets.py#L119) |
+| `bundle_profile_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L62) |
+| `bundle_profile_libc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L84) |
+| `bundle_profile_os` | [bundle/targets.py](../src/tarel/bundle/targets.py#L131) |
+| `bundle_profile_python` | [bundle/targets.py](../src/tarel/bundle/targets.py#L68), [bundle/targets.py](../src/tarel/bundle/targets.py#L73) |
 | `bundle_recipe_conflict` | [cli/bundle.py](../src/tarel/cli/bundle.py#L146) |
 | `bundle_recipe_format` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L172) |
 | `bundle_recipe_invalid` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L168), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L177), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L180) |
 | `bundle_recipe_missing` | [bundle/application.py](../src/tarel/bundle/application.py#L67) |
 | `bundle_resolve_conflict` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L118) |
-| `bundle_resolve_incomplete` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L130) |
+| `bundle_resolve_incomplete` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L134) |
 | `bundle_target_arch` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L47) |
-| `bundle_target_glibc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L167) |
-| `bundle_target_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L141) |
+| `bundle_target_glibc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L176) |
+| `bundle_target_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L150) |
 | `bundle_target_missing` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L101) |
 | `bundle_target_os` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L45) |
 | `bundle_target_python` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L50) |
 | `bundle_target_required` | [cli/bundle.py](../src/tarel/cli/bundle.py#L156) |
 | `bundle_target_version` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L56), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L58), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L60) |
 | `bundle_version_mismatch` | [bundle/application.py](../src/tarel/bundle/application.py#L21) |
-| `bundle_wheel_duplicate` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L236) |
-| `bundle_wheel_metadata` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L234), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L252) |
+| `bundle_wheel_duplicate` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L240) |
+| `bundle_wheel_metadata` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L238), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L256) |
 | `bundle_wheel_name` | [bundle/builder.py](../src/tarel/bundle/builder.py#L171) |
 | `bundle_wheel_unsafe_path` | [bundle/builder.py](../src/tarel/bundle/builder.py#L212) |
 | `catalog_not_found` | [connectors/catalog.py](../src/tarel/connectors/catalog.py#L51) |
