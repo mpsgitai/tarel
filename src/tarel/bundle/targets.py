@@ -22,6 +22,7 @@ PROFILE_COMMAND = (
 
 # Oldest glibc baseline that manylinux wheels are still built for (manylinux2014).
 _OLDEST_GLIBC_MINOR = 17
+_32_BIT = {"win32", "i686", "i386", "x86", "armv7l", "armv6l"}
 _MACHINES: dict[str, Architecture] = {
     "x86_64": "x86_64",
     "amd64": "x86_64",
@@ -64,9 +65,7 @@ def parse_profile(line: str) -> Target:
         raise BundleFailure(
             "bundle_profile_python", f"Only CPython targets are supported, not {implementation}."
         )
-    arch = _MACHINES.get(machine.lower())
-    if arch is None:
-        raise BundleFailure("bundle_profile_arch", f"Unsupported processor: {machine}.")
+    arch = _arch_from_platform(build_platform, machine)
     os_name = _os_from_platform(build_platform)
     glibc = None
     macos = None
@@ -88,6 +87,29 @@ def macos_baseline(version: str) -> str:
     major, _, rest = version.partition(".")
     minor = rest.split(".")[0] if major == "10" and rest else "0"
     return f"{major}.{minor}"
+
+
+def _arch_from_platform(build_platform: str, machine: str) -> Architecture:
+    """The architecture of the Python that loads the wheels, which can differ from the machine.
+
+    Windows on ARM runs x64 Python under emulation, and 64-bit Windows runs 32-bit Python; the
+    build platform says which one the target uses. Only a macOS universal2 build runs natively
+    either way, so there the machine decides.
+    """
+    suffix = build_platform.rsplit("-", 1)[-1].lower()
+    if suffix == "universal2":
+        suffix = machine.lower()
+    arch = _MACHINES.get(suffix)
+    if arch is not None:
+        return arch
+    if suffix in _32_BIT:
+        raise BundleFailure(
+            "bundle_profile_arch",
+            f"The target runs 32-bit Python ({build_platform}); install 64-bit Python there.",
+        )
+    raise BundleFailure(
+        "bundle_profile_arch", f"Unsupported processor: {build_platform} on {machine}."
+    )
 
 
 def _os_from_platform(build_platform: str) -> OperatingSystem:

@@ -100,6 +100,12 @@ class TargetTests(unittest.TestCase):
         self.assertEqual((linux.arch, linux.glibc, linux.slug), ("arm64", "2.31", linux.slug))
         mac = parse_profile("tarel-target:1 cpython macosx-11.0-arm64 3.12 arm64 - 14.5")
         self.assertEqual(mac.macos, "14.0")
+        emulated = parse_profile("tarel-target:1 cpython win-amd64 3.12 ARM64 - -")
+        self.assertEqual(emulated.arch, "x86_64")
+        universal = parse_profile(
+            "tarel-target:1 cpython macosx-10.13-universal2 3.12 arm64 - 14.5"
+        )
+        self.assertEqual(universal.arch, "arm64")
         intel = parse_profile("tarel-target:1 cpython macosx-10.9-x86_64 3.12 x86_64 - 10.15.7")
         self.assertEqual(intel.macos, "10.15")
         self.assertEqual(pip_platforms(intel), ("macosx_10_15_x86_64",))
@@ -110,6 +116,7 @@ class TargetTests(unittest.TestCase):
             "tarel-target:1 pypy win-amd64 3.12 AMD64 - -": "bundle_profile_python",
             "tarel-target:1 cpython linux-x86_64 3.12 x86_64 - -": "bundle_profile_libc",
             "tarel-target:1 cpython win-amd64 3.10 AMD64 - -": "bundle_target_python",
+            "tarel-target:1 cpython win32 3.12 AMD64 - -": "bundle_profile_arch",
         }
         for line, code in cases.items():
             with self.subTest(line=line), self.assertRaises(BundleFailure) as caught:
