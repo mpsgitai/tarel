@@ -247,7 +247,7 @@ Build one offline bundle: collect wheels, pin them by hash, prove they install, 
 - **Input:** parameters `on_step: StepCallback`, `output: Path`, `plan: BundlePlan`, `tarel_from: Path | None`; reads files
 - **Processing:**
     - `build_bundle`: build bundle; returns `BundleReport`. Calls `ensure_pip`, `BundleReport`, `complete_for_target`, `run_pip`, `target_arguments`; raises `BundleFailure`.
-- **Output:** returns `BundleReport`; deletes files; writes files
+- **Output:** returns `BundleReport`; deletes files; writes files; writes temporary files
 - **Uses:** `tarel.bundle.contracts`, `tarel.bundle.pip`, `tarel.bundle.resolve`, `tarel.bundle.targets`
 - **Used by:** `tarel.bundle.application`
 

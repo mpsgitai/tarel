@@ -12,6 +12,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 from tarel.bundle.contracts import (
     BUNDLE_FORMAT,
@@ -321,17 +322,22 @@ def _write_text(path: Path, text: str) -> None:
 
 
 def _write_zip(source: Path, output: Path) -> None:
-    folder = output.stem
-    partial = output.with_name(output.name + ".partial")
+    # A new file with a random name, created exclusively: a predictable name in a shared folder
+    # could be planted beforehand as a link to another file, which writing would then overwrite.
+    handle, name = tempfile.mkstemp(prefix=f".{output.name}.", suffix=".partial", dir=output.parent)
+    partial = Path(name)
     try:
-        _zip_folder(source, partial, folder)
+        with os.fdopen(handle, "wb") as stream:
+            _zip_folder(source, stream, output.stem)
+        # mkstemp creates the file private to this user; a bundle is meant to be copied around.
+        partial.chmod(0o644)
+        partial.replace(output)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
-    partial.replace(output)
 
 
-def _zip_folder(source: Path, destination: Path, folder: str) -> None:
+def _zip_folder(source: Path, destination: BinaryIO, folder: str) -> None:
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
         for path in sorted(p for p in source.rglob("*") if p.is_file()):
             relative = path.relative_to(source).as_posix()

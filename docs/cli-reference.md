@@ -5602,8 +5602,8 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `bundle_hub_invalid` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L68) |
 | `bundle_hub_missing` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L64) |
 | `bundle_hub_package` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L100), [bundle/catalog.py](../src/tarel/bundle/catalog.py#L105) |
-| `bundle_local_source` | [bundle/builder.py](../src/tarel/bundle/builder.py#L127) |
-| `bundle_not_a_wheel` | [bundle/builder.py](../src/tarel/bundle/builder.py#L158) |
+| `bundle_local_source` | [bundle/builder.py](../src/tarel/bundle/builder.py#L128) |
+| `bundle_not_a_wheel` | [bundle/builder.py](../src/tarel/bundle/builder.py#L159) |
 | `bundle_not_interactive` | [cli/bundle.py](../src/tarel/cli/bundle.py#L93) |
 | `bundle_output_exists` | [bundle/application.py](../src/tarel/bundle/application.py#L50) |
 | `bundle_output_folder` | [bundle/application.py](../src/tarel/bundle/application.py#L54) |
@@ -5631,8 +5631,8 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `bundle_version_mismatch` | [bundle/application.py](../src/tarel/bundle/application.py#L21) |
 | `bundle_wheel_duplicate` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L240) |
 | `bundle_wheel_metadata` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L238), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L256) |
-| `bundle_wheel_name` | [bundle/builder.py](../src/tarel/bundle/builder.py#L171) |
-| `bundle_wheel_unsafe_path` | [bundle/builder.py](../src/tarel/bundle/builder.py#L212) |
+| `bundle_wheel_name` | [bundle/builder.py](../src/tarel/bundle/builder.py#L172) |
+| `bundle_wheel_unsafe_path` | [bundle/builder.py](../src/tarel/bundle/builder.py#L213) |
 | `catalog_not_found` | [connectors/catalog.py](../src/tarel/connectors/catalog.py#L51) |
 | `change_report_conflict` | [graph/change_store.py](../src/tarel/graph/change_store.py#L26) |
 | `change_report_not_found` | [graph/change_store.py](../src/tarel/graph/change_store.py#L52) |

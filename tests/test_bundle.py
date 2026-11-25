@@ -392,7 +392,24 @@ class BundleFileTests(unittest.TestCase):
             self.assertEqual(first.read_bytes(), second.read_bytes())
             with zipfile.ZipFile(first) as archive:
                 self.assertIn("b/requirements.lock", archive.namelist())
-            self.assertFalse((first.parent / "b.zip.partial").exists())
+            self.assertEqual(sorted(p.name for p in first.parent.iterdir()), ["b.zip"])
+
+    def test_a_planted_partial_link_is_not_followed(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "bundle").mkdir()
+            (root / "bundle" / "INSTALL.md").write_text("x", encoding="utf-8")
+            victim = root / "victim.txt"
+            victim.write_text("keep", encoding="utf-8")
+            out = root / "out"
+            out.mkdir()
+            try:
+                (out / "b.zip.partial").symlink_to(victim)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            builder._write_zip(root / "bundle", out / "b.zip")
+            self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+            self.assertTrue(zipfile.is_zipfile(out / "b.zip"))
 
     def test_local_builds_replace_downloaded_releases(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
