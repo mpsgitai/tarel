@@ -8,27 +8,27 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import os
 import shutil
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest import SkipTest, TestCase
 
 from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
 from tarel.graph.build import build_graph_from_catalog
-from tarel.retrieval.contracts import RetrievalFailure
+from tarel.retrieval.contracts import EmbeddingBackend, RetrievalFailure
 from tarel.retrieval.documents import build_retrieval_documents
 from tarel.retrieval.local import (
     DEFAULT_MODEL_NAME,
-    EMBEDDING_TOKEN_CAPACITY,
-    LlamaCppEmbedding,
     default_model_path,
     model_spec,
     qwen_embedding_query,
     sha256_file,
 )
+from tarel.retrieval.plugins import load_local_embedding_plugin
 from tarel.sdk import Tarel
 
 _UNIT = "order"
@@ -36,8 +36,14 @@ _LEGACY_TOKEN_LIMIT = 256
 
 
 def real_model_or_skip() -> Path:
+    try:
+        load_local_embedding_plugin()
+    except RetrievalFailure as exc:
+        raise SkipTest(str(exc)) from exc
     if importlib.util.find_spec("llama_cpp") is None:
-        raise SkipTest("llama-cpp-python is not installed; install tarel[local-rag].")
+        raise SkipTest(
+            "llama-cpp-python is not installed; install `tarel-retrieval-llamacpp` from TAREL Hub."
+        )
     configured = os.getenv("TAREL_EMBEDDING_MODEL")
     path = Path(configured) if configured else default_model_path()
     if not path.is_file():
@@ -48,13 +54,19 @@ def real_model_or_skip() -> Path:
 
 
 class QwenRuntimeTests(TestCase):
-    embedder: ClassVar[LlamaCppEmbedding]
+    embedder: ClassVar[Any]
     model_path: ClassVar[Path]
+    token_capacity: ClassVar[int]
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_path = real_model_or_skip()
-        cls.embedder = LlamaCppEmbedding(cls.model_path, n_threads=4)
+        embedder: EmbeddingBackend = load_local_embedding_plugin().create_embedder(
+            cls.model_path, n_threads=4
+        )
+        cls.embedder = embedder
+        assert embedder.max_input_tokens is not None
+        cls.token_capacity = embedder.max_input_tokens
 
     def _text(self, tokens: int, suffix: str = "") -> str:
         """Build a text of exactly this many real tokens, counting what the tokenizer adds."""
@@ -81,16 +93,16 @@ class QwenRuntimeTests(TestCase):
                 self.assertEqual(len(self._embed(self._text(tokens))), 1024)
 
     def test_text_at_the_limit_is_embedded_and_one_token_more_is_refused(self) -> None:
-        self.assertEqual(len(self._embed(self._text(EMBEDDING_TOKEN_CAPACITY))), 1024)
+        self.assertEqual(len(self._embed(self._text(self.token_capacity))), 1024)
 
         with self.assertRaises(RetrievalFailure) as raised:
-            self._embed(self._text(EMBEDDING_TOKEN_CAPACITY + 1))
+            self._embed(self._text(self.token_capacity + 1))
 
         self.assertEqual(raised.exception.code, "embedding_input_too_long")
-        self.assertIn(str(EMBEDDING_TOKEN_CAPACITY + 1), str(raised.exception))
+        self.assertIn(str(self.token_capacity + 1), str(raised.exception))
 
     def test_only_a_marked_document_is_cut_and_only_after_the_limit(self) -> None:
-        length = EMBEDDING_TOKEN_CAPACITY + 20
+        length = self.token_capacity + 20
         first = self.embedder.embed_cut_document(self._text(length, "diagnosis"))
         second = self.embedder.embed_cut_document(self._text(length, "stock"))
 
@@ -154,9 +166,9 @@ class QwenRuntimeTests(TestCase):
         instruction = self.embedder.token_count(qwen_embedding_query("")) - 1
         self.assertGreater(instruction, 10)
         # "Query: " alone tokenizes its space separately; before a word the space merges into it.
-        question = self._text(EMBEDDING_TOKEN_CAPACITY - instruction + 1)
+        question = self._text(self.token_capacity - instruction + 1)
         self.assertEqual(
-            self.embedder.token_count(qwen_embedding_query(question)), EMBEDDING_TOKEN_CAPACITY,
+            self.embedder.token_count(qwen_embedding_query(question)), self.token_capacity,
         )
 
         with self.assertRaises(RetrievalFailure) as raised:
@@ -181,9 +193,9 @@ class QwenRuntimeTests(TestCase):
 
     @staticmethod
     def _renormalized(vector: list[float]) -> tuple[float, ...]:
-        from tarel.retrieval.local import _normalized_vector
-
-        return _normalized_vector(vector)
+        values = tuple(float(item) for item in vector)
+        magnitude = math.sqrt(sum(item * item for item in values))
+        return tuple(item / magnitude for item in values)
 
 
 class OldIndexRuntimeTests(TestCase):
@@ -232,7 +244,7 @@ class OldIndexRuntimeTests(TestCase):
         self.assertEqual(results.hits[0].label, "dbo.Customer")
         self.assertIn("256 tokens", results.warnings[0])
 
-        embedder = LlamaCppEmbedding(self.model_path, n_threads=4)
+        embedder = load_local_embedding_plugin().create_embedder(self.model_path, n_threads=4)
         long_ids = {
             item.id for item in build_retrieval_documents(self.graph)
             if embedder.token_count(item.text) > 256

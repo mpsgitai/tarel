@@ -137,10 +137,11 @@ function buildSystemBlockElements(scopedObjects, mode) {
   // Group objects by system and graph.
   const systems = new Map();
   if (!isLineage) {
+    const selectedSystems = state.scopeFilters?.systems;
     for (const workspace of state.data?.workspaces || []) {
       for (const system of workspace.systems || []) {
         if (!system?.name || systems.has(system.name)) continue;
-        if (state.scopeFilters?.systems?.size && !state.scopeFilters.systems.has(system.name)) continue;
+        if (selectedSystems instanceof Set && !selectedSystems.has(system.name)) continue;
         const graphMap = new Map();
         for (const graphName of system.graphs || []) graphMap.set(graphName, []);
         systems.set(system.name, {

@@ -340,7 +340,12 @@ function workspaceSystemNames() {
 
 function emptyWorkspaceSystems(objects) {
   const populated = new Set((objects || []).map(item => item.system).filter(Boolean));
-  return unique(workspaceSystemNames()).filter(name => !populated.has(name));
+  const selectedSystems = state.scopeFilters?.systems;
+  return unique(workspaceSystemNames()).filter(
+    name =>
+      !populated.has(name) &&
+      (!(selectedSystems instanceof Set) || selectedSystems.has(name)),
+  );
 }
 
 function initializeScopeFilters() {
