@@ -61,12 +61,13 @@ class Style:
 
 
 def _enable_windows_ansi() -> bool:
-    if os.name != "nt":
+    # A sys.platform check (not os.name) lets mypy type ctypes.windll on every platform.
+    if sys.platform != "win32":
         return True
     try:
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined,unused-ignore]
+        kernel32 = ctypes.windll.kernel32
         handle = kernel32.GetStdHandle(-11)
         mode = ctypes.c_uint32()
         if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):

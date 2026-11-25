@@ -17,8 +17,14 @@ from unittest import mock
 
 from tarel import __version__
 from tarel.bundle import builder
-from tarel.bundle.application import plan_bundle_use_case
+from tarel.bundle.application import (
+    build_bundle_use_case,
+    plan_bundle_use_case,
+    save_recipe_use_case,
+)
+from tarel.bundle.catalog import available_components, hub_components
 from tarel.bundle.contracts import BundleFailure, BundleReport, Recipe, Target
+from tarel.bundle.pip import run_pip
 from tarel.bundle.resolve import complete_for_target
 from tarel.bundle.targets import (
     PROFILE_COMMAND,
@@ -256,6 +262,18 @@ class BundleFileTests(unittest.TestCase):
                 self.assertIn("b/requirements.lock", archive.namelist())
             self.assertFalse((first.parent / "b.zip.partial").exists())
 
+    def test_local_builds_replace_downloaded_releases(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            local, wheels = Path(folder) / "local", Path(folder) / "wheels"
+            local.mkdir()
+            wheels.mkdir()
+            write_wheel(wheels, "tarel", "0.0.5", ("pypi-only",))
+            write_wheel(wheels, "other", "1.0")
+            built = write_wheel(local, "tarel", "0.0.5", ("checkout-only",))
+            builder._prefer_local(local, wheels)
+            self.assertEqual((wheels / built.name).read_bytes(), built.read_bytes())
+            self.assertEqual(len(list(wheels.glob("*.whl"))), 2)
+
     def test_install_guide_names_the_offline_flags(self) -> None:
         guide = builder._install_guide(WINDOWS)
         self.assertIn("py -3.12 -m venv .venv", guide)
@@ -326,11 +344,127 @@ class DialogTests(unittest.TestCase):
             with self.assertRaises(Cancelled):
                 self.run_dialog(answers, Path(folder))
 
+    def test_linux_by_hand_with_hub_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            hub = write_hub(Path(folder) / "hub")
+            answers = [
+                "2",
+                "2",
+                "1",
+                "1",  # by hand: Linux, x86-64, Python 3.12
+                "2.x",
+                "2.31",  # invalid glibc, then a valid one
+                str(Path(folder) / "missing"),
+                str(hub),  # no catalog, then the hub
+                "1 2",
+                "none",
+                "",  # SQL Server and PostgreSQL, no extras, confirm
+            ]
+            transcript, build = self.run_dialog(answers, Path(folder))
+        recipe = build.call_args.args[0]
+        self.assertEqual(recipe.target.glibc, "2.31")
+        self.assertEqual(recipe.components, ("sqlserver", "postgres"))
+        text = "\n".join(transcript)
+        self.assertIn("Type a version like 2.28.", text)
+        self.assertIn("No TAREL hub catalog", text)
+        self.assertIn("2 hub packages found", text)
+
     def test_ascii_consoles_get_ascii_symbols(self) -> None:
         stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
         style = Style.for_stream(stream)
         self.assertFalse(style.unicode)
         self.assertEqual(style.text("a · b"), "a - b")
+
+
+class FailureTests(unittest.TestCase):
+    def test_pip_errors_hide_credentials(self) -> None:
+        failed = mock.Mock(
+            returncode=1,
+            stdout="",
+            stderr="Looking in https://user:token@pkgs.example/simple\nboom",
+        )
+        with (
+            mock.patch("tarel.bundle.pip.subprocess.run", return_value=failed),
+            self.assertRaises(BundleFailure) as caught,
+        ):
+            run_pip(["download", "x"], code="bundle_download_failed")
+        message = str(caught.exception)
+        self.assertNotIn("token", message)
+        self.assertIn("https://***@pkgs.example", message)
+        self.assertEqual(caught.exception.code, "bundle_download_failed")
+
+    def test_missing_wheel_names_the_target(self) -> None:
+        plan = plan_bundle_use_case(Recipe(WINDOWS, ("sqlserver",), __version__))
+        missing = BundleFailure("bundle_download_failed", "pip failed:\nNo matching distribution")
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch("tarel.bundle.builder.ensure_pip"),
+            mock.patch("tarel.bundle.builder.run_pip", side_effect=missing),
+            self.assertRaises(BundleFailure) as caught,
+        ):
+            builder.build_bundle(
+                plan, Path(folder) / "b.zip", tarel_from=None, on_step=lambda _: None
+            )
+        self.assertIn("no wheel for Windows · x86-64 · Python 3.12", str(caught.exception))
+
+    def test_build_refuses_bad_outputs(self) -> None:
+        recipe = Recipe(WINDOWS, (), __version__)
+        with tempfile.TemporaryDirectory() as folder:
+            existing = Path(folder) / "b.zip"
+            existing.write_bytes(b"keep")
+            cases = {
+                existing: "bundle_output_exists",
+                Path(folder) / "b.tar": "bundle_output_suffix",
+                Path(folder) / "no" / "b.zip": "bundle_output_folder",
+            }
+            for output, code in cases.items():
+                with self.subTest(code=code), self.assertRaises(BundleFailure) as caught:
+                    build_bundle_use_case(recipe, output)
+                self.assertEqual(caught.exception.code, code)
+            self.assertEqual(existing.read_bytes(), b"keep")
+
+    def test_hub_catalog_problems(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaises(BundleFailure) as caught:
+                hub_components(root)
+            self.assertEqual(caught.exception.code, "bundle_hub_missing")
+
+            hub = write_hub(root / "hub")
+            (hub / "packages" / "lineage-sqlglot" / "pyproject.toml").write_text("[", "utf-8")
+            with self.assertRaises(BundleFailure) as caught:
+                hub_components(hub)
+            self.assertEqual(caught.exception.code, "bundle_hub_package")
+
+            clash = write_hub(root / "clash")
+            catalog = clash / "catalog" / "catalog.toml"
+            catalog.write_text(
+                catalog.read_text("utf-8").replace('"lineage-sqlglot"', '"semantic"', 1), "utf-8"
+            )
+            with self.assertRaises(BundleFailure) as caught:
+                available_components(clash)
+            self.assertEqual(caught.exception.code, "bundle_hub_clash")
+
+    def test_cli_rejections(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            recipe = Path(folder) / "r.toml"
+            save_recipe_use_case(Recipe(WINDOWS, (), __version__), recipe)
+            commands = {
+                ("bundle", "plan", "--recipe", str(recipe), "--with", "sqlserver"): (
+                    "bundle_recipe_conflict"
+                ),
+                ("bundle", "plan"): "bundle_target_required",
+                ("bundle",): "bundle_not_interactive",
+            }
+            for command, code in commands.items():
+                errors = io.StringIO()
+                with (
+                    self.subTest(command=command),
+                    contextlib.redirect_stderr(errors),
+                    mock.patch("tarel.cli.bundle.is_interactive", return_value=False),
+                ):
+                    self.assertEqual(main(list(command)), 2)
+                self.assertIn(f"error [{code}]", errors.getvalue())
 
 
 if __name__ == "__main__":

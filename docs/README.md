@@ -7,6 +7,7 @@ Start with the [Retail DWH demo](retail-demo.md) for a local, credential-free wa
 | [CLI reference](cli-reference.md) | Look up every command, argument, default, result, and related contract |
 | [Architecture and extensions](architecture.md) | Understand the graph, adapter boundaries, and reviewed self-modification |
 | [Portable `.tarel` packages](package-format.md) | Share verified metadata snapshots without indexes, credentials, or source data |
+| [Offline bundles](offline-bundles.md) | Install TAREL and hub packages on a computer without internet access |
 | [Metadata sync](sync.md) | Publish approved metadata from several installations to a central view (experimental) |
 | [Static lineage analysis](static-lineage.md) | Use coding-agent, provider, or optional local SQLGlot analysis |
 | [Declared dbt lineage](dbt-lineage.md) | Import manifest dependencies through the shared CLI/SDK build and refresh path |

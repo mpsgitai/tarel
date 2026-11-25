@@ -87,6 +87,7 @@ def build_bundle(
 
         on_step(f"Downloading packages for {plan.target.label}")
         download(list(plan.requirements))
+        _prefer_local(local, wheels)
         complete_for_target(wheels, plan.requirements, plan.target, download)
 
         on_step("Pinning every file by its SHA-256 hash")
@@ -119,6 +120,25 @@ def _build_local(source: Path, destination: Path) -> None:
         ["wheel", "--no-deps", "--wheel-dir", str(destination), str(source)],
         code="bundle_local_build_failed",
     )
+
+
+def _prefer_local(local: Path, wheels: Path) -> None:
+    """Put every locally built wheel in place of any downloaded wheel of the same project.
+
+    pip treats a local build and a PyPI release with the same version as equal and may take
+    either; an unreleased checkout (--tarel-from) must win, or the bundle silently ships the
+    release instead.
+    """
+    for built in sorted(local.glob("*.whl")):
+        project = _project_of(built)
+        for downloaded in wheels.glob("*.whl"):
+            if _project_of(downloaded) == project:
+                downloaded.unlink()
+        (wheels / built.name).write_bytes(built.read_bytes())
+
+
+def _project_of(wheel: Path) -> str:
+    return re.sub(r"[-_.]+", "-", wheel.name.split("-", 1)[0]).lower()
 
 
 def _wheel_files(wheels: Path) -> list[Path]:

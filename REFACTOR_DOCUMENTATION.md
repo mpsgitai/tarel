@@ -16,6 +16,7 @@ How to read an entry:
 | Package | Purpose |
 | --- | --- |
 | `tarel.annotations` | Provider-neutral annotation tasks, proposals, and execution. |
+| `tarel.bundle` | Offline install bundles: TAREL, chosen hub packages, and their wheels for one target machine. |
 | `tarel.cli` | The ``tarel`` command line. |
 | `tarel.connectors` | Connector contracts and the explicit connector host. |
 | `tarel.context` | Context packets: the bounded, hashed slice of a graph that a harness hands to a model. |
@@ -52,7 +53,7 @@ TAREL: topology, annotation, retrieval, evidence, and lineage.
 - **Input:** none (constants or declarations only)
 - **Processing:** module-level constants and imports only.
 - **Output:** no return values or effects
-- **Used by:** `tarel.cli`, `tarel.packages.contracts`
+- **Used by:** `tarel.bundle.application`, `tarel.cli`, `tarel.cli._bundle_dialog`, `tarel.cli.bundle`, `tarel.packages.contracts`
 
 ### `src/tarel/__main__.py`
 
@@ -213,6 +214,126 @@ Crash-safe replacement of state files.
 - **Uses:** `tarel.file_lock`
 - **Used by:** `tarel.demo`, `tarel.discovery.store`, `tarel.entity_resolution.store`, `tarel.focus.store`, `tarel.graph.change_store`, `tarel.graph.selective`, `tarel.graph.store`, `tarel.knowledge.store`, `tarel.lineage.change_store`, `tarel.lineage.store`, `tarel.logical_joins.store`, `tarel.object_bindings.application`, `tarel.object_families.proposals`, `tarel.object_families.store`, `tarel.reference_mapping.store`, `tarel.retrieval.settings`, `tarel.semantic_concepts.store`, `tarel.semantics.store`, `tarel.sources.store`, `tarel.sync.store`, `tarel.topology.store`, `tarel.workspaces.store`
 
+### `src/tarel/bundle/__init__.py`
+
+Offline install bundles: TAREL, chosen hub packages, and their wheels for one target machine.
+
+- **Input:** none (constants or declarations only)
+- **Processing:** module-level constants and imports only.
+- **Output:** no return values or effects
+
+## `tarel.bundle`
+
+### `src/tarel/bundle/application.py`
+
+Use cases for offline bundles. The CLI dialog and the plain commands both call only these.
+
+- **Input:** parameters `folder: Path`, `hub: Path | None`, `on_step: StepCallback`, `output: Path`, `path: Path`, `recipe: Recipe`, `replace: bool`, `tarel_from: Path | None`; reads files
+- **Processing:**
+    - `list_components_use_case`: list components (use case); returns `tuple[Component, ...]`. Calls `available_components`.
+    - `plan_bundle_use_case`: Resolve the recipe into exact requirements without downloading anything. Calls `select_components`, `BundlePlan`, `available_components`, `pip_platforms`; raises `BundleFailure`.
+    - `build_bundle_use_case`: Build the bundle for ``recipe`` into the ZIP file ``output``. Calls `build_bundle`; raises `BundleFailure`.
+    - `default_output`: default output; returns `Path`.
+    - `load_recipe_use_case`: load recipe (use case); returns `Recipe`. Raises `BundleFailure`.
+    - `save_recipe_use_case`: save recipe (use case); returns `None`.
+- **Output:** returns `BundlePlan`, `BundleReport`, `Path`, `Recipe`, `tuple[Component, ...]`; writes files
+- **Uses:** `tarel`, `tarel.bundle.builder`, `tarel.bundle.catalog`, `tarel.bundle.contracts`, `tarel.bundle.targets`
+- **Used by:** `tarel.cli._bundle_dialog`, `tarel.cli.bundle`
+
+### `src/tarel/bundle/builder.py`
+
+Build one offline bundle: collect wheels, pin them by hash, prove they install, and zip them.
+
+- **Input:** parameters `on_step: StepCallback`, `output: Path`, `plan: BundlePlan`, `tarel_from: Path | None`; reads files
+- **Processing:**
+    - `build_bundle`: build bundle; returns `BundleReport`. Calls `ensure_pip`, `BundleReport`, `complete_for_target`, `run_pip`, `target_arguments`; raises `BundleFailure`.
+- **Output:** returns `BundleReport`; deletes files; writes files
+- **Uses:** `tarel.bundle.contracts`, `tarel.bundle.pip`, `tarel.bundle.resolve`, `tarel.bundle.targets`
+- **Used by:** `tarel.bundle.application`
+
+### `src/tarel/bundle/catalog.py`
+
+The parts a bundle can contain: core extras and the packages listed in a hub checkout.
+
+- **Input:** parameters `available: tuple[Component, ...]`, `chosen: tuple[str, ...]`, `hub_root: Path | None`, `hub_root: Path`; reads files
+- **Processing:**
+    - `hub_components`: Read the installable packages of one hub checkout. Calls `Component`; raises `BundleFailure`.
+    - `available_components`: available components; returns `tuple[Component, ...]`. Raises `BundleFailure`.
+    - `select_components`: The chosen components plus the ones that are always included, in catalog order. Raises `BundleFailure`.
+- **Output:** returns `tuple[Component, ...]`
+- **Uses:** `tarel.bundle.contracts`
+- **Used by:** `tarel.bundle.application`
+
+### `src/tarel/bundle/contracts.py`
+
+Records for offline bundles: the target machine, the recipe, the plan, and the build report.
+
+- **Input:** parameters `data: dict[str, Any]`, `text: str`
+- **Processing:**
+    - `BundleFailure`: A bundle could not be planned, built, or read.
+    - `Target`: The machine that will install the bundle. Only what wheel selection depends on.
+    - `Target.slug`: Short, file-name-safe identifier, e.g. ``windows-x86_64-py3.12``.
+    - `Target.label`: Human description, e.g. ``Windows · x86-64 · Python 3.12``.
+    - `Target.to_dict`: to dict; returns `dict[str, str]`.
+    - `Target.from_dict`: from dict; returns `Target`.
+    - `Component`: One selectable part of a bundle: a core extra or a hub package.
+    - `Component.to_dict`: to dict; returns `dict[str, Any]`.
+    - `Recipe`: Everything needed to build the same bundle again.
+    - `Recipe.to_toml`: to toml; returns `str`.
+    - `Recipe.from_toml`: from toml; returns `Recipe`.
+    - `BundlePlan`: What a build will download, before anything is downloaded.
+    - `BundlePlan.to_dict`: to dict; returns `dict[str, Any]`.
+    - `BundledPackage`: record with fields name, version, license.
+    - `BundleReport`: The finished bundle and how far it was proven to install.
+    - `BundleReport.to_dict`: to dict; returns `dict[str, Any]`.
+- **Output:** returns `Recipe`, `Target`, `dict[str, Any]`, `dict[str, str]`, `str`
+- **Uses:** `tarel.errors`
+- **Used by:** `tarel.bundle.application`, `tarel.bundle.builder`, `tarel.bundle.catalog`, `tarel.bundle.pip`, `tarel.bundle.resolve`, `tarel.bundle.targets`, `tarel.cli._bundle_dialog`, `tarel.cli.bundle`
+
+### `src/tarel/bundle/pip.py`
+
+Run pip as a subprocess of the current interpreter, with failures turned into BundleFailure.
+
+- **Input:** parameters `arguments: Sequence[str]`, `code: str`, `python: Path | None`, `target: Target`
+- **Processing:**
+    - `run_pip`: Run ``python -m pip`` and return stdout; raise with pip's last error lines on failure. Raises `BundleFailure`.
+    - `ensure_pip`: ensure pip; returns `None`.
+    - `target_arguments`: pip options that select wheels for ``target`` instead of for this machine. Calls `pip_platforms`.
+- **Output:** returns `list[str]`, `str`
+- **Uses:** `tarel.bundle.contracts`, `tarel.bundle.targets`
+- **Used by:** `tarel.bundle.builder`
+
+### `src/tarel/bundle/resolve.py`
+
+Complete a wheel folder for the target's environment markers.
+
+- **Input:** parameters `download: Callable[[list[str]], None]`, `roots: Iterable[str]`, `target: Target`, `wheel: Path`, `wheels: Path`
+- **Processing:**
+    - `marker_environment`: marker environment; returns `dict[str, str]`.
+    - `complete_for_target`: Download until the closure of ``roots`` is complete, then delete unused wheels. Raises `BundleFailure`.
+    - `wheel_metadata`: wheel metadata; returns `Any`. Raises `BundleFailure`.
+- **Output:** returns `Any`, `dict[str, str]`; deletes files
+- **Uses:** `tarel.bundle.contracts`
+- **Used by:** `tarel.bundle.builder`
+
+### `src/tarel/bundle/targets.py`
+
+Describe a target machine and translate it into the wheel platform tags pip understands.
+
+- **Input:** parameters `host: Target`, `line: str`, `target: Target`, `text: str`
+- **Processing:**
+    - `host_profile`: The profile line this machine would print; lets "same as this machine" share one parser.
+    - `host_target`: host target; returns `Target`.
+    - `parse_profile`: Read the line printed by :data:`PROFILE_COMMAND`. Calls `Target`; raises `BundleFailure`.
+    - `parse_target`: Read ``host``, a profile line, or a slug such as ``linux-x86_64-py3.12-glibc2.28``. Calls `Target`; raises `BundleFailure`.
+    - `pip_platforms`: Every platform tag a wheel may carry and still install on ``target``, best first. Raises `BundleFailure`.
+    - `can_test_install`: True when a bundle for ``target`` can really be installed on ``host`` as a test.
+- **Output:** returns `Target`, `bool`, `str`, `tuple[str, ...]`
+- **Uses:** `tarel.bundle.contracts`
+- **Used by:** `tarel.bundle.application`, `tarel.bundle.builder`, `tarel.bundle.pip`, `tarel.cli._bundle_dialog`, `tarel.cli.bundle`
+
+## `tarel`
+
 ### `src/tarel/cli/__init__.py`
 
 The ``tarel`` command line.
@@ -244,7 +365,35 @@ Argument groups shared by several command groups.
     - `require_graph_or_workspace`: Exactly one of the positional graph name and ``--workspace NAME``. Raises `WorkspaceFailure`.
 - **Output:** returns `tuple[str, ...]`
 - **Uses:** `tarel.knowledge.contracts`, `tarel.search`, `tarel.workspaces.contracts`
-- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.grounding`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.ui`, `tarel.cli.workspace`
+- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.grounding`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.ui`, `tarel.cli.workspace`
+
+### `src/tarel/cli/_bundle_dialog.py`
+
+The interactive ``tarel bundle`` dialog: three short steps, sensible defaults, one summary.
+
+- **Input:** parameters `default: int`, `default: str`, `hub: Path | None`, `items: Sequence[Component]`, `label: str`, `number: int`, `options: Sequence[tuple[str, str]]`, `output: Path`, `preset: set[str]`, `question: str`, `recipe: Recipe`, `recipe_path: Path` …; reads environment variables
+- **Processing:**
+    - `Cancelled`: The person left the dialog (Ctrl+C, Ctrl+D, or declined the summary).
+    - `Dialog`: record with fields style, ask, say, folder.
+    - `Dialog.rule`: rule; returns `None`.
+    - `Dialog.heading`: heading; returns `None`.
+    - `Dialog.prompt`: prompt; returns `str`.
+    - `Dialog.choose`: One numbered choice. Returns the zero-based index.
+    - `Dialog.choose_many`: choose many; returns `set[str]`.
+    - `Dialog.done`: done; returns `None`.
+    - `Dialog.run`: run; returns `BundleReport`. Calls `Recipe`, `default_output`, `save_recipe_use_case`.
+    - `Dialog.ask_target`: ask target; returns `Target`. Calls `host_target`.
+    - `Dialog.paste_profile`: paste profile; returns `Target`. Calls `parse_profile`.
+    - `Dialog.pick_target`: pick target; returns `Target`. Calls `Target`.
+    - `Dialog.ask_version`: ask version; returns `str`.
+    - `Dialog.ask_hub`: ask hub; returns `Path | None`. Calls `list_components_use_case`.
+    - `Dialog.ask_components`: ask components; returns `tuple[str, ...]`. Calls `list_components_use_case`.
+    - `Dialog.summary`: summary; returns `None`. Calls `list_components_use_case`.
+    - `Dialog.build`: build; returns `BundleReport`. Calls `build_bundle_use_case`.
+    - `Dialog.finish`: finish; returns `None`.
+- **Output:** returns `BundleReport`, `Path | None`, `Target`, `int`, `set[str]`, `str`, `tuple[str, ...]`; prints to the terminal
+- **Uses:** `tarel`, `tarel.bundle.application`, `tarel.bundle.contracts`, `tarel.bundle.targets`, `tarel.cli._terminal`
+- **Used by:** `tarel.cli.bundle`
 
 ### `src/tarel/cli/_output.py`
 
@@ -259,7 +408,26 @@ Text and JSON renderers shared by several command groups.
     - `print_json`: Print ``payload`` as every ``--format json`` command does: indented, keys sorted.
 - **Output:** prints JSON to stdout; prints to the terminal
 - **Uses:** `tarel.annotations.contracts`, `tarel.connectors.contracts`, `tarel.graph.contracts`
-- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.workspace`
+- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.workspace`
+
+### `src/tarel/cli/_terminal.py`
+
+Small, dependency-free terminal styling for interactive commands.
+
+- **Input:** parameters `name: str`, `stream: TextIO`, `value: str`; reads environment variables; reads stdin
+- **Processing:**
+    - `Style`: record with fields color, unicode, live.
+    - `Style.for_stream`: for stream; returns `Style`.
+    - `Style.symbol`: symbol; returns `str`.
+    - `Style.text`: Make arbitrary text printable, e.g. the ``·`` inside target labels.
+    - `Style.bold`: bold; returns `str`.
+    - `Style.dim`: dim; returns `str`.
+    - `Style.accent`: accent; returns `str`.
+    - `Style.good`: good; returns `str`.
+    - `Style.bad`: bad; returns `str`.
+    - `is_interactive`: is interactive; returns `bool`.
+- **Output:** returns `Style`, `bool`, `str`
+- **Used by:** `tarel.cli._bundle_dialog`, `tarel.cli.bundle`
 
 ### `src/tarel/cli/annotation.py`
 
@@ -289,6 +457,17 @@ Thin object-binding CLI; private resolution values are accepted through stdin on
     - `dispatch`: dispatch; returns `int | None`. Calls `print_json`, `save_object_binding_use_case`, `find_object_bindings_use_case`, `load_object_binding_use_case`, `review_object_binding_use_case`, `resolve_object_binding_use_case`; raises `ObjectBindingFailure`.
 - **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
 - **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.object_bindings.application`, `tarel.object_bindings.contracts`
+
+### `src/tarel/cli/bundle.py`
+
+CLI surface for offline install bundles.
+
+- **Input:** parameters `args: argparse.Namespace`, `subcommands: Subcommands`
+- **Processing:**
+    - `register`: register; returns `None`. Calls `add_format_argument`.
+    - `dispatch`: dispatch; returns `int | None`.
+- **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
+- **Uses:** `tarel`, `tarel.bundle.application`, `tarel.bundle.contracts`, `tarel.bundle.targets`, `tarel.cli._args`, `tarel.cli._bundle_dialog`, `tarel.cli._output`, `tarel.cli._terminal`
 
 ### `src/tarel/cli/concept.py`
 
@@ -1660,7 +1839,7 @@ The exception hierarchy shared by every TAREL package.
 - **Processing:**
     - `TarelError`: A rejected TAREL operation with a stable error ``code``.
 - **Output:** no return values or effects
-- **Used by:** `tarel.agents`, `tarel.annotations.contracts`, `tarel.cli`, `tarel.connectors.contracts`, `tarel.context.compiler`, `tarel.demo`, `tarel.discovery.contracts`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.entity_resolution.contracts`, `tarel.expansion.contracts`, `tarel.focus.contracts`, `tarel.graph.application`, `tarel.graph.contracts`, `tarel.knowledge.contracts`, `tarel.lineage.contracts`, `tarel.logical_joins.contracts`, `tarel.object_bindings.contracts`, `tarel.object_families.contracts`, `tarel.packages.contracts`, `tarel.providers.contracts`, `tarel.reference_mapping.contracts`, `tarel.relationships.core`, `tarel.retrieval.contracts`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.semantics.contracts`, `tarel.sources.contracts`, `tarel.sync.application`, `tarel.sync.contracts`, `tarel.sync.inbox`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.ui.contracts`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.workspaces.contracts`
+- **Used by:** `tarel.agents`, `tarel.annotations.contracts`, `tarel.bundle.contracts`, `tarel.cli`, `tarel.connectors.contracts`, `tarel.context.compiler`, `tarel.demo`, `tarel.discovery.contracts`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.entity_resolution.contracts`, `tarel.expansion.contracts`, `tarel.focus.contracts`, `tarel.graph.application`, `tarel.graph.contracts`, `tarel.knowledge.contracts`, `tarel.lineage.contracts`, `tarel.logical_joins.contracts`, `tarel.object_bindings.contracts`, `tarel.object_families.contracts`, `tarel.packages.contracts`, `tarel.providers.contracts`, `tarel.reference_mapping.contracts`, `tarel.relationships.core`, `tarel.retrieval.contracts`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.semantics.contracts`, `tarel.sources.contracts`, `tarel.sync.application`, `tarel.sync.contracts`, `tarel.sync.inbox`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.ui.contracts`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.workspaces.contracts`
 
 ### `src/tarel/expansion/__init__.py`
 

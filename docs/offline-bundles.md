@@ -44,6 +44,10 @@ tarel bundle build --target "tarel-target:1 cpython win-amd64 3.12 AMD64 - -" --
 tarel bundle build --recipe tarel-offline-0.0.5-windows-x86_64-py3.12.toml
 ```
 
+`--tarel-from PATH` bundles an unreleased TAREL wheel or source checkout instead of the PyPI
+release. Locally built wheels, from `--tarel-from` and from the hub, always replace a downloaded
+wheel of the same project, even when both carry the same version number.
+
 `--target` accepts `host`, a pasted profile line, or a short name such as
 `windows-x86_64-py3.12`, `linux-arm64-py3.13-glibc2.31`, or `macos-arm64-py3.12-macos14.0`.
 A Linux name without glibc assumes glibc 2.28.
