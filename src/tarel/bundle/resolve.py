@@ -65,6 +65,14 @@ class _Wheel:
     requires: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _Walk:
+    needed: dict[str, set[str]]  # project -> selected extras
+    missing: dict[str, str]  # project -> requirement to download, without markers
+    stale: dict[str, list[str]]  # project whose wheel fails a constraint -> who asks what
+    asks: dict[str, list[str]]  # project -> "parent needs requirement", for every edge
+
+
 def complete_for_target(
     wheels: Path,
     roots: Iterable[str],
@@ -78,32 +86,55 @@ def complete_for_target(
     ``download`` must fetch exactly the requirements it is given, without their dependencies:
     pip would resolve those for this machine. ``local`` names projects built from local sources;
     they are never swapped for a download.
+
+    The walk takes the newest version that satisfies every constraint seen so far; unlike pip it
+    does not backtrack to older versions of a parent. A conflict therefore stops the build with
+    every constraint named, instead of producing a bundle that cannot install.
     """
     packaging = _packaging()
     environment = marker_environment(target)
     roots = tuple(roots)
     protected = {_normalize(name) for name in local}
-    missing: list[str] = []
+    walk: _Walk | None = None
     for _ in range(_MAX_ROUNDS):
         index = _index(wheels, packaging)
-        needed, missing, stale = _closure(index, roots, environment, packaging)
-        if not missing:
+        walk = _closure(index, roots, environment, packaging)
+        if not walk.missing:
             for name, wheel in index.items():
-                if name not in needed:
+                if name not in walk.needed:
                     wheel.path.unlink()
             return
-        for name, requirements in stale.items():
+        for name, asks in walk.stale.items():
             if name in protected:
                 raise BundleFailure(
                     "bundle_resolve_conflict",
-                    f"The locally built {index[name].path.name} does not satisfy "
-                    f"{', '.join(str(r) for r in requirements)} on the target.",
+                    f"The locally built {index[name].path.name} does not satisfy every "
+                    f"constraint on the target: {'; '.join(asks)}.",
                 )
             # A newer download replaces it; two wheels of one project would be ambiguous.
             index[name].path.unlink()
-        download(missing)
+        try:
+            download(sorted(walk.missing.values()))
+        except BundleFailure as exc:
+            raise BundleFailure(exc.code, f"{exc}{_explain(walk)}") from exc
+    missing = sorted(walk.missing.values()) if walk is not None else []
     raise BundleFailure(
         "bundle_resolve_incomplete", f"Dependencies still missing after downloading: {missing}."
+    )
+
+
+def _explain(walk: _Walk) -> str:
+    """Name who asks for what when several packages constrain one dependency."""
+    shared = {name: walk.asks[name] for name in walk.missing if len(walk.asks[name]) > 1}
+    if not shared:
+        return ""
+    lines = [f"  {name}: {'; '.join(asks)}" for name, asks in sorted(shared.items())]
+    return (
+        "\n\nThese packages constrain the same dependency:\n"
+        + "\n".join(lines)
+        + "\nThe bundle takes the newest version of each package and does not try older ones. "
+        "If the constraints exclude each other, pin a compatible version in the package that "
+        "needs it."
     )
 
 
@@ -112,21 +143,25 @@ def _closure(
     roots: tuple[str, ...],
     environment: dict[str, str],
     packaging: Any,
-) -> tuple[dict[str, set[str]], list[str], dict[str, list[Any]]]:
-    """Walk the closure of ``roots`` with the target's markers.
-
-    Returns the needed projects with their extras, the requirements still to download, and the
-    wheels that fail a constraint from some edge of the walk (to be replaced by a download).
-    """
+) -> _Walk:
+    """Walk the closure of ``roots`` with the target's markers."""
     requirement_type = packaging.requirements.Requirement
     needed: dict[str, set[str]] = {}
-    constraints: dict[str, list[Any]] = {}
-    queue = [requirement_type(text) for text in roots]
+    constraints: dict[str, list[tuple[Any, str]]] = {}
+    queue = [(requirement_type(text), "the bundle") for text in roots]
     while queue:
-        requirement = queue.pop()
+        requirement, parent = queue.pop()
         name = _normalize(requirement.name)
+        if requirement.url:
+            # Collection and the offline install both go through wheels/; a URL would be
+            # silently swapped for an index package of the same name.
+            raise BundleFailure(
+                "bundle_direct_reference",
+                f"{parent} depends on {requirement.name} by URL ({requirement.url}). Offline "
+                "bundles take every package from an index or a local build; publish it there.",
+            )
         # Record every edge's constraint, also for a project whose dependencies were walked.
-        constraints.setdefault(name, []).append(requirement)
+        constraints.setdefault(name, []).append((requirement, parent))
         known = needed.get(name)
         extras = set(requirement.extras)
         if known is not None and extras <= known:
@@ -135,28 +170,39 @@ def _closure(
         wheel = index.get(name)
         if wheel is None or not _satisfies(wheel, constraints[name]):
             continue
-        active_extras = needed[name] or {""}
+        # Extras add to the base dependencies; pip always installs the base set as well.
+        active_extras = {"", *needed[name]}
+        label = f"{wheel.path.name.split('-')[0]} {wheel.version}"
         for text in wheel.requires:
             dependency = requirement_type(text)
             marker = dependency.marker
             if marker is None or any(
                 marker.evaluate({**environment, "extra": extra}) for extra in active_extras
             ):
-                queue.append(dependency)
-    missing: list[str] = []
-    stale: dict[str, list[Any]] = {}
-    for name, requirements in constraints.items():
+                queue.append((dependency, label))
+    missing: dict[str, str] = {}
+    stale: dict[str, list[str]] = {}
+    asks = {
+        name: [f"{parent} needs {_without_marker(r)}" for r, parent in edges]
+        for name, edges in constraints.items()
+    }
+    for name, edges in constraints.items():
         wheel = index.get(name)
-        if wheel is not None and _satisfies(wheel, requirements):
+        if wheel is not None and _satisfies(wheel, edges):
             continue
         if wheel is not None:
-            stale[name] = requirements
-        missing.append(_combined(name, needed[name], requirements, packaging))
-    return needed, sorted(missing), stale
+            stale[name] = asks[name]
+        missing[name] = _combined(name, needed[name], [r for r, _ in edges], packaging)
+    return _Walk(needed=needed, missing=missing, stale=stale, asks=asks)
 
 
-def _satisfies(wheel: _Wheel, requirements: list[Any]) -> bool:
-    return all(r.specifier.contains(wheel.version, prereleases=True) for r in requirements)
+def _satisfies(wheel: _Wheel, edges: list[tuple[Any, str]]) -> bool:
+    return all(r.specifier.contains(wheel.version, prereleases=True) for r, _ in edges)
+
+
+def _without_marker(requirement: Any) -> str:
+    extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
+    return f"{requirement.name}{extras}{requirement.specifier}"
 
 
 def _combined(name: str, extras: set[str], requirements: list[Any], packaging: Any) -> str:

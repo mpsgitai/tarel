@@ -77,7 +77,10 @@ transfer path, as for any other file brought into the network.
   computer it runs on. TAREL therefore downloads each package without its dependencies, walks
   the dependency closure with the target's markers, downloads what is missing, and removes what
   the target would never install. Every version constraint on a package counts, from every
-  package that needs it.
+  package that needs it. Unlike pip, the walk does not fall back to older versions of a
+  package when constraints conflict; the build stops and names who needs which version.
+  Dependencies given by URL are refused, because the offline install takes every file from
+  `wheels/`.
 - **Wheels only.** Source distributions are refused, so nothing is compiled on the target.
 - **Native libraries inside the wheel.** When a hub package offers a `binary` extra (for example
   PostgreSQL's bundled libpq), the bundle always takes it; an offline target cannot install

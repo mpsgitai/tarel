@@ -270,6 +270,45 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(fetched, [["lib>=1,>=2"]])
         self.assertEqual(names, ["lib-2.5-py3-none-any.whl"])
 
+    def test_base_dependencies_stay_with_selected_extras(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            wheels = Path(folder)
+            write_wheel(wheels, "app", "1.0", ("lib[fast]",))
+            write_wheel(wheels, "lib", "1.0", ('base; extra != "fast"', 'speedup; extra == "fast"'))
+            write_wheel(wheels, "base", "1.0")
+            write_wheel(wheels, "speedup", "1.0")
+            complete_for_target(wheels, ["app"], WINDOWS, lambda _: None)
+            names = sorted(path.name.split("-")[0] for path in wheels.glob("*.whl"))
+        self.assertEqual(names, ["app", "base", "lib", "speedup"])
+
+    def test_url_dependencies_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            wheels = Path(folder)
+            write_wheel(wheels, "app", "1.0", ("private @ https://example.org/private.whl",))
+            with self.assertRaises(BundleFailure) as caught:
+                complete_for_target(wheels, ["app"], WINDOWS, lambda _: None)
+        self.assertEqual(caught.exception.code, "bundle_direct_reference")
+        self.assertIn("app 1.0 depends on private by URL", str(caught.exception))
+
+    def test_conflicting_constraints_are_named(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            wheels = Path(folder)
+            write_wheel(wheels, "app", "1.0", ("foo", "bar"))
+            write_wheel(wheels, "foo", "2.0", ("shared>=2",))
+            write_wheel(wheels, "bar", "1.0", ("shared<2",))
+            failure = BundleFailure("bundle_download_failed", "No matching distribution")
+
+            def download(requirements: list[str]) -> None:
+                raise failure
+
+            with self.assertRaises(BundleFailure) as caught:
+                complete_for_target(wheels, ["app"], WINDOWS, download)
+        message = str(caught.exception)
+        self.assertEqual(caught.exception.code, "bundle_download_failed")
+        self.assertIn("shared: ", message)
+        self.assertIn("foo 2.0 needs shared>=2", message)
+        self.assertIn("bar 1.0 needs shared<2", message)
+
     def test_a_local_wheel_that_fails_a_constraint_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             wheels = Path(folder)
