@@ -20,12 +20,12 @@ from tarel.graph.build import build_graph_from_catalog
 from tarel.retrieval.contracts import RetrievalFailure
 from tarel.retrieval.documents import build_retrieval_documents
 from tarel.retrieval.index import embedding_input_warning, vector_reuse_rule
-from tarel.retrieval.local import LOCAL_EMBEDDING_INPUT
 from tarel.retrieval.remote import HTTP_EMBEDDING_INPUT
 from tarel.sdk import Tarel
 from tarel.workspaces.core import create_workspace, define_system
 
-LOCAL_EMBEDDING = "tarel.retrieval.application.LlamaCppEmbedding"
+LOCAL_EMBEDDING = "tarel.retrieval.application._create_local_embedder"
+LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 _OLD_FORMATS = ("tarel.retrieval.v0.1", "tarel.retrieval.v0.2", "tarel.retrieval.v0.3")
 
 
@@ -178,7 +178,11 @@ class ExistingFormatTests(IndexCompatibilityCase):
             embedding_input="llama.cpp:max_tokens=512:overflow=reject",
         )
 
-        result, _embedder = self._build()
+        with patch(
+            "tarel.retrieval.application.local_embedding_input_strategy",
+            return_value=LOCAL_EMBEDDING_INPUT,
+        ):
+            result, _embedder = self._build()
 
         self.assertEqual(result.reused_documents, 0)
         self.assertEqual(result.embedded_documents, len(self.documents))

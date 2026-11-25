@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from tarel.retrieval.contracts import ModelCatalog, ModelEntry, RetrievalFailure
-from tarel.retrieval.local import MODEL_SPECS, default_model_path
+from tarel.retrieval.local import default_model_path
+from tarel.retrieval.plugins import installed_local_model_specs
 from tarel.retrieval.remote import HTTPRetrievalClient
 
 
@@ -22,7 +23,7 @@ def list_models(*, provider: str = "local", task: str = "embedding") -> ModelCat
                 "size_bytes": spec.size,
                 "source": spec.source,
             }
-            for spec in MODEL_SPECS.values()
+            for spec in installed_local_model_specs().values()
             if spec.task == task
         ]
     else:

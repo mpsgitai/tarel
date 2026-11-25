@@ -25,14 +25,16 @@ from tarel.retrieval.index import (
 )
 from tarel.retrieval.local import (
     DEFAULT_MODEL_NAME,
-    LOCAL_EMBEDDING_INPUT,
-    LlamaCppEmbedding,
     ModelDownloadResult,
     default_model_path,
     download_model,
     model_spec,
     resolve_model_path,
     sha256_file,
+)
+from tarel.retrieval.plugins import (
+    load_local_embedding_plugin,
+    local_embedding_input_strategy,
 )
 from tarel.retrieval.remote import HTTP_EMBEDDING_INPUT, HTTPEmbedding, remote_identity
 from tarel.retrieval.settings import (
@@ -120,13 +122,22 @@ def build_retrieval_index_use_case(
     storage_complete = metadata is not None and store.storage_complete(
         name, metadata=metadata, annotation_states=selected_states,
     )
-    selected_input = HTTP_EMBEDDING_INPUT if resolved_model is None else LOCAL_EMBEDDING_INPUT
+    selected_input = (
+        HTTP_EMBEDDING_INPUT if resolved_model is None else local_embedding_input_strategy()
+    )
+    input_changed = (
+        metadata is not None
+        and (
+            (bool(selected_input) and metadata.embedding_input != selected_input)
+            or not metadata.embedding_input
+        )
+    )
     needs_embedding = (
         metadata is None
         or not model_matches
         or not storage_complete
         or changes.requires_embedding > 0
-        or metadata.embedding_input != selected_input
+        or input_changed
     )
     embedder = (
         embedding_backend(
@@ -370,6 +381,14 @@ def _embedding_input_state(status: GraphIndexStatus) -> str | None:
     return embedding_input["state"] if embedding_input is not None else None
 
 
+def _create_local_embedder(
+    model_path: Path,
+    *,
+    n_threads: int | None = None,
+) -> EmbeddingBackend:
+    return load_local_embedding_plugin().create_embedder(model_path, n_threads=n_threads)
+
+
 def embedding_backend(
     runtime: TarelRuntime | None,
     model_path: Path | None,
@@ -390,7 +409,7 @@ def embedding_backend(
                 "model_changed_during_load",
                 "Embedding model changed before it could be loaded.",
             )
-        backend = LlamaCppEmbedding(model_path, n_threads=n_threads)
+        backend = _create_local_embedder(model_path, n_threads=n_threads)
         if sha256_file(model_path) != model_sha256:
             raise RetrievalFailure(
                 "model_changed_during_load",
@@ -398,10 +417,12 @@ def embedding_backend(
             )
         return backend
     return cast(
-        LlamaCppEmbedding,
+        EmbeddingBackend,
         runtime.embedding_backend(
-            model_path, n_threads, model_sha256,
-            lambda: LlamaCppEmbedding(model_path, n_threads=n_threads),
+            model_path,
+            n_threads,
+            model_sha256,
+            lambda: _create_local_embedder(model_path, n_threads=n_threads),
         ),
     )
 

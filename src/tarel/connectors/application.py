@@ -25,7 +25,11 @@ from tarel.connectors.contracts import (
     SampleResult,
 )
 from tarel.connectors.credentials import resolve_credential
-from tarel.connectors.host import check_connector, load_connector
+from tarel.connectors.host import check_connector, list_connectors, load_connector
+
+
+def list_connectors_use_case() -> tuple[ConnectorCheck, ...]:
+    return list_connectors()
 
 
 def check_connector_use_case(name: str) -> ConnectorCheck:
@@ -151,9 +155,20 @@ def scaffold_connector_use_case(name: str, *, output: Path | None = None) -> Sca
     return scaffold_connector(name, output=output)
 
 
+def _looks_like_url_or_secret_path(raw: str) -> bool:
+    return "://" in raw or (":/" in raw and "@" in raw)
+
+
 def read_config(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
+    raw = str(path)
+    if _looks_like_url_or_secret_path(raw):
+        raise ConnectorFailure(
+            "config_not_found",
+            "Configuration file not found: value looks like a connection URL, "
+            "expected a TOML file path.",
+        )
     try:
         with path.expanduser().open("rb") as handle:
             data = tomllib.load(handle)

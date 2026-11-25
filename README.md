@@ -54,7 +54,7 @@ It does not scan data rows or rerun annotation across the existing graph.
 behind each connection.
 
 SQL definitions can be analyzed by a configured provider or, after installing the optional
-`tarel[sql-lineage]` extra, locally with SQLGlot first and provider fallback only for unresolved
+`tarel-lineage-sqlglot` Hub plugin, locally with SQLGlot first and provider fallback only for unresolved
 definitions. The base installation does not include or import SQLGlot. See
 [static lineage analysis](docs/static-lineage.md).
 

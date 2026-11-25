@@ -309,6 +309,7 @@ Thin concept CLI; public SDK and CLI use the same application functions.
 - **Processing:**
     - `register`: Add the `connector` command group to the top-level parser. Calls `add_format_argument`.
     - `dispatch`: Run a parsed `connector` command; return ``None`` for other commands.
+    - `_run_list`: list; returns `int`. Calls `list_connectors_use_case`.
     - `_run_check`: check; returns `int`. Calls `check_connector_use_case`.
     - `_run_probe`: probe; returns `int`. Calls `probe_connector_use_case`, `render_probe`.
     - `_run_discover`: discover; returns `int`. Calls `discover_catalog_use_case`, `render_catalog`.
@@ -738,6 +739,7 @@ Connector use cases: check, probe, discover, sample and profile a configured sou
 
 - **Input:** parameters `config_path: Path | None`, `database: str | None`, `include_values: bool`, `limit: int`, `name: str`, `namespace: str | None`, `namespace: str`, `object_name: str`, `output: Path | None`, `path: Path | None`, `row_limit: int`, `section: dict[str, Any]` …; loads stored documents; reads environment variables
 - **Processing:**
+    - `list_connectors_use_case`: list connectors (use case); returns `tuple[ConnectorCheck, ...]`. Calls `list_connectors`.
     - `check_connector_use_case`: check connector (use case); returns `ConnectorCheck`. Calls `check_connector`.
     - `ConfiguredConnector`: A loaded connector with its resolved target; URL and login never appear in repr.
     - `configured_connector`: configured connector; returns `ConfiguredConnector`. Calls `load_connector`, `resolve_credential`; raises `ConnectorFailure`.
@@ -748,7 +750,7 @@ Connector use cases: check, probe, discover, sample and profile a configured sou
     - `scaffold_connector_use_case`: scaffold connector (use case); returns `ScaffoldResult`. Calls `scaffold_connector`.
     - `read_config`: read config; returns `dict[str, Any]`. Raises `ConnectorFailure`.
     - `connection_url`: connection url; returns `str`. Raises `ConnectorFailure`.
-- **Output:** returns `CatalogResult`, `ConfiguredConnector`, `ConnectorCheck`, `ObjectProfileResult`, `ProbeResult`, `SampleResult`, `ScaffoldResult`, `dict[str, Any]`, `str`
+- **Output:** returns `CatalogResult`, `ConfiguredConnector`, `ConnectorCheck`, `ObjectProfileResult`, `ProbeResult`, `SampleResult`, `ScaffoldResult`, `dict[str, Any]`, `str`, `tuple[ConnectorCheck, ...]`
 - **Uses:** `tarel.connectors.authoring`, `tarel.connectors.contracts`, `tarel.connectors.credentials`, `tarel.connectors.host`
 - **Used by:** `tarel.annotations.application`, `tarel.cli.connector`, `tarel.graph.application`, `tarel.relationships.application`, `tarel.sdk.connectors`, `tarel.sdk.setup`, `tarel.sources.application`
 
@@ -850,10 +852,11 @@ Explicit loading and checking of trusted connector manifests.
 
 - **Input:** parameters `name: str`; loads stored documents
 - **Processing:**
+    - `list_connectors`: Return checks for built-in and installed connectors without importing drivers.
     - `check_connector`: check connector; returns `ConnectorCheck`. Calls `ConnectorCheck`.
     - `load_manifest`: load manifest; returns `ConnectorManifest`. Raises `ConnectorFailure`.
     - `load_connector`: load connector; returns `Connector`. Raises `ConnectorFailure`.
-- **Output:** returns `Connector`, `ConnectorCheck`, `ConnectorManifest`
+- **Output:** returns `Connector`, `ConnectorCheck`, `ConnectorManifest`, `tuple[ConnectorCheck, ...]`
 - **Uses:** `tarel.connectors.contracts`
 - **Used by:** `tarel.connectors.application`, `tarel.sources.application`
 
@@ -2166,7 +2169,7 @@ Definition analysis: derive lineage workfiles with a provider or the SQLGlot ada
     - `run_lineage_provider_use_case`: run lineage provider (use case); returns `LineageProviderRunResult`. Calls `load_lineage_input`, `plan_lineage_tasks`, `load_provider`, `LineageAnalysisCacheIdentity`, `lineage_analyzer_version`, `record_lineage_analysis_failure` …; uses the lineage store; raises `LineageFailure`.
     - `run_lineage_analysis_use_case`: Run the selected analyzer strategy through the shared validated apply path. Calls `load_lineage_input`, `plan_lineage_tasks`, `record_lineage_analysis_failure`, `apply_lineage_proposal`; uses the lineage store; raises `LineageFailure`.
 - **Output:** returns `LineageProviderRunResult`; saves documents to a store
-- **Uses:** `tarel.lineage.analysis_cache`, `tarel.lineage.contracts`, `tarel.lineage.core`, `tarel.lineage.source`, `tarel.lineage.sqlglot_adapter`, `tarel.lineage.tasks`, `tarel.providers.contracts`, `tarel.providers.host`, `tarel.runtime`
+- **Uses:** `tarel.lineage.analysis_cache`, `tarel.lineage.analyzers`, `tarel.lineage.contracts`, `tarel.lineage.core`, `tarel.lineage.source`, `tarel.lineage.tasks`, `tarel.providers.contracts`, `tarel.providers.host`, `tarel.runtime`
 - **Used by:** `tarel.cli.lineage`, `tarel.sdk.lineage`
 
 ### `src/tarel/lineage/analysis_cache.py`
@@ -2186,6 +2189,23 @@ Content-addressed local cache for validated provider lineage workfiles.
 - **Output:** returns `LineageAnalysisCacheIdentity`, `Path`, `dict[str, object]`, `dict[str, object] | None`, `str`; deletes files; writes temporary files
 - **Uses:** `tarel.lineage.contracts`
 - **Used by:** `tarel.lineage.analysis_application`, `tarel.runtime`
+
+### `src/tarel/lineage/analyzers.py`
+
+Extension point for external static SQL lineage analyzers (`tarel.lineage_analyzers`).
+
+- **Input:** parameters `definition: SourceDefinition`, `dialect: str | None`, `name: str`; loads stored documents
+- **Processing:**
+    - `StaticLineageAnalysisResult`: Result returned by an installed static lineage analyzer plugin.
+    - `StaticLineageAnalysisResult.complete`: complete; returns `bool`.
+    - `LineageAnalyzer`: Contract implemented by static lineage analyzer plugins.
+    - `LineageAnalyzer.name`: name; returns `str`.
+    - `LineageAnalyzer.analyze`: analyze; returns `StaticLineageAnalysisResult`.
+    - `list_lineage_analyzers`: List installed static lineage analyzer names without importing them.
+    - `load_lineage_analyzer`: Load one installed static lineage analyzer by entry-point name. Raises `LineageFailure`.
+- **Output:** returns `LineageAnalyzer`, `StaticLineageAnalysisResult`, `bool`, `str`, `tuple[str, ...]`
+- **Uses:** `tarel.lineage.contracts`, `tarel.lineage.source`
+- **Used by:** `tarel.lineage.analysis_application`
 
 ### `src/tarel/lineage/application.py`
 
@@ -2210,10 +2230,10 @@ Lineage use cases: build, import, edit, review and trace static lineage document
     - `process_lineage_view_use_case`: process lineage view (use case); returns `tuple[ProcessStep, ...]`. Calls `process_view`; uses the lineage store.
     - `table_lineage_view_use_case`: table lineage view (use case); returns `tuple[TableLineage, ...]`. Calls `table_lineage`; uses the lineage store.
     - `lineage_status_use_case`: lineage status (use case); returns `LineageStatus`. Calls `lineage_status`; uses the lineage store.
-    - `find_lineage_references_use_case`: find lineage references (use case); returns `tuple[LineageReference, ...]`. Calls `find_lineage_references`, `LlamaCppEmbedding`, `resolve_model_path`; uses the graph store.
+    - `find_lineage_references_use_case`: find lineage references (use case); returns `tuple[LineageReference, ...]`. Calls `find_lineage_references`, `resolve_model_path`, `load_local_embedding_plugin`; uses the graph store.
     - `trace_upstream_use_case`: trace upstream (use case); returns `UpstreamTrace`. Calls `trace_upstream`; uses the graph store.
 - **Output:** returns `LineageChangeResult`, `LineageDocument`, `LineageReviewResult`, `LineageStatus`, `LineageTask | None`, `ManualHopResult`, `ManualJobResult`, `UpstreamTrace`, `tuple[LineageReference, ...]`, `tuple[LineageReviewItem, ...]`; saves documents to a store
-- **Uses:** `tarel.lineage.contracts`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.refresh`, `tarel.lineage.review`, `tarel.lineage.revision`, `tarel.lineage.source`, `tarel.lineage.status`, `tarel.lineage.tasks`, `tarel.lineage.traversal`, `tarel.retrieval.local`, `tarel.runtime`
+- **Uses:** `tarel.lineage.contracts`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.refresh`, `tarel.lineage.review`, `tarel.lineage.revision`, `tarel.lineage.source`, `tarel.lineage.status`, `tarel.lineage.tasks`, `tarel.lineage.traversal`, `tarel.retrieval.local`, `tarel.retrieval.plugins`, `tarel.runtime`
 - **Used by:** `tarel.cli.lineage`, `tarel.context.grounding_application`, `tarel.sdk.grounding`, `tarel.sdk.lineage`, `tarel.sdk.view`, `tarel.ui.backend`
 
 ### `src/tarel/lineage/change_store.py`
@@ -2267,7 +2287,7 @@ Dependency-free persisted contracts for reviewed static lineage.
     - `validate_lineage_document`: Raise ``LineageFailure`` unless every section of ``document`` is internally consistent.
 - **Output:** returns `LineageDocument`, `dict[str, LineageClaim]`, `dict[str, LineageDefinition]`, `dict[str, object]`, `dict[str, str]`
 - **Uses:** `tarel.errors`
-- **Used by:** `tarel.cli.lineage`, `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.focus.application`, `tarel.focus.core`, `tarel.lineage`, `tarel.lineage._runtime_parse`, `tarel.lineage.analysis_application`, `tarel.lineage.analysis_cache`, `tarel.lineage.application`, `tarel.lineage.change_store`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.refresh`, `tarel.lineage.resolution`, `tarel.lineage.review`, `tarel.lineage.revision`, `tarel.lineage.runtime`, `tarel.lineage.runtime_application`, `tarel.lineage.runtime_inputs`, `tarel.lineage.runtime_logical`, `tarel.lineage.runtime_records`, `tarel.lineage.runtime_store`, `tarel.lineage.source`, `tarel.lineage.sqlglot_adapter`, `tarel.lineage.status`, `tarel.lineage.store`, `tarel.lineage.tasks`, `tarel.lineage.traversal`, `tarel.packages.application`, `tarel.sdk.lineage`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.payloads.graph`, `tarel.ui.payloads.lineage`, `tarel.ui.payloads.lineage_flows`, `tarel.ui.payloads.lineage_source`, `tarel.ui.server`
+- **Used by:** `tarel.cli.lineage`, `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.focus.application`, `tarel.focus.core`, `tarel.lineage`, `tarel.lineage._runtime_parse`, `tarel.lineage.analysis_application`, `tarel.lineage.analysis_cache`, `tarel.lineage.analyzers`, `tarel.lineage.application`, `tarel.lineage.change_store`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.refresh`, `tarel.lineage.resolution`, `tarel.lineage.review`, `tarel.lineage.revision`, `tarel.lineage.runtime`, `tarel.lineage.runtime_application`, `tarel.lineage.runtime_inputs`, `tarel.lineage.runtime_logical`, `tarel.lineage.runtime_records`, `tarel.lineage.runtime_store`, `tarel.lineage.source`, `tarel.lineage.status`, `tarel.lineage.store`, `tarel.lineage.tasks`, `tarel.lineage.traversal`, `tarel.packages.application`, `tarel.sdk.lineage`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.payloads.graph`, `tarel.ui.payloads.lineage`, `tarel.ui.payloads.lineage_flows`, `tarel.ui.payloads.lineage_source`, `tarel.ui.server`
 
 ### `src/tarel/lineage/core.py`
 
@@ -2300,7 +2320,7 @@ Dependency-free coverage guard for potential SQL write statements.
     - `WriteMarker.to_dict`: to dict; returns `dict[str, object]`.
     - `write_markers`: Locate possible writes without claiming their targets or data dependencies.
 - **Output:** returns `dict[str, object]`, `tuple[WriteMarker, ...]`
-- **Used by:** `tarel.lineage.core`, `tarel.lineage.sqlglot_adapter`, `tarel.lineage.tasks`
+- **Used by:** `tarel.lineage.core`, `tarel.lineage.tasks`
 
 ### `src/tarel/lineage/dbt.py`
 
@@ -2563,20 +2583,7 @@ Strict input-only contract for workflow definitions and source code.
     - `stable_id`: stable id; returns `str`.
 - **Output:** returns `LineageInput`, `dict[str, SourceDefinition]`, `str`
 - **Uses:** `tarel.lineage.contracts`
-- **Used by:** `tarel.lineage.analysis_application`, `tarel.lineage.application`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.refresh`, `tarel.lineage.sqlglot_adapter`, `tarel.lineage.tasks`
-
-### `src/tarel/lineage/sqlglot_adapter.py`
-
-Optional SQLGlot adapter for conservative, write-centred static lineage.
-
-- **Input:** parameters `definition: SourceDefinition`, `dialect: str | None`
-- **Processing:**
-    - `SqlglotAnalysisResult`: record with fields status, dialect, sqlglot_version, adapter_version, analysis, failure_code.
-    - `SqlglotAnalysisResult.complete`: complete; returns `bool`.
-    - `analyze_with_sqlglot`: Return a complete TAREL workfile or a sanitized unsupported result. Calls `write_markers`; raises `LineageFailure`.
-- **Output:** returns `SqlglotAnalysisResult`, `bool`
-- **Uses:** `tarel.lineage.contracts`, `tarel.lineage.coverage`, `tarel.lineage.source`
-- **Used by:** `tarel.lineage.analysis_application`
+- **Used by:** `tarel.lineage.analysis_application`, `tarel.lineage.analyzers`, `tarel.lineage.application`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.refresh`, `tarel.lineage.tasks`
 
 ### `src/tarel/lineage/status.py`
 
@@ -3260,15 +3267,15 @@ Retrieval use cases: embedding models and the local search indexes built from gr
 - **Processing:**
     - `download_embedding_model_use_case`: download embedding model (use case); returns `ModelDownloadResult`. Calls `download_model`.
     - `embedding_model_status_use_case`: embedding model status (use case); returns `ModelStatus`. Calls `model_spec`, `sha256_file`, `default_model_path`.
-    - `build_retrieval_index_use_case`: build retrieval index (use case); returns `IndexBuildResult`. Calls `snapshot_runtime`, `selected_annotation_states`; uses the retrieval index, graph store; raises `RetrievalFailure`.
+    - `build_retrieval_index_use_case`: build retrieval index (use case); returns `IndexBuildResult`. Calls `snapshot_runtime`, `selected_annotation_states`, `local_embedding_input_strategy`; uses the retrieval index, graph store; raises `RetrievalFailure`.
     - `retrieval_index_status_use_case`: retrieval index status (use case); returns `IndexStatus`. Calls `snapshot_runtime`, `selected_annotation_states`, `embedding_input_status`, `graph_revision`, `sqlite_vec_available`; uses the retrieval index, graph store.
     - `retrieval_workspace_status_use_case`: retrieval workspace status (use case); returns `WorkspaceIndexStatus`. Calls `snapshot_runtime`, `resolve_workspace_scope_use_case`, `GraphIndexStatus`, `sqlite_vec_available`.
     - `build_retrieval_workspace_indexes_use_case`: build retrieval workspace indexes (use case); returns `WorkspaceIndexBuild`. Calls `snapshot_runtime`; raises `RetrievalFailure`.
-    - `embedding_backend`: embedding backend; returns `EmbeddingBackend`. Calls `HTTPEmbedding`, `LlamaCppEmbedding`, `load_settings`, `remote_identity`, `sha256_file`; raises `RetrievalFailure`.
+    - `embedding_backend`: embedding backend; returns `EmbeddingBackend`. Calls `HTTPEmbedding`, `load_settings`, `remote_identity`, `sha256_file`; raises `RetrievalFailure`.
     - `embedding_model_sha256`: embedding model sha256; returns `str`. Calls `remote_identity`, `sha256_file`, `load_settings`.
     - `resolved_embedding_model`: resolved embedding model; returns `Path | None`. Calls `selected_local_path`, `load_settings`, `resolve_model_path`.
 - **Output:** returns `EmbeddingBackend`, `IndexBuildResult`, `IndexStatus`, `ModelDownloadResult`, `ModelStatus`, `Path | None`, `WorkspaceIndexBuild`, `WorkspaceIndexStatus`, `str`
-- **Uses:** `tarel.annotations.states`, `tarel.graph.revision`, `tarel.retrieval.contracts`, `tarel.retrieval.index`, `tarel.retrieval.local`, `tarel.retrieval.remote`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.workspaces.application`
+- **Uses:** `tarel.annotations.states`, `tarel.graph.revision`, `tarel.retrieval.contracts`, `tarel.retrieval.index`, `tarel.retrieval.local`, `tarel.retrieval.plugins`, `tarel.retrieval.remote`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.workspaces.application`
 - **Used by:** `tarel.cli.index`, `tarel.cli.model`, `tarel.retrieval.search_application`, `tarel.sdk.index`, `tarel.ui.backend`
 
 ### `src/tarel/retrieval/bm25.py`
@@ -3289,9 +3296,9 @@ Task-specific model discovery; remote catalogs are fetched only on request.
 
 - **Input:** parameters `provider: str`, `task: str`
 - **Processing:**
-    - `list_models`: List the models ``provider`` offers for ``task``; only remote providers use the network. Calls `HTTPRetrievalClient`, `default_model_path`; raises `RetrievalFailure`.
+    - `list_models`: List the models ``provider`` offers for ``task``; only remote providers use the network. Calls `HTTPRetrievalClient`, `default_model_path`, `installed_local_model_specs`; raises `RetrievalFailure`.
 - **Output:** returns `ModelCatalog`
-- **Uses:** `tarel.retrieval.contracts`, `tarel.retrieval.local`, `tarel.retrieval.remote`
+- **Uses:** `tarel.retrieval.contracts`, `tarel.retrieval.local`, `tarel.retrieval.plugins`, `tarel.retrieval.remote`
 - **Used by:** `tarel.cli.retrieval`, `tarel.sdk.retrieval`, `tarel.ui.backend`
 
 ### `src/tarel/retrieval/checkpoint.py`
@@ -3311,7 +3318,7 @@ Resumable index builds: embeddings are checkpointed in batches and reused when u
 
 Small contracts shared by local retrieval implementations.
 
-- **Input:** parameters `batch_size: int`, `text: str`, `texts: tuple[str, ...]`
+- **Input:** parameters `batch_size: int`, `query: str`, `text: str`, `texts: tuple[str, ...]`
 - **Processing:**
     - `RetrievalFailure`: Raised when a retrieval operation is rejected.
     - `RetrievalDocument`: record with fields id, object_id, field_id, namespace, label, text.
@@ -3325,6 +3332,10 @@ Small contracts shared by local retrieval implementations.
     - `EmbeddingBackend.token_count`: The tokens this text occupies, or None when only the provider can count them.
     - `EmbeddingBackend.embed_cut_document`: Embed the part of an overlong document that fits; the caller must record the cut.
     - `EmbeddingBackend.runtime_version`: The embedding library and version, or "" when TAREL cannot know it.
+    - `RerankerBackend`: The only reranker behavior required by TAREL retrieval.
+    - `RerankerBackend.score`: score; returns `tuple[float, ...]`.
+    - `ModelSpec`: Declarative pinned model download link supplied by a retrieval plugin.
+    - `ModelDownloadResult`: record with fields path, spec, reused.
     - `IndexMetadata`: record with fields contract_version, graph, graph_hash, document_count, dimensions, model_id, model_path, model_sha256 ….
     - `IndexMetadata.to_dict`: to dict; returns `dict[str, object]`.
     - `IndexBuildResult`: record with fields path, metadata, resumed_documents, reused_documents, embedded_documents, removed_documents.
@@ -3343,7 +3354,7 @@ Small contracts shared by local retrieval implementations.
     - `ModelCatalog`: The models a provider offers for one task (embedding or reranker).
 - **Output:** returns `bool`, `dict[str, int | bool]`, `dict[str, object]`, `int`, `int | None`, `str`, `tuple[float, ...]`, `tuple[tuple[float, ...], ...]`
 - **Uses:** `tarel.errors`
-- **Used by:** `tarel.cli.retrieval`, `tarel.discovery.application`, `tarel.lineage.traversal`, `tarel.retrieval`, `tarel.retrieval.application`, `tarel.retrieval.bm25`, `tarel.retrieval.catalog`, `tarel.retrieval.checkpoint`, `tarel.retrieval.documents`, `tarel.retrieval.index`, `tarel.retrieval.local`, `tarel.retrieval.ranking`, `tarel.retrieval.remote`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.retrieval.settings`, `tarel.retrieval.vectors`, `tarel.runtime`, `tarel.sdk.index`, `tarel.sdk.retrieval`, `tarel.ui.backend`, `tarel.ui.server`
+- **Used by:** `tarel.cli.retrieval`, `tarel.discovery.application`, `tarel.lineage.traversal`, `tarel.retrieval`, `tarel.retrieval.application`, `tarel.retrieval.bm25`, `tarel.retrieval.catalog`, `tarel.retrieval.checkpoint`, `tarel.retrieval.documents`, `tarel.retrieval.index`, `tarel.retrieval.local`, `tarel.retrieval.plugins`, `tarel.retrieval.ranking`, `tarel.retrieval.remote`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.retrieval.settings`, `tarel.retrieval.vectors`, `tarel.runtime`, `tarel.sdk.index`, `tarel.sdk.retrieval`, `tarel.ui.backend`, `tarel.ui.server`
 
 ### `src/tarel/retrieval/documents.py`
 
@@ -3383,31 +3394,45 @@ The local SQLite retrieval index: one per graph and embedding model.
 
 ### `src/tarel/retrieval/local.py`
 
-Explicit model download and lazy llama.cpp embedding adapter.
+Explicit model download and cache helpers for local retrieval Hub plugins.
 
-- **Input:** parameters `batch_size: int`, `force: bool`, `name: str`, `path: Path | None`, `path: Path`, `progress: Callable[[int, int], None] | None`, `target: Path | None`, `text: str`, `texts: tuple[str, ...]`; reads environment variables
+- **Input:** parameters `force: bool`, `name: str`, `path: Path | None`, `path: Path`, `progress: Callable[[int, int], None] | None`, `target: Path | None`, `text: str`; reads environment variables
 - **Processing:**
     - `qwen_embedding_query`: qwen embedding query; returns `str`.
-    - `ModelSpec`: record with fields name, filename, url, sha256, size, source, task.
-    - `ModelDownloadResult`: record with fields path, spec, reused.
     - `model_cache_root`: model cache root; returns `Path`.
     - `default_model_path`: default model path; returns `Path`.
-    - `model_spec`: model spec; returns `ModelSpec`. Raises `RetrievalFailure`.
+    - `model_spec`: model spec; returns `ModelSpec`. Calls `installed_local_model_specs`; raises `RetrievalFailure`.
     - `resolve_model_path`: resolve model path; returns `Path`. Raises `RetrievalFailure`.
-    - `download_model`: download model; returns `ModelDownloadResult`. Raises `RetrievalFailure`.
+    - `download_model`: download model; returns `ModelDownloadResult`. Calls `ModelDownloadResult`; raises `RetrievalFailure`.
     - `sha256_file`: sha256 file; returns `str`.
-    - `LlamaCppEmbedding`: CPU-only Qwen-compatible embeddings without LlamaIndex or a server.
-    - `LlamaCppEmbedding.model_id`: model id; returns `str`.
-    - `LlamaCppEmbedding.input_strategy`: input strategy; returns `str`.
-    - `LlamaCppEmbedding.max_input_tokens`: max input tokens; returns `int`.
-    - `LlamaCppEmbedding.runtime_version`: runtime version; returns `str`.
-    - `LlamaCppEmbedding.token_count`: Count tokens as ``embed`` will see them, including special tokens it adds.
-    - `LlamaCppEmbedding.embed_documents`: embed documents; returns `tuple[tuple[float, ...], ...]`. Raises `RetrievalFailure`.
-    - `LlamaCppEmbedding.embed_query`: embed query; returns `tuple[float, ...]`.
-    - `LlamaCppEmbedding.embed_cut_document`: Embed only the first tokens of a text whose caller records that it was shortened. Raises `RetrievalFailure`.
-- **Output:** returns `ModelDownloadResult`, `ModelSpec`, `Path`, `int`, `str`, `tuple[float, ...]`, `tuple[tuple[float, ...], ...]`; deletes files; writes temporary files
-- **Uses:** `tarel.retrieval.contracts`
+- **Output:** returns `ModelDownloadResult`, `ModelSpec`, `Path`, `str`; deletes files; writes temporary files
+- **Uses:** `tarel.retrieval.contracts`, `tarel.retrieval.plugins`
 - **Used by:** `tarel.cli.model`, `tarel.cli.retrieval`, `tarel.lineage.application`, `tarel.retrieval.application`, `tarel.retrieval.catalog`, `tarel.retrieval.index`, `tarel.retrieval.remote`, `tarel.retrieval.rerank`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.sdk.index`
+
+### `src/tarel/retrieval/plugins.py`
+
+Extension points for external local embedding and reranker plugins.
+
+- **Input:** parameters `model_path: Path`, `n_threads: int | None`, `name: str | None`; loads stored documents
+- **Processing:**
+    - `LocalEmbeddingPlugin`: Contract implemented by local embedding plugins (`tarel.embeddings`).
+    - `LocalEmbeddingPlugin.name`: name; returns `str`.
+    - `LocalEmbeddingPlugin.input_strategy`: input strategy; returns `str`.
+    - `LocalEmbeddingPlugin.models`: models; returns `tuple[ModelSpec, ...]`.
+    - `LocalEmbeddingPlugin.create_embedder`: create embedder; returns `EmbeddingBackend`.
+    - `LocalRerankerPlugin`: Contract implemented by local reranker plugins (`tarel.rerankers`).
+    - `LocalRerankerPlugin.name`: name; returns `str`.
+    - `LocalRerankerPlugin.models`: models; returns `tuple[ModelSpec, ...]`.
+    - `LocalRerankerPlugin.create_reranker`: create reranker; returns `RerankerBackend`.
+    - `list_local_embedding_plugins`: list local embedding plugins; returns `tuple[str, ...]`.
+    - `list_local_reranker_plugins`: list local reranker plugins; returns `tuple[str, ...]`.
+    - `load_local_embedding_plugin`: load local embedding plugin; returns `LocalEmbeddingPlugin`.
+    - `load_local_reranker_plugin`: load local reranker plugin; returns `LocalRerankerPlugin`.
+    - `installed_local_model_specs`: Collect pinned model download specs declared by installed local retrieval plugins.
+    - `local_embedding_input_strategy`: Return the active local embedding plugin's input strategy, or '' if none is installed.
+- **Output:** returns `EmbeddingBackend`, `LocalEmbeddingPlugin`, `LocalRerankerPlugin`, `RerankerBackend`, `dict[str, ModelSpec]`, `str`, `tuple[ModelSpec, ...]`, `tuple[str, ...]`
+- **Uses:** `tarel.retrieval.contracts`
+- **Used by:** `tarel.lineage.application`, `tarel.retrieval.application`, `tarel.retrieval.catalog`, `tarel.retrieval.local`, `tarel.retrieval.rerank`, `tarel.retrieval.settings`
 
 ### `src/tarel/retrieval/ranking.py`
 
@@ -3449,14 +3474,12 @@ Bounded standard-library adapters over configured HTTP provider profiles.
 
 Optional relevance ordering of already scoped metadata objects.
 
-- **Input:** parameters `graphs: tuple[GraphDocument, ...]`, `limit: int`, `n_threads: int | None`, `query: str`, `results: SearchResults`, `runtime: TarelRuntime | None`, `texts: tuple[str, ...]`; reads retrieval settings
+- **Input:** parameters `graphs: tuple[GraphDocument, ...]`, `limit: int`, `n_threads: int | None`, `results: SearchResults`, `runtime: TarelRuntime | None`; reads retrieval settings
 - **Processing:**
-    - `LocalQwenReranker`: class.
-    - `LocalQwenReranker.score`: score; returns `tuple[float, ...]`. Raises `RetrievalFailure`.
     - `candidate_limit`: candidate limit; returns `int`. Calls `load_settings`.
     - `rerank_results`: rerank results; returns `SearchResults`. Calls `load_settings`, `resolve_model_path`, `rerank_remote`, `build_retrieval_documents`, `sha256_file`, `default_model_path`; raises `RetrievalFailure`.
-- **Output:** returns `SearchResults`, `int`, `tuple[float, ...]`
-- **Uses:** `tarel.graph.contracts`, `tarel.retrieval.contracts`, `tarel.retrieval.documents`, `tarel.retrieval.local`, `tarel.retrieval.remote`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.search`
+- **Output:** returns `SearchResults`, `int`
+- **Uses:** `tarel.graph.contracts`, `tarel.retrieval.contracts`, `tarel.retrieval.documents`, `tarel.retrieval.local`, `tarel.retrieval.plugins`, `tarel.retrieval.remote`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.search`
 - **Used by:** `tarel.retrieval.search_application`
 
 ### `src/tarel/retrieval/search_application.py`
@@ -3493,7 +3516,7 @@ Independent model choices; project settings contain no credentials.
     - `index_namespace`: index namespace; returns `str | None`.
     - `selected_local_path`: selected local path; returns `Path | None`. Calls `default_model_path`; raises `RetrievalFailure`.
 - **Output:** returns `Path`, `Path | None`, `RetrievalSettings`, `TarelRuntime`, `bool`, `dict[str, object]`, `str | None`; replaces state files atomically
-- **Uses:** `tarel.atomic`, `tarel.providers.config`, `tarel.retrieval.contracts`, `tarel.retrieval.local`, `tarel.runtime`
+- **Uses:** `tarel.atomic`, `tarel.providers.config`, `tarel.retrieval.contracts`, `tarel.retrieval.local`, `tarel.retrieval.plugins`, `tarel.runtime`
 - **Used by:** `tarel.cli.retrieval`, `tarel.retrieval.application`, `tarel.retrieval.remote`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.runtime`, `tarel.sdk`, `tarel.sdk.client`, `tarel.sdk.retrieval`, `tarel.ui.backend`
 
 ### `src/tarel/retrieval/vectors.py`
@@ -3626,12 +3649,13 @@ Low-level read-only connector operations for embedded harnesses.
 - **Input:** parameters `config: str | Path`, `database: str | None`, `include_values: bool`, `limit: int`, `name: str`, `namespace: str | None`, `namespace: str`, `object: str`, `row_limit: int`, `small_domain_limit: int`
 - **Processing:**
     - `ConnectorAPI`: Call connectors directly without applying a named source permission policy.
+    - `ConnectorAPI.list`: list; returns `tuple[ConnectorCheck, ...]`. Calls `list_connectors_use_case`.
     - `ConnectorAPI.check`: check; returns `ConnectorCheck`. Calls `check_connector_use_case`.
     - `ConnectorAPI.probe`: probe; returns `ProbeResult`. Calls `probe_connector_use_case`.
     - `ConnectorAPI.discover`: discover; returns `CatalogResult`. Calls `discover_catalog_use_case`.
     - `ConnectorAPI.sample`: Return an ephemeral bounded sample; the SDK never persists its row values. Calls `sample_connector_use_case`.
     - `ConnectorAPI.profile`: profile; returns `ObjectProfileResult`. Calls `profile_connector_use_case`.
-- **Output:** returns `CatalogResult`, `ConnectorCheck`, `ObjectProfileResult`, `ProbeResult`, `SampleResult`
+- **Output:** returns `CatalogResult`, `ConnectorCheck`, `ObjectProfileResult`, `ProbeResult`, `SampleResult`, `tuple[ConnectorCheck, ...]`
 - **Uses:** `tarel.connectors.application`, `tarel.connectors.contracts`
 - **Used by:** `tarel.sdk.client`
 

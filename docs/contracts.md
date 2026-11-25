@@ -921,7 +921,7 @@ HTTP rerankers must provide `/rerank` with indexed `relevance_score` results; em
 `/embeddings` with indexed float vectors. Model IDs can be entered explicitly. Generic HTTP
 `/models` catalogs do not guarantee that every entry supports the requested task.
 
-Local reranking uses Qwen3-Reranker-0.6B on the CPU through the same optional `local-rag` extra.
+Local reranking uses Qwen3-Reranker-0.6B on the CPU through the optional `tarel-retrieval-llamacpp` Hub plugin.
 It scores yes/no logits without generating text. Its immutable GGUF revision, byte size and
 checksum are pinned in the existing model registry.
 
@@ -1031,7 +1031,7 @@ embedding context is mutable; separate CLI processes remain independent. The def
 does not use a reranker. No local generation server, LlamaIndex, vector database, Torch, or
 Sentence Transformers layer is involved.
 
-Install `tarel[local-rag]` for local embeddings, or `tarel[local-rag,vector]` to also enable native
+Install the `tarel-retrieval-llamacpp` Hub plugin for local embeddings (and optionally `tarel[vector]` to also enable native
 SQLite ranking. The `vector` extra alone does not provide an embedding model or llama.cpp runtime.
 Neither extra downloads model weights. An existing GGUF can be used without downloading another copy:
 

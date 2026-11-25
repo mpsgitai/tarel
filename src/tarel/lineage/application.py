@@ -34,7 +34,8 @@ from tarel.lineage.traversal import (
     find_lineage_references,
     trace_upstream,
 )
-from tarel.retrieval.local import LlamaCppEmbedding, resolve_model_path
+from tarel.retrieval.local import resolve_model_path
+from tarel.retrieval.plugins import load_local_embedding_plugin
 from tarel.runtime import TarelRuntime, resolve_runtime
 
 
@@ -281,7 +282,9 @@ def find_lineage_references_use_case(
     graphs = tuple(graph_store.load(name) for name in graph_names)
     embedder = None
     if mode in {"vector", "hybrid"}:
-        embedder = LlamaCppEmbedding(resolve_model_path(model_path), n_threads=n_threads)
+        embedder = load_local_embedding_plugin().create_embedder(
+            resolve_model_path(model_path), n_threads=n_threads
+        )
     return find_lineage_references(
         documents,
         graphs,

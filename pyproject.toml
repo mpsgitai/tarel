@@ -44,14 +44,8 @@ sqlserver = [
 semantic = [
   "PyYAML>=6,<7",
 ]
-local-rag = [
-  "llama-cpp-python>=0.3.16,<0.4",
-]
 vector = [
   "sqlite-vec==0.1.9",
-]
-sql-lineage = [
-  "sqlglot>=30.19,<30.20",
 ]
 dev = [
   "build>=1.2,<2",
@@ -124,7 +118,7 @@ warn_unused_ignores = true
 
 # Optional drivers and runtimes ship without type information.
 [[tool.mypy.overrides]]
-module = ["llama_cpp", "pymssql", "sqlite_vec", "yaml"]
+module = ["pymssql", "sqlite_vec", "yaml"]
 ignore_missing_imports = true
 
 # Type debt: modules that do not pass yet. Every other module, including all of cli/ and sdk/,
@@ -139,7 +133,6 @@ module = [
   "tarel.expansion.projections",
   "tarel.lineage.dbt",
   "tarel.lineage.review",
-  "tarel.lineage.sqlglot_adapter",
   "tarel.lineage.traversal",
   "tarel.object_families.proposal_contracts",
   "tarel.retrieval.documents",

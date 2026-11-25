@@ -11,6 +11,7 @@ from tarel.cli._output import print_json, render_catalog, render_probe
 from tarel.connectors.application import (
     check_connector_use_case,
     discover_catalog_use_case,
+    list_connectors_use_case,
     probe_connector_use_case,
     profile_connector_use_case,
     sample_connector_use_case,
@@ -23,6 +24,12 @@ def register(subcommands: Subcommands) -> None:
     """Add the `connector` command group to the top-level parser."""
     connector = subcommands.add_parser("connector", help="Inspect and run source connectors.")
     connector_commands = connector.add_subparsers(dest="connector_command")
+
+    list_cmd = connector_commands.add_parser(
+        "list",
+        help="List built-in and installed connectors and their availability.",
+    )
+    add_format_argument(list_cmd)
 
     check = connector_commands.add_parser(
         "check",
@@ -102,6 +109,25 @@ def dispatch(args: argparse.Namespace) -> int | None:
     return None
 
 
+def _render_list(results: tuple[ConnectorCheck, ...], *, output_format: str) -> None:
+    if output_format == "json":
+        print_json({"connectors": [item.to_dict() for item in results]})
+        return
+    if not results:
+        print("Connectors: none")
+        return
+    print(f"Connectors: {len(results)}")
+    for item in results:
+        status = "available" if item.available else "unavailable"
+        dialect = f" ({item.dialect})" if item.dialect else ""
+        missing = (
+            f" — missing: {', '.join(item.missing_dependencies)}"
+            if item.missing_dependencies
+            else ""
+        )
+        print(f"- {item.name}{dialect}: {status} [{', '.join(item.capabilities)}]{missing}")
+
+
 def _render_check(result: ConnectorCheck, *, output_format: str) -> None:
     if output_format == "json":
         print_json(result.to_dict())
@@ -115,7 +141,8 @@ def _render_check(result: ConnectorCheck, *, output_format: str) -> None:
         print(f"References: {', '.join(result.references)}")
     if result.missing_dependencies:
         print(f"Missing dependencies: {', '.join(result.missing_dependencies)}")
-        print(f"Install: pip install tarel[{result.extra}]")
+        if result.extra:
+            print(f"Install: pip install tarel[{result.extra}]")
 
 
 def _render_sample(result: SampleResult, *, output_format: str) -> None:
@@ -153,6 +180,12 @@ def _render_profile(result: ObjectProfileResult, *, output_format: str) -> None:
         if column.values:
             rendered = ", ".join(f"{item.value!r} ({item.count})" for item in column.values)
             print(f"  values: {rendered}")
+
+
+def _run_list(args: argparse.Namespace) -> int:
+    results = list_connectors_use_case()
+    _render_list(results, output_format=args.format)
+    return 0
 
 
 def _run_check(args: argparse.Namespace) -> int:
@@ -218,6 +251,7 @@ def _run_profile(args: argparse.Namespace) -> int:
 
 
 _HANDLERS = {
+    "list": _run_list,
     "check": _run_check,
     "probe": _run_probe,
     "discover": _run_discover,
