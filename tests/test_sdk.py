@@ -22,10 +22,11 @@ from tarel.lineage.source import (
     SourceMaterialization,
     SourceStep,
 )
-LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 from tarel.sdk import Tarel, WorkspaceScope
 from tarel.workspaces.contracts import WorkspaceFailure
 from tarel.workspaces.core import create_workspace, define_system
+
+LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 
 
 class SDKTests(TestCase):

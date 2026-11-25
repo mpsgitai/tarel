@@ -3,7 +3,6 @@ import json
 import os
 import sqlite3
 import struct
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +11,6 @@ from dataclasses import replace
 from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -38,7 +36,6 @@ from tarel.retrieval.index import (
 )
 from tarel.retrieval.local import (
     download_model,
-    qwen_embedding_query,
 )
 from tarel.retrieval.ranking import (
     DEFAULT_BM25_WEIGHT,

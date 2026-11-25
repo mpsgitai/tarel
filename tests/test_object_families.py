@@ -15,11 +15,12 @@ from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResul
 from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.contracts import GraphDocument
 from tarel.object_families import FamilyAttribute, ObjectFamily, ObjectFamilyFailure
-LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 from tarel.runtime import TarelRuntime
 from tarel.sdk import Tarel
 from tarel.workspaces.core import create_workspace, define_system
 from tarel.workspaces.projection import scoped_node_id
+
+LOCAL_EMBEDDING_INPUT = "llama.cpp:max_tokens=2048:overflow=recorded_document_cut"
 
 
 class ObjectFamilyApplicationTests(TestCase):

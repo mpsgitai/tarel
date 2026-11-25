@@ -8,7 +8,6 @@ from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
