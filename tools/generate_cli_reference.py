@@ -36,6 +36,17 @@ GROUPS = {
         "package-format.md",
         "tarel package inspect team.tarel",
     ),
+    "bundle": (
+        "Offline bundles",
+        "Build an install bundle of TAREL and chosen hub packages for a computer without internet.",
+        (
+            "Without a subcommand, a dialog asks about the target computer and the parts to "
+            "include. Plan downloads nothing. Build writes a ZIP of wheels with a hash-pinned "
+            "requirements.lock and, on a matching machine, installs it offline as a test."
+        ),
+        "offline-bundles.md",
+        "tarel bundle plan --target windows-x86_64-py3.12 --with sqlserver",
+    ),
     "sync": (
         "Metadata sync",
         "Publish approved graph metadata from a site and take it over into a central state.",
@@ -700,6 +711,7 @@ DOC_TARGETS = {
     "family-focus.md": "contracts.md#families-in-report-focus",
     "browser-workflows.md": "contracts.md#browser-scope-and-review",
     "package-format.md": "package-format.md",
+    "offline-bundles.md": "offline-bundles.md",
 }
 RESULTS = {
     "version": "Version text; no JSON document.",
@@ -708,6 +720,11 @@ RESULTS = {
         "and statement; for plan and apply, the action, sequence, object changes, affected central "
         "claims and warnings; for status, each origin's active publication, source age, receipt "
         "and last failure."
+    ),
+    "bundle": (
+        "For profile, the command to run on the target; for components, each part with its "
+        "origin and status; for plan, target, wheel tags and requirements; for build, the "
+        "bundle path, size, packages with licenses, and whether it was installed or resolved."
     ),
     "package": (
         "Package path, selected workspace, entry counts by kind, compressed and uncompressed "
