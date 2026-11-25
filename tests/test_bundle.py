@@ -192,6 +192,19 @@ class RecipeAndPlanTests(unittest.TestCase):
             main(["bundle", "build", "--recipe", str(recipe), *common])
         self.assertEqual(calls, [(root / "src").resolve()] * 2)
 
+    def test_saved_recipes_keep_an_absolute_hub(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, contextlib.chdir(folder):
+            write_hub(Path(folder) / "hub")
+            args = ["--target", "windows-x86_64-py3.12", "--hub", "hub", "--format", "json"]
+            with (
+                mock.patch("tarel.bundle.application.build_bundle") as build,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                build.return_value = BundleReport(Path("b.zip"), 1, WINDOWS, (), "resolved", ())
+                main(["bundle", "build", *args, "--save-recipe", "r.toml"])
+            saved = Recipe.from_toml(Path("r.toml").read_text(encoding="utf-8"))
+            self.assertEqual(saved.hub, (Path(folder) / "hub").resolve())
+
     def test_plan_resolves_core_extras_and_hub_packages(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             hub = write_hub(Path(folder))
@@ -501,6 +514,18 @@ class DialogTests(unittest.TestCase):
         self.assertIn("Type none to use only the core.", text)
         self.assertIn("Core only", text)
 
+    def test_an_unsupported_host_still_builds_for_others(self) -> None:
+        musl = BundleFailure("bundle_profile_libc", "musl")
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch("tarel.cli._bundle_dialog.host_target", side_effect=musl),
+        ):
+            # Only two target choices remain; the third is refused and asked again.
+            answers = ["3", "2", "1", "1", "1", "", "", "", ""]
+            transcript, build = self.run_dialog(answers, Path(folder))
+        self.assertEqual(build.call_args.args[0].target, WINDOWS)
+        self.assertNotIn("Same as this computer", "\n".join(transcript))
+
     def test_ascii_consoles_get_ascii_symbols(self) -> None:
         stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
         style = Style.for_stream(stream)
@@ -553,6 +578,18 @@ class FailureTests(unittest.TestCase):
         self.assertIn("no wheel for Windows · x86-64 · Python 3.12", str(caught.exception))
         # pip would resolve dependencies for this machine; the target walk picks them instead.
         self.assertIn("--no-deps", run.call_args.args[0])
+
+    def test_an_unsupported_host_only_resolves(self) -> None:
+        plan = plan_bundle_use_case(Recipe(WINDOWS, (), __version__))
+        musl = BundleFailure("bundle_profile_libc", "musl")
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch("tarel.bundle.builder.host_target", side_effect=musl),
+            mock.patch("tarel.bundle.builder.run_pip") as run,
+        ):
+            result = builder._check_install(plan, Path(folder), lambda _: None)
+        self.assertEqual(result, "resolved")
+        self.assertIn("--dry-run", run.call_args.args[0])
 
     def test_files_are_checked_against_the_target_before_a_host_install(self) -> None:
         plan = plan_bundle_use_case(Recipe(WINDOWS, (), __version__))

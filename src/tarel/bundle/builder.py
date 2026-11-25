@@ -236,7 +236,13 @@ def _check_install(plan: BundlePlan, root: Path, on_step: StepCallback) -> Insta
     # hashes per file.
     dry_run = ["--dry-run", "--no-deps", "--ignore-installed", "--target", str(root / "dry")]
     run_pip([*install, *dry_run, *target_arguments(plan.target)], code="bundle_check_failed")
-    if not can_test_install(plan.target, host_target()):
+    try:
+        host = host_target()
+    except BundleFailure:
+        # This computer cannot be a target itself (musl, PyPy, free-threaded, 32-bit); it can
+        # still build for one, only without the real install.
+        return "resolved"
+    if not can_test_install(plan.target, host):
         return "resolved"
 
     on_step("Installing into a clean environment, without internet")

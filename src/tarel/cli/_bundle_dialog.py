@@ -141,15 +141,19 @@ class Dialog:
 
     def ask_target(self) -> Target:
         self.heading(1, "Target computer")
-        choice = self.choose(
-            "How do you want to describe it?",
-            [
-                ("Paste a profile from the target", "most accurate"),
-                ("Choose it myself", ""),
-                ("Same as this computer", self.style.text(host_target().label)),
-            ],
-        )
-        target = (self.paste_profile, self.pick_target, host_target)[choice]()
+        options: list[tuple[str, str]] = [
+            ("Paste a profile from the target", "most accurate"),
+            ("Choose it myself", ""),
+        ]
+        steps: list[Callable[[], Target]] = [self.paste_profile, self.pick_target]
+        try:
+            host = host_target()
+        except BundleFailure:
+            host = None  # This computer is no possible target; it can still build for others.
+        if host is not None:
+            options.append(("Same as this computer", self.style.text(host.label)))
+            steps.append(lambda: host)
+        target = steps[self.choose("How do you want to describe it?", options)]()
         self.done(target.label)
         return target
 

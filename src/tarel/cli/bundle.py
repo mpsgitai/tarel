@@ -148,7 +148,7 @@ def _recipe(args: argparse.Namespace) -> Recipe:
             )
         recipe = load_recipe_use_case(args.recipe)
         if args.hub is not None:
-            recipe = dataclasses.replace(recipe, hub=args.hub)
+            recipe = dataclasses.replace(recipe, hub=args.hub.resolve())
         if tarel_from is not None:
             recipe = dataclasses.replace(recipe, tarel_from=tarel_from)
         return recipe
@@ -160,7 +160,8 @@ def _recipe(args: argparse.Namespace) -> Recipe:
         target=parse_target(args.target),
         components=chosen,
         tarel_version=__version__,
-        hub=args.hub,
+        # Absolute, so a saved recipe finds the same checkout from any folder.
+        hub=args.hub.resolve() if args.hub is not None else None,
         tarel_from=tarel_from,
     )
 
