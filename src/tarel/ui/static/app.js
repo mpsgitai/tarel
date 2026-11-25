@@ -328,20 +328,16 @@ function focusMembership(id) {
   return state.focusSelection?.members.find(item => item.id === id)?.focuses || [];
 }
 
-function workspaceSystemNames() {
-  const names = [];
-  for (const workspace of state.data?.workspaces || []) {
-    for (const system of workspace.systems || []) {
-      if (system?.name) names.push(system.name);
-    }
-  }
-  return names;
-}
-
 function emptyWorkspaceSystems(objects) {
   const populated = new Set((objects || []).map(item => item.system).filter(Boolean));
   const selectedSystems = state.scopeFilters?.systems;
-  return unique(workspaceSystemNames()).filter(
+  const workspaceSystems = [];
+  for (const workspace of state.data?.workspaces || []) {
+    for (const system of workspace.systems || []) {
+      if (system?.name) workspaceSystems.push(system.name);
+    }
+  }
+  return unique(workspaceSystems).filter(
     name =>
       !populated.has(name) &&
       (!(selectedSystems instanceof Set) || selectedSystems.has(name)),
@@ -349,10 +345,16 @@ function emptyWorkspaceSystems(objects) {
 }
 
 function initializeScopeFilters() {
+  const workspaceSystems = [];
+  for (const workspace of state.data?.workspaces || []) {
+    for (const system of workspace.systems || []) {
+      if (system?.name) workspaceSystems.push(system.name);
+    }
+  }
   const facets = {
     systems: unique([
       ...state.data.objects.map(item => item.system).filter(Boolean),
-      ...workspaceSystemNames(),
+      ...workspaceSystems,
     ]),
     areas: unique(state.data.objects.map(item => item.area_ref).filter(Boolean)),
     graphs: unique(state.data.objects.map(item => item.graph)),
