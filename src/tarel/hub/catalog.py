@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from tarel import __version__
-from tarel.hub.contracts import HubEntryPoint, HubExtension, HubFailure
-
-DEFAULT_HUB_CATALOG_URL = (
-    "https://raw.githubusercontent.com/mpsgitai/tarel-hub/main/catalog/catalog.json"
+from tarel.hub.contracts import (
+    DEFAULT_HUB_CATALOG_URL,
+    HubEntryPoint,
+    HubExtension,
+    HubFailure,
 )
+
 HUB_URL_ENV_VAR = "TAREL_HUB_URL"
 _SNAPSHOT_PATH = Path(__file__).resolve().parent / "catalog_snapshot.json"
 _MAX_CATALOG_BYTES = 1_048_576
@@ -26,51 +28,50 @@ _BUILTIN_CONNECTORS = frozenset({"sqlite", "sqlserver"})
 
 _CONFIG_TEMPLATES: dict[str, str] = {
     "connector-postgres": (
-        '[source]\n'
-        'url = "${TAREL_POSTGRES_URL}"\n'
-        '# Or omit url and rely on libpq environment variables / pgpass / SSPI / GSSAPI.\n'
-        '# Optional: schema = "public"\n'
+        "[postgres]\n"
+        'url = "postgresql://readonly_user:password@127.0.0.1:5432/analytics"\n'
+        "# Or set TAREL_POSTGRES_URL in the environment (overrides [postgres].url).\n"
     ),
     "connector-mysql": (
-        '[source]\n'
-        'url = "${TAREL_MYSQL_URL}"\n'
-        '# Example: mysql://readonly_user:password@127.0.0.1:3306/analytics\n'
+        "[mysql]\n"
+        'url = "mysql://readonly_user:password@127.0.0.1:3306/analytics"\n'
+        "# Or set TAREL_MYSQL_URL in the environment (overrides [mysql].url).\n"
     ),
     "connector-clickhouse": (
-        '[source]\n'
-        'url = "${TAREL_CLICKHOUSE_URL}"\n'
-        '# Example: clickhouse+http://readonly_user:password@127.0.0.1:8123/default\n'
+        "[clickhouse]\n"
+        'url = "clickhouse+http://readonly_user:password@127.0.0.1:8123/default"\n'
+        "# Or set TAREL_CLICKHOUSE_URL in the environment (overrides [clickhouse].url).\n"
     ),
     "connector-oracle": (
-        '[source]\n'
-        'url = "${TAREL_ORACLE_URL}"\n'
-        '# Example: oracle://readonly_user:password@127.0.0.1:1521/FREEPDB1\n'
+        "[oracle]\n"
+        'url = "oracle://readonly_user:password@127.0.0.1:1521/FREEPDB1"\n'
+        "# Or set TAREL_ORACLE_URL in the environment (overrides [oracle].url).\n"
     ),
     "connector-duckdb": (
-        '[source]\n'
-        'path = "./warehouse.duckdb"\n'
-        '# Opened read-only with external access disabled (trusted local files only).\n'
+        "[duckdb]\n"
+        'url = "duckdb:///./warehouse.duckdb"\n'
+        "# Opened read-only with external access disabled (trusted local files only).\n"
+        "# Or set TAREL_DUCKDB_URL in the environment (overrides [duckdb].url).\n"
     ),
     "connector-mongodb": (
-        '[source]\n'
-        'url = "${TAREL_MONGODB_URL}"\n'
-        '# Example: mongodb://readonly_user:password@127.0.0.1:27017/analytics\n'
+        "[mongodb]\n"
+        'url = "mongodb://readonly_user:password@127.0.0.1:27017/analytics"\n'
+        "# Or set TAREL_MONGODB_URL in the environment (overrides [mongodb].url).\n"
     ),
     "connector-sqlserver": (
-        '[source]\n'
-        'server = "127.0.0.1"\n'
-        'port = 1433\n'
-        'database = "analytics"\n'
-        '# Provide user/password or use Windows integrated auth where supported.\n'
+        "[sqlserver]\n"
+        'url = "mssql://readonly_user:password@127.0.0.1:1433/analytics"\n'
+        "# Or set TAREL_SQLSERVER_URL in the environment (overrides [sqlserver].url).\n"
     ),
     "lineage-sqlglot": (
-        "# No source.toml required. Once installed, TAREL discovers `sqlglot` automatically:\n"
-        "#   tarel lineage analyze --sql-dir ./models --dialect postgres --format json\n"
+        "# No connector config required. Run static SQL analysis on a lineage source document:\n"
+        "#   tarel lineage analyze <name> --source lineage-source.json "
+        "--analyzer sqlglot --dialect postgres --format json\n"
     ),
     "retrieval-llamacpp": (
-        "# No source.toml required. Download pinned GGUF models explicitly after install:\n"
-        "#   tarel model list\n"
-        "#   tarel model download <model-name>\n"
+        "# No connector config required. Check and download a pinned GGUF model explicitly:\n"
+        "#   tarel model status\n"
+        "#   tarel model download --name <model-name>\n"
     ),
 }
 
@@ -236,12 +237,18 @@ def _read_bundled_snapshot() -> dict[str, Any]:
     return data
 
 
+def _is_windows_drive_path(target: str) -> bool:
+    return len(target) >= 2 and target[0].isalpha() and target[1] == ":" and (
+        len(target) == 2 or target[2] in ("\\", "/")
+    )
+
+
 def _fetch_catalog_json(target: str) -> dict[str, Any]:
     parsed = urllib.parse.urlparse(target)
-    if parsed.scheme in ("", "file"):
+    if _is_windows_drive_path(target) or parsed.scheme in ("", "file"):
         local_path = (
             Path(urllib.parse.unquote(parsed.path))
-            if parsed.scheme == "file"
+            if not _is_windows_drive_path(target) and parsed.scheme == "file"
             else Path(target)
         )
         try:

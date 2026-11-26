@@ -55,7 +55,10 @@ _ENV_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
 _CONTENT_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     (
         "connector-postgres",
-        re.compile(r"\b(postgresql?://|psycopg|type:\s*postgres|postgres:)\b", re.IGNORECASE),
+        re.compile(
+            r"(?:postgres(?:ql)?://|\bpsycopg\b|\btype:\s*postgres\b|\bpostgres:)",
+            re.IGNORECASE,
+        ),
         "PostgreSQL reference",
     ),
     (

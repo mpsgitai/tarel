@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from tarel.errors import TarelError
+
+DEFAULT_HUB_CATALOG_URL = (
+    "https://raw.githubusercontent.com/mpsgitai/tarel-hub/main/catalog/catalog.json"
+)
 
 
 class HubFailure(TarelError):
@@ -114,7 +119,10 @@ class HubExtension:
         if self.status == "builtin":
             return self.install or None
         extra_flag = f" --extra {self.recommended_extra}" if self.recommended_extra else ""
-        return f"tarel hub install {self.id}{extra_flag} --yes"
+        hub_flag = ""
+        if self.catalog_source not in ("bundled_snapshot", DEFAULT_HUB_CATALOG_URL):
+            hub_flag = f" --hub-url {shlex.quote(self.catalog_source)}"
+        return f"tarel hub install {self.id}{extra_flag}{hub_flag} --yes"
 
     def to_dict(self) -> dict[str, Any]:
         return {

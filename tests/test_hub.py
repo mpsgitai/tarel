@@ -79,7 +79,7 @@ class HubCatalogAndCliTests(unittest.TestCase):
                 main(["hub", "show", "postgres", "--config-template", "--offline"]),
                 0,
             )
-        self.assertIn("[source]", text_out.getvalue())
+        self.assertIn("[postgres]", text_out.getvalue())
         self.assertIn("TAREL_POSTGRES_URL", text_out.getvalue())
 
         json_out = StringIO()
@@ -90,7 +90,18 @@ class HubCatalogAndCliTests(unittest.TestCase):
             self.assertEqual(code, 0)
         tpl_payload = json.loads(json_out.getvalue())
         self.assertEqual(tpl_payload["extension_id"], "connector-duckdb")
-        self.assertIn("warehouse.duckdb", tpl_payload["config_template"])
+        self.assertIn("[duckdb]", tpl_payload["config_template"])
+        self.assertIn("duckdb:///./warehouse.duckdb", tpl_payload["config_template"])
+
+        # Lineage and retrieval templates use supported CLI invocations
+        with TemporaryDirectory() as tmp:
+            client = Tarel(tmp)
+            lin_tpl = client.hub.show("sqlglot", offline=True).config_template or ""
+            ret_tpl = client.hub.show("llamacpp", offline=True).config_template or ""
+        self.assertIn("--analyzer sqlglot", lin_tpl)
+        self.assertIn("--source", lin_tpl)
+        self.assertIn("tarel model status", ret_tpl)
+        self.assertIn("tarel model download --name", ret_tpl)
 
     def test_hub_search_matches_capabilities_and_dialects(self) -> None:
         stdout = StringIO()
@@ -211,6 +222,13 @@ class HubCatalogAndCliTests(unittest.TestCase):
             items = client.hub.list(hub_url=str(custom_catalog))
             self.assertEqual([item.id for item in items], ["connector-custom"])
             self.assertEqual(items[0].catalog_source, str(custom_catalog))
+            self.assertIn("--hub-url", items[0].recommended_cli_install or "")
+
+            # Windows drive path is treated as local file, not URL scheme 'c'
+            with self.assertRaises(HubFailure) as win_err:
+                client.hub.list(hub_url=r"C:\nonexistent\hub\catalog.json")
+            self.assertEqual(win_err.exception.code, "hub_fetch_failed")
+            self.assertNotIn("Unsupported Hub catalog URL scheme", str(win_err.exception))
 
             # Explicit bad hub_url must raise HubFailure (never silently swallow)
             with self.assertRaises(HubFailure) as missing_err:
@@ -276,6 +294,16 @@ class HubCatalogAndCliTests(unittest.TestCase):
             self.assertIn("connector-mysql", ids)
             self.assertIn("lineage-sqlglot", ids)
             self.assertNotIn("connector-mongodb", ids)
+
+            # postgres:// URI scheme alone in .env.example triggers connector-postgres
+            pg_only = Path(tmp) / "pg_uri_only"
+            pg_only.mkdir()
+            (pg_only / ".env.example").write_text(
+                "DATABASE_URL=postgres://reader@localhost/analytics\n",
+                encoding="utf-8",
+            )
+            pg_suggestions = Tarel(tmp).hub.suggest(pg_only)
+            self.assertEqual([s.extension_id for s in pg_suggestions], ["connector-postgres"])
 
     def test_self_healing_hub_hints_on_missing_plugins(self) -> None:
         with (
