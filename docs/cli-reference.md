@@ -5642,7 +5642,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_entity_resolution_import` | [entity_resolution/application.py](../src/tarel/entity_resolution/application.py#L44) |
 | `invalid_entity_resolution_mode` | [entity_resolution/application.py](../src/tarel/entity_resolution/application.py#L119), [entity_resolution/application.py](../src/tarel/entity_resolution/application.py#L172) |
 | `invalid_entity_resolution_supersede` | [entity_resolution/application.py](../src/tarel/entity_resolution/application.py#L395) |
-| `invalid_entrypoint` | [connectors/host.py](../src/tarel/connectors/host.py#L70), [connectors/host.py](../src/tarel/connectors/host.py#L129), [connectors/host.py](../src/tarel/connectors/host.py#L155) |
+| `invalid_entrypoint` | [connectors/host.py](../src/tarel/connectors/host.py#L70), [connectors/host.py](../src/tarel/connectors/host.py#L129), [connectors/host.py](../src/tarel/connectors/host.py#L141), [connectors/host.py](../src/tarel/connectors/host.py#L168) |
 | `invalid_expansion_input` | [cli/context_expand.py](../src/tarel/cli/context_expand.py#L88), [expansion/projections.py](../src/tarel/expansion/projections.py#L61), [expansion/projections.py](../src/tarel/expansion/projections.py#L173) |
 | `invalid_expansion_stdin` | [cli/context_expand.py](../src/tarel/cli/context_expand.py#L42) |
 | `invalid_family_proposals` | [object_families/proposal_contracts.py](../src/tarel/object_families/proposal_contracts.py#L33), [object_families/proposals.py](../src/tarel/object_families/proposals.py#L177) |
