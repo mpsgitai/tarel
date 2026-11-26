@@ -136,26 +136,90 @@ def _manifest_path_for_entry_point(
     module_name: str,
 ) -> Path:
     """Locate a connector's manifest.toml without importing any plugin Python code."""
-    parts = module_name.split(".")
-    parent_parts = parts[:-1] if len(parts) > 1 else parts
-    relative_manifest = Path(*parent_parts) / "manifest.toml"
+    parts = [part for part in module_name.split(".") if part]
+    if not parts:
+        raise ConnectorFailure(
+            "invalid_entrypoint",
+            f"Could not locate connector module: {name}",
+        )
+    relative_candidates = [Path(*parts) / "manifest.toml"]
+    if len(parts) > 1:
+        relative_candidates.append(Path(*parts[:-1]) / "manifest.toml")
+
     dist = getattr(entry_point, "dist", None)
     if dist is not None:
-        located = Path(str(dist.locate_file(relative_manifest.as_posix())))
-        if located.is_file():
-            return located.resolve()
-        # Editable installs store a direct_url.json or .pth; fall back to filesystem lookup
-        # using sys.path without executing any package __init__.py.
+        for relative_manifest in relative_candidates:
+            located = Path(str(dist.locate_file(relative_manifest.as_posix())))
+            if located.is_file():
+                return located.resolve()
+
+    from_meta_path = _manifest_path_from_meta_path(parts)
+    if from_meta_path is not None:
+        return from_meta_path
+
     import sys
 
     for base in sys.path:
-        candidate = Path(base or ".") / relative_manifest
-        if candidate.is_file():
-            return candidate.resolve()
+        base_path = Path(base or ".")
+        for relative_manifest in relative_candidates:
+            candidate = base_path / relative_manifest
+            if candidate.is_file():
+                return candidate.resolve()
     raise ConnectorFailure(
         "invalid_entrypoint",
         f"Could not locate connector module: {name}",
     )
+
+
+def _manifest_path_from_meta_path(parts: list[str]) -> Path | None:
+    """Resolve manifest.toml via sys.meta_path finders without importing packages."""
+    candidate_names = [".".join(parts)]
+    if len(parts) > 1:
+        candidate_names.append(".".join(parts[:-1]))
+    for candidate_name in candidate_names:
+        spec = _find_spec_without_import(candidate_name)
+        if spec is None:
+            continue
+        if spec.origin and spec.origin != "namespace":
+            manifest = Path(spec.origin).resolve().parent / "manifest.toml"
+            if manifest.is_file():
+                return manifest
+        if spec.submodule_search_locations:
+            for location in spec.submodule_search_locations:
+                manifest = Path(location) / "manifest.toml"
+                if manifest.is_file():
+                    return manifest.resolve()
+    return None
+
+
+def _find_spec_without_import(module_name: str) -> Any:
+    """Walk sys.meta_path finders segment-by-segment without executing __init__.py."""
+    import sys
+
+    parts = module_name.split(".")
+    search_path: list[str] | None = None
+    spec: Any = None
+    for index in range(len(parts)):
+        fullname = ".".join(parts[: index + 1])
+        spec = None
+        for finder in sys.meta_path:
+            find_spec = getattr(finder, "find_spec", None)
+            if find_spec is None:
+                continue
+            try:
+                spec = find_spec(fullname, search_path)
+            except Exception:
+                continue
+            if spec is not None:
+                break
+        if spec is None:
+            return None
+        if index < len(parts) - 1:
+            locations = getattr(spec, "submodule_search_locations", None)
+            if locations is None:
+                return None
+            search_path = list(locations)
+    return spec
 
 
 def _installed_entry_point(name: str) -> EntryPoint:

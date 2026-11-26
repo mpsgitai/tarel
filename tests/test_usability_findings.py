@@ -129,3 +129,137 @@ class UsabilityAndSecurityFindingsTests(TestCase):
 
         self.assertTrue(checked.available)
         self.assertIn("noimport", [item.name for item in listed])
+
+    def test_check_connector_supports_nested_package_entrypoint_without_import(self) -> None:
+        import sys
+        from importlib.metadata import EntryPoint
+
+        from tarel.connectors.host import check_connector
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            vendor = root / "nested_vendor"
+            adapter = vendor / "adapter"
+            adapter.mkdir(parents=True)
+            (vendor / "__init__.py").write_text(
+                'raise RuntimeError("vendor __init__ must not run")\n',
+                encoding="utf-8",
+            )
+            (adapter / "__init__.py").write_text(
+                'raise RuntimeError("adapter __init__ must not run")\n',
+                encoding="utf-8",
+            )
+            (adapter / "manifest.toml").write_text(
+                '[connector]\n'
+                'contract_version = 1\n'
+                'name = "nestedpkg"\n'
+                'version = "0.1.0"\n'
+                'source_type = "database"\n'
+                'dialect = "sqlite"\n'
+                'entrypoint = "nested_vendor.adapter:create"\n'
+                'extra = "nestedpkg"\n'
+                'capabilities = ["probe", "discover_catalog"]\n'
+                'permissions = ["read"]\n'
+                'dependencies = []\n',
+                encoding="utf-8",
+            )
+            ep = EntryPoint(
+                name="nestedpkg",
+                value="nested_vendor.adapter:create",
+                group="tarel.connectors",
+            )
+            sys.path.insert(0, str(root))
+            try:
+                with patch("tarel.connectors.host.entry_points") as eps:
+                    eps.return_value.select.side_effect = (
+                        lambda *, group, name=None: (ep,)
+                        if group == "tarel.connectors" and name in (None, "nestedpkg")
+                        else ()
+                    )
+                    checked = check_connector("nestedpkg")
+            finally:
+                sys.path.remove(str(root))
+                sys.modules.pop("nested_vendor", None)
+                sys.modules.pop("nested_vendor.adapter", None)
+
+        self.assertTrue(checked.available)
+
+    def test_check_connector_supports_meta_path_editable_finder_without_import(self) -> None:
+        import sys
+        from importlib.machinery import ModuleSpec
+        from importlib.metadata import EntryPoint
+
+        from tarel.connectors.host import check_connector
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            src_pkg = root / "editable_src" / "mapped_plugin"
+            src_pkg.mkdir(parents=True)
+            (src_pkg / "__init__.py").write_text(
+                'raise RuntimeError("editable __init__ must not run")\n',
+                encoding="utf-8",
+            )
+            (src_pkg / "connector.py").write_text(
+                'raise RuntimeError("editable connector must not run")\n',
+                encoding="utf-8",
+            )
+            (src_pkg / "manifest.toml").write_text(
+                '[connector]\n'
+                'contract_version = 1\n'
+                'name = "mappedpkg"\n'
+                'version = "0.1.0"\n'
+                'source_type = "database"\n'
+                'dialect = "sqlite"\n'
+                'entrypoint = "mapped_plugin.connector:create"\n'
+                'extra = "mappedpkg"\n'
+                'capabilities = ["probe", "discover_catalog"]\n'
+                'permissions = ["read"]\n'
+                'dependencies = []\n',
+                encoding="utf-8",
+            )
+
+            class _EditableMetaPathFinder:
+                def find_spec(
+                    self,
+                    fullname: str,
+                    path: object = None,
+                    target: object = None,
+                ) -> ModuleSpec | None:
+                    if fullname == "mapped_plugin":
+                        spec = ModuleSpec(
+                            name="mapped_plugin",
+                            loader=None,
+                            origin=str(src_pkg / "__init__.py"),
+                            is_package=True,
+                        )
+                        spec.submodule_search_locations = [str(src_pkg)]
+                        return spec
+                    if fullname == "mapped_plugin.connector":
+                        return ModuleSpec(
+                            name="mapped_plugin.connector",
+                            loader=None,
+                            origin=str(src_pkg / "connector.py"),
+                        )
+                    return None
+
+            finder = _EditableMetaPathFinder()
+            ep = EntryPoint(
+                name="mappedpkg",
+                value="mapped_plugin.connector:create",
+                group="tarel.connectors",
+            )
+            sys.meta_path.insert(0, finder)
+            try:
+                with patch("tarel.connectors.host.entry_points") as eps:
+                    eps.return_value.select.side_effect = (
+                        lambda *, group, name=None: (ep,)
+                        if group == "tarel.connectors" and name in (None, "mappedpkg")
+                        else ()
+                    )
+                    checked = check_connector("mappedpkg")
+            finally:
+                sys.meta_path.remove(finder)
+                sys.modules.pop("mapped_plugin", None)
+                sys.modules.pop("mapped_plugin.connector", None)
+
+        self.assertTrue(checked.available)
