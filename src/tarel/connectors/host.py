@@ -71,19 +71,7 @@ def load_manifest(name: str) -> ConnectorManifest:
                 "invalid_entrypoint",
                 f"Connector entry point is invalid: {name}",
             )
-        try:
-            specification = importlib.util.find_spec(module_name)
-        except (ImportError, ModuleNotFoundError) as exc:
-            raise ConnectorFailure(
-                "invalid_entrypoint",
-                f"Could not locate connector module: {name}",
-            ) from exc
-        if specification is None or specification.origin is None:
-            raise ConnectorFailure(
-                "invalid_entrypoint",
-                f"Could not locate connector module: {name}",
-            )
-        manifest_path = Path(specification.origin).resolve().parent / "manifest.toml"
+        manifest_path = _manifest_path_for_entry_point(name, entry_point, module_name)
     try:
         with manifest_path.open("rb") as handle:
             data = tomllib.load(handle)
@@ -140,6 +128,34 @@ def load_connector(name: str) -> Connector:
     except (AttributeError, ImportError, TypeError) as exc:
         raise ConnectorFailure("invalid_entrypoint", f"Could not load connector: {name}") from exc
     return cast(Connector, connector)
+
+
+def _manifest_path_for_entry_point(
+    name: str,
+    entry_point: EntryPoint,
+    module_name: str,
+) -> Path:
+    """Locate a connector's manifest.toml without importing any plugin Python code."""
+    parts = module_name.split(".")
+    parent_parts = parts[:-1] if len(parts) > 1 else parts
+    relative_manifest = Path(*parent_parts) / "manifest.toml"
+    dist = getattr(entry_point, "dist", None)
+    if dist is not None:
+        located = Path(str(dist.locate_file(relative_manifest.as_posix())))
+        if located.is_file():
+            return located.resolve()
+        # Editable installs store a direct_url.json or .pth; fall back to filesystem lookup
+        # using sys.path without executing any package __init__.py.
+    import sys
+
+    for base in sys.path:
+        candidate = Path(base or ".") / relative_manifest
+        if candidate.is_file():
+            return candidate.resolve()
+    raise ConnectorFailure(
+        "invalid_entrypoint",
+        f"Could not locate connector module: {name}",
+    )
 
 
 def _installed_entry_point(name: str) -> EntryPoint:

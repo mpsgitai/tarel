@@ -79,3 +79,53 @@ class UsabilityAndSecurityFindingsTests(TestCase):
             code = main(["version"])
         self.assertEqual(code, 0)
         self.assertTrue(stdout.getvalue().strip())
+
+    def test_check_and_list_connectors_never_import_plugin_code(self) -> None:
+        import sys
+        from importlib.metadata import EntryPoint
+
+        from tarel.connectors.host import check_connector, list_connectors
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            pkg = root / "no_import_plugin"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text(
+                'raise RuntimeError("plugin __init__ must not run during check/list")\n',
+                encoding="utf-8",
+            )
+            (pkg / "manifest.toml").write_text(
+                '[connector]\n'
+                'contract_version = 1\n'
+                'name = "noimport"\n'
+                'version = "0.1.0"\n'
+                'source_type = "database"\n'
+                'dialect = "sqlite"\n'
+                'entrypoint = "no_import_plugin.connector:create"\n'
+                'extra = "noimport"\n'
+                'capabilities = ["probe", "discover_catalog"]\n'
+                'permissions = ["read"]\n'
+                'dependencies = []\n',
+                encoding="utf-8",
+            )
+            ep = EntryPoint(
+                name="noimport",
+                value="no_import_plugin.connector:create",
+                group="tarel.connectors",
+            )
+            sys.path.insert(0, str(root))
+            try:
+                with patch("tarel.connectors.host.entry_points") as eps:
+                    eps.return_value.select.side_effect = (
+                        lambda *, group, name=None: (ep,)
+                        if group == "tarel.connectors" and name in (None, "noimport")
+                        else ()
+                    )
+                    checked = check_connector("noimport")
+                    listed = list_connectors()
+            finally:
+                sys.path.remove(str(root))
+                sys.modules.pop("no_import_plugin", None)
+
+        self.assertTrue(checked.available)
+        self.assertIn("noimport", [item.name for item in listed])

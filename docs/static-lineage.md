@@ -11,7 +11,7 @@ SQLGlot is not a dependency of the base package and `import tarel` does not impo
 capability explicitly, in the same spirit as optional local embeddings:
 
 ```bash
-python -m pip install tarel-lineage-sqlglot
+python -m pip install "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/lineage-sqlglot"
 ```
 
 The extra uses the pure-Python SQLGlot package. TAREL constrains it to a tested minor line because
