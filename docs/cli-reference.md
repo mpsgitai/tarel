@@ -5772,25 +5772,26 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `bundle_output_folder` | [bundle/application.py](../src/tarel/bundle/application.py#L56) |
 | `bundle_output_suffix` | [bundle/application.py](../src/tarel/bundle/application.py#L50) |
 | `bundle_pip_unavailable` | [bundle/pip.py](../src/tarel/bundle/pip.py#L27), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L277) |
-| `bundle_profile_arch` | [bundle/targets.py](../src/tarel/bundle/targets.py#L115), [bundle/targets.py](../src/tarel/bundle/targets.py#L119) |
+| `bundle_profile_arch` | [bundle/targets.py](../src/tarel/bundle/targets.py#L119), [bundle/targets.py](../src/tarel/bundle/targets.py#L123) |
 | `bundle_profile_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L62) |
-| `bundle_profile_libc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L84) |
-| `bundle_profile_os` | [bundle/targets.py](../src/tarel/bundle/targets.py#L131) |
+| `bundle_profile_libc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L86) |
+| `bundle_profile_os` | [bundle/targets.py](../src/tarel/bundle/targets.py#L135) |
 | `bundle_profile_python` | [bundle/targets.py](../src/tarel/bundle/targets.py#L68), [bundle/targets.py](../src/tarel/bundle/targets.py#L73) |
 | `bundle_recipe_conflict` | [cli/bundle.py](../src/tarel/cli/bundle.py#L146) |
-| `bundle_recipe_format` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L172) |
-| `bundle_recipe_invalid` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L168), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L177), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L180) |
+| `bundle_recipe_format` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L184) |
+| `bundle_recipe_invalid` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L180), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L189), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L192) |
 | `bundle_recipe_missing` | [bundle/application.py](../src/tarel/bundle/application.py#L69) |
 | `bundle_resolve_conflict` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L119) |
 | `bundle_resolve_incomplete` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L135) |
-| `bundle_target_arch` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L47) |
-| `bundle_target_glibc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L176) |
-| `bundle_target_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L150) |
-| `bundle_target_missing` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L101) |
-| `bundle_target_os` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L45) |
-| `bundle_target_python` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L50) |
+| `bundle_target_arch` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L51) |
+| `bundle_target_glibc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L180) |
+| `bundle_target_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L154) |
+| `bundle_target_machine` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L66) |
+| `bundle_target_missing` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L113) |
+| `bundle_target_os` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L49) |
+| `bundle_target_python` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L54) |
 | `bundle_target_required` | [cli/bundle.py](../src/tarel/cli/bundle.py#L156) |
-| `bundle_target_version` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L56), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L58), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L60) |
+| `bundle_target_version` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L60), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L62), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L64) |
 | `bundle_version_mismatch` | [bundle/application.py](../src/tarel/bundle/application.py#L23) |
 | `bundle_wheel_duplicate` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L248) |
 | `bundle_wheel_metadata` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L246), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L264) |
