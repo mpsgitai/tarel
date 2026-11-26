@@ -4,7 +4,7 @@ An offline bundle carries TAREL and the hub packages you choose to a computer wi
 access, such as a server in a restricted on-premises network. It is a plain ZIP file:
 
 ```
-tarel-offline-0.0.5-windows-x86_64-py3.12/
+tarel-offline-0.0.6-windows-x86_64-py3.12/
   wheels/             unmodified wheels as published upstream, plus locally built hub packages
   requirements.lock   every wheel, pinned by version and SHA-256 hash
   bundle.json         target, components, and packages with their licenses
@@ -42,7 +42,7 @@ Without the dialog, for scripts:
 tarel bundle components --hub ../tarel-hub
 tarel bundle plan --target windows-x86_64-py3.12 --with sqlserver,postgres --hub ../tarel-hub
 tarel bundle build --target "tarel-target:1 cpython win-amd64 3.12 AMD64 - -" --with sqlserver
-tarel bundle build --recipe tarel-offline-0.0.5-windows-x86_64-py3.12.toml
+tarel bundle build --recipe tarel-offline-0.0.6-windows-x86_64-py3.12.toml
 ```
 
 `--tarel-from PATH` bundles an unreleased TAREL wheel or source checkout instead of the PyPI
