@@ -185,7 +185,9 @@ def _build(args: argparse.Namespace, recipe: Recipe) -> int:
     text = args.format == "text"
     report = build_bundle_use_case(
         recipe,
-        output.resolve(),
+        # Resolve the folder only: a link planted as the output file must be replaced, not
+        # followed to whatever file it points at.
+        output.parent.resolve() / output.name,
         replace=args.replace,
         on_step=(lambda step: print(f"  {step} ...", flush=True)) if text else (lambda _: None),
     )

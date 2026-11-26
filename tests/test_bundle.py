@@ -192,6 +192,22 @@ class RecipeAndPlanTests(unittest.TestCase):
             main(["bundle", "build", "--recipe", str(recipe), *common])
         self.assertEqual(calls, [(root / "src").resolve()] * 2)
 
+    def test_replace_does_not_follow_a_planted_output_link(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, contextlib.chdir(folder):
+            Path("victim.zip").write_text("keep", encoding="utf-8")
+            try:
+                Path("b.zip").symlink_to(Path(folder) / "victim.zip")
+            except OSError:
+                self.skipTest("symlinks are not available")
+            with (
+                mock.patch("tarel.bundle.application.build_bundle") as build,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                build.return_value = BundleReport(Path("b.zip"), 1, WINDOWS, (), "resolved", ())
+                args = ["--target", "windows-x86_64-py3.12", "--output", "b.zip", "--replace"]
+                main(["bundle", "build", *args, "--format", "json"])
+            self.assertEqual(build.call_args.args[1], Path(folder).resolve() / "b.zip")
+
     def test_saved_recipes_keep_an_absolute_hub(self) -> None:
         with tempfile.TemporaryDirectory() as folder, contextlib.chdir(folder):
             write_hub(Path(folder) / "hub")
