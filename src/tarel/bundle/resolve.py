@@ -58,7 +58,7 @@ def marker_environment(target: Target, patch: str = "0") -> dict[str, str]:
         "sys_platform": sys_platform,
         "platform_system": system,
         "os_name": os_name,
-        "platform_machine": _MACHINES[(target.os, target.arch)],
+        "platform_machine": target.machine or _MACHINES[(target.os, target.arch)],
         "python_version": target.python,
         "python_full_version": f"{target.python}.{patch}",
         "implementation_name": "cpython",

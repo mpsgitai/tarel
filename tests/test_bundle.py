@@ -25,7 +25,7 @@ from tarel.bundle.application import (
 from tarel.bundle.catalog import available_components, hub_components
 from tarel.bundle.contracts import BundleFailure, BundlePlan, BundleReport, Recipe, Target
 from tarel.bundle.pip import run_pip
-from tarel.bundle.resolve import complete_for_target
+from tarel.bundle.resolve import complete_for_target, marker_environment
 from tarel.bundle.targets import (
     PROFILE_COMMAND,
     can_test_install,
@@ -101,7 +101,12 @@ class TargetTests(unittest.TestCase):
         mac = parse_profile("tarel-target:1 cpython macosx-11.0-arm64 3.12 arm64 - 14.5")
         self.assertEqual(mac.macos, "14.0")
         emulated = parse_profile("tarel-target:1 cpython win-amd64 3.12 ARM64 - -")
-        self.assertEqual(emulated.arch, "x86_64")
+        self.assertEqual((emulated.arch, emulated.machine), ("x86_64", "ARM64"))
+        self.assertEqual(pip_platforms(emulated), ("win_amd64",))
+        self.assertEqual(marker_environment(emulated)["platform_machine"], "ARM64")
+        self.assertEqual(marker_environment(WINDOWS)["platform_machine"], "AMD64")
+        self.assertEqual(Target.from_dict(emulated.to_dict()), emulated)
+        self.assertIn("on ARM64", emulated.label)
         universal = parse_profile(
             "tarel-target:1 cpython macosx-10.13-universal2 3.12 arm64 - 14.5"
         )

@@ -75,6 +75,8 @@ def parse_profile(line: str) -> Target:
             f"The target runs free-threaded Python {python}; use the regular build there.",
         )
     arch = _arch_from_platform(build_platform, machine)
+    native = _MACHINES.get(machine.lower())
+    emulated = machine if native is not None and native != arch else None
     os_name = _os_from_platform(build_platform)
     glibc = None
     macos = None
@@ -88,7 +90,9 @@ def parse_profile(line: str) -> Target:
         glibc = ".".join(version.split(".")[:2])
     if os_name == "macos" and mac_version != "-":
         macos = macos_baseline(mac_version)
-    return Target(os=os_name, arch=arch, python=python, glibc=glibc, macos=macos)
+    return Target(
+        os=os_name, arch=arch, python=python, glibc=glibc, macos=macos, machine=emulated
+    )
 
 
 def macos_baseline(version: str) -> str:

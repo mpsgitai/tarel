@@ -52,7 +52,8 @@ wheel of the same project, even when both carry the same version number. A saved
 
 `--target` accepts `host`, a pasted profile line, or a short name such as
 `windows-x86_64-py3.12`, `linux-arm64-py3.13-glibc2.31`, or `macos-arm64-py3.12-macos14.0`.
-A Linux name without glibc assumes glibc 2.28.
+A Linux name without glibc assumes glibc 2.28. Prefer the pasted profile for x64 Python on Windows ARM:
+only the profile records that it runs under emulation, which some dependency markers check.
 
 ## Install on the target
 

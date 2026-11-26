@@ -22,6 +22,7 @@ _OS_LABELS = {"windows": "Windows", "linux": "Linux", "macos": "macOS"}
 _ARCH_LABELS = {"x86_64": "x86-64", "arm64": "ARM64"}
 _PYTHON = re.compile(r"3\.(\d{2})")
 _VERSION = re.compile(r"\d+\.\d+")
+_MACHINE = re.compile(r"[A-Za-z0-9_.-]{1,32}")
 # TAREL itself requires Python 3.11 or newer.
 MIN_PYTHON_MINOR = 11
 
@@ -39,6 +40,9 @@ class Target:
     python: str
     glibc: str | None = None
     macos: str | None = None
+    # What platform.machine() reports, kept only when it differs from the wheel architecture
+    # (x64 Python under Windows ARM emulation): markers see the machine, wheels the Python.
+    machine: str | None = None
 
     def __post_init__(self) -> None:
         if self.os not in OPERATING_SYSTEMS:
@@ -58,6 +62,8 @@ class Target:
             raise BundleFailure("bundle_target_version", "A glibc version only applies to Linux.")
         if self.macos is not None and self.os != "macos":
             raise BundleFailure("bundle_target_version", "A macOS version only applies to macOS.")
+        if self.machine is not None and not _MACHINE.fullmatch(self.machine):
+            raise BundleFailure("bundle_target_machine", f"Invalid machine: {self.machine!r}.")
 
     @property
     def slug(self) -> str:
@@ -77,7 +83,10 @@ class Target:
             system += f" (glibc {self.glibc})"
         if self.macos:
             system += f" {self.macos}"
-        return f"{system} · {_ARCH_LABELS[self.arch]} · Python {self.python}"
+        arch = _ARCH_LABELS[self.arch]
+        if self.machine:
+            arch += f" (on {self.machine})"
+        return f"{system} · {arch} · Python {self.python}"
 
     def to_dict(self) -> dict[str, str]:
         data = {"os": self.os, "arch": self.arch, "python": self.python}
@@ -85,6 +94,8 @@ class Target:
             data["glibc"] = self.glibc
         if self.macos:
             data["macos"] = self.macos
+        if self.machine:
+            data["machine"] = self.machine
         return data
 
     @classmethod
@@ -96,6 +107,7 @@ class Target:
                 python=str(data["python"]),
                 glibc=str(data["glibc"]) if data.get("glibc") else None,
                 macos=str(data["macos"]) if data.get("macos") else None,
+                machine=str(data["machine"]) if data.get("machine") else None,
             )
         except KeyError as exc:
             raise BundleFailure("bundle_target_missing", f"Target is missing {exc}.") from exc
