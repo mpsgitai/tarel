@@ -129,6 +129,7 @@ Try the synthetic [Retail DWH walkthrough](docs/retail-demo.md) without credenti
 - [Architecture, contracts, and self-modification](docs/architecture.md)
 - [Demo warehouse](docs/retail-demo.md)
 - [Three-day enterprise workshop](docs/workshop.md)
+- [Offline bundles](docs/offline-bundles.md) for computers without internet access
 - [Python SDK](docs/cli-reference.md#python-sdk)
 - [Documentation index](docs/README.md)
 

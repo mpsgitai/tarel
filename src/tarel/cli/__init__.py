@@ -25,6 +25,7 @@ from tarel.errors import TarelError
 # Order defines `tarel --help`. Each entry is (module_name, (subcommand_names...)).
 _COMMAND_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("package", ("package",)),
+    ("bundle", ("bundle",)),
     ("sync", ("sync",)),
     ("demo", ("demo",)),
     ("workspace", ("workspace",)),

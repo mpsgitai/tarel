@@ -4,7 +4,7 @@ Command reference for the CLI shipped in this source tree. Regenerate with `pyth
 
 Syntax, choices, defaults, required flags, and mutually exclusive groups are generated from the CLI parser. The command notes describe behavior; the linked contracts define structured inputs and outputs. Resource names in examples must be replaced with resources in your environment.
 
-**Coverage:** 174 executable commands in 32 groups.
+**Coverage:** 178 executable commands in 33 groups.
 
 ## Reading this reference
 
@@ -35,6 +35,7 @@ The main dispatcher returns 2 for recognized domain errors and writes `error [co
 | --- | ---: | --- |
 | [version](#version) | 1 | Identify the installed package when reporting an issue or reproducing a run. |
 | [package](#package) | 5 | Plan, pack, inspect, verify, and unpack portable metadata snapshots. |
+| [bundle](#bundle) | 4 | Build an install bundle of TAREL and chosen hub packages for a computer without internet. |
 | [sync](#sync) | 15 | Publish approved graph metadata from a site and take it over into a central state. |
 | [demo](#demo) | 1 | Create a deterministic local source for learning and regression exercises. |
 | [workspace](#workspace) | 12 | Organize independent source graphs into systems, areas, schema scopes, and overlapping object zones. |
@@ -244,6 +245,128 @@ tarel package unpack [-h] --destination DESTINATION [--format {text,json}] path
 **Result:** Package path, selected workspace, entry counts by kind, compressed and uncompressed sizes, package revision, verification state, and unpack destination when applicable.
 
 CLI entry point and delegated output renderers: [src/tarel/cli/package.py](../src/tarel/cli/package.py).
+
+## bundle
+
+**Offline bundles.** Build an install bundle of TAREL and chosen hub packages for a computer without internet.
+
+Without a subcommand, a dialog asks about the target computer and the parts to include. Plan downloads nothing. Build writes a ZIP of wheels with a hash-pinned requirements.lock and, on a matching machine, installs it offline as a test.
+
+Contract and workflow: [offline-bundles.md](offline-bundles.md).
+
+Example:
+
+```bash
+tarel bundle plan --target windows-x86_64-py3.12 --with sqlserver
+```
+
+ | Command | Purpose |
+ | --- | --- |
+ | [`tarel bundle profile`](#tarel-bundle-profile) | Show the command that describes a target computer. |
+ | [`tarel bundle components`](#tarel-bundle-components) | List what a bundle can contain. |
+ | [`tarel bundle plan`](#tarel-bundle-plan) | Show what a build would download; downloads nothing. |
+ | [`tarel bundle build`](#tarel-bundle-build) | Build a bundle without questions. |
+
+### tarel bundle profile
+
+Show the command that describes a target computer.
+
+**Syntax**
+
+```text
+tarel bundle profile [-h] [--format {text,json}]
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** For profile, the command to run on the target; for components, each part with its origin and status; for plan, target, wheel tags and requirements; for build, the bundle path, size, packages with licenses, and whether it was installed or resolved.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/bundle.py](../src/tarel/cli/bundle.py).
+
+### tarel bundle components
+
+List what a bundle can contain.
+
+**Syntax**
+
+```text
+tarel bundle components [-h] [--hub HUB] [--format {text,json}]
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `--hub` | Path | optional | not set | Folder of a TAREL hub checkout. |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** For profile, the command to run on the target; for components, each part with its origin and status; for plan, target, wheel tags and requirements; for build, the bundle path, size, packages with licenses, and whether it was installed or resolved.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/bundle.py](../src/tarel/cli/bundle.py).
+
+### tarel bundle plan
+
+Show what a build would download; downloads nothing.
+
+**Syntax**
+
+```text
+tarel bundle plan [-h] [--hub HUB] [--recipe RECIPE] [--target TARGET] [--with COMPONENTS]
+                         [--format {text,json}]
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `--hub` | Path | optional | not set | Folder of a TAREL hub checkout. |
+| `--recipe` | Path | optional | not set | Recipe file from an earlier build. |
+| `--target` | text | optional | not set | host, a pasted profile line, or e.g. windows-x86_64-py3.12, linux-x86_64-py3.12-glibc2.28. |
+| `--with` | text | optional; repeatable | `[]` | Component ids, comma-separated or repeated (see `tarel bundle components`). |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** For profile, the command to run on the target; for components, each part with its origin and status; for plan, target, wheel tags and requirements; for build, the bundle path, size, packages with licenses, and whether it was installed or resolved.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/bundle.py](../src/tarel/cli/bundle.py).
+
+### tarel bundle build
+
+Build a bundle without questions.
+
+**Syntax**
+
+```text
+tarel bundle build [-h] [--hub HUB] [--recipe RECIPE] [--target TARGET] [--with COMPONENTS]
+                          [--output OUTPUT] [--replace] [--save-recipe SAVE_RECIPE] [--test-install]
+                          [--tarel-from TAREL_FROM] [--format {text,json}]
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `--hub` | Path | optional | not set | Folder of a TAREL hub checkout. |
+| `--recipe` | Path | optional | not set | Recipe file from an earlier build. |
+| `--target` | text | optional | not set | host, a pasted profile line, or e.g. windows-x86_64-py3.12, linux-x86_64-py3.12-glibc2.28. |
+| `--with` | text | optional; repeatable | `[]` | Component ids, comma-separated or repeated (see `tarel bundle components`). |
+| `--output` | Path | optional | not set | Bundle .zip path (default: current folder). |
+| `--replace` | flag | optional | `False` | Overwrite an existing bundle. |
+| `--save-recipe` | Path | optional | not set | Also write the recipe to this file. |
+| `--test-install` | flag | optional | `False` | When this computer matches the target, also install and import the bundle in a throwaway environment. This runs the downloaded packages' code here. |
+| `--tarel-from` | Path | optional | not set | Use this TAREL wheel or source checkout instead of the release from PyPI. |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** For profile, the command to run on the target; for components, each part with its origin and status; for plan, target, wheel tags and requirements; for build, the bundle path, size, packages with licenses, and whether it was installed or resolved.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/bundle.py](../src/tarel/cli/bundle.py).
 
 ## sync
 
@@ -5636,6 +5759,45 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `architecture_scope` | [ui/backend.py](../src/tarel/ui/backend.py#L123) |
 | `architecture_unavailable` | [ui/backend.py](../src/tarel/ui/backend.py#L468) |
 | `batch_failed` | [annotations/runner.py](../src/tarel/annotations/runner.py#L103) |
+| `bundle_component_unknown` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L128) |
+| `bundle_direct_reference` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L172) |
+| `bundle_hub_clash` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L114) |
+| `bundle_hub_invalid` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L68) |
+| `bundle_hub_missing` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L64) |
+| `bundle_hub_package` | [bundle/catalog.py](../src/tarel/bundle/catalog.py#L100), [bundle/catalog.py](../src/tarel/bundle/catalog.py#L105) |
+| `bundle_local_source` | [bundle/builder.py](../src/tarel/bundle/builder.py#L129) |
+| `bundle_marker_unknown` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L194) |
+| `bundle_not_a_wheel` | [bundle/builder.py](../src/tarel/bundle/builder.py#L160) |
+| `bundle_not_interactive` | [cli/bundle.py](../src/tarel/cli/bundle.py#L99) |
+| `bundle_output_exists` | [bundle/application.py](../src/tarel/bundle/application.py#L57) |
+| `bundle_output_folder` | [bundle/application.py](../src/tarel/bundle/application.py#L61) |
+| `bundle_output_suffix` | [bundle/application.py](../src/tarel/bundle/application.py#L55) |
+| `bundle_pip_unavailable` | [bundle/pip.py](../src/tarel/bundle/pip.py#L27), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L277) |
+| `bundle_profile_arch` | [bundle/targets.py](../src/tarel/bundle/targets.py#L119), [bundle/targets.py](../src/tarel/bundle/targets.py#L123) |
+| `bundle_profile_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L62) |
+| `bundle_profile_libc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L86) |
+| `bundle_profile_os` | [bundle/targets.py](../src/tarel/bundle/targets.py#L135) |
+| `bundle_profile_python` | [bundle/targets.py](../src/tarel/bundle/targets.py#L68), [bundle/targets.py](../src/tarel/bundle/targets.py#L73) |
+| `bundle_recipe_conflict` | [cli/bundle.py](../src/tarel/cli/bundle.py#L152) |
+| `bundle_recipe_format` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L184) |
+| `bundle_recipe_invalid` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L180), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L189), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L192) |
+| `bundle_recipe_missing` | [bundle/application.py](../src/tarel/bundle/application.py#L76) |
+| `bundle_resolve_conflict` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L119) |
+| `bundle_resolve_incomplete` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L135) |
+| `bundle_target_arch` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L51) |
+| `bundle_target_glibc` | [bundle/targets.py](../src/tarel/bundle/targets.py#L180) |
+| `bundle_target_invalid` | [bundle/targets.py](../src/tarel/bundle/targets.py#L154) |
+| `bundle_target_machine` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L66) |
+| `bundle_target_missing` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L113) |
+| `bundle_target_os` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L49) |
+| `bundle_target_python` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L54) |
+| `bundle_target_required` | [cli/bundle.py](../src/tarel/cli/bundle.py#L162) |
+| `bundle_target_version` | [bundle/contracts.py](../src/tarel/bundle/contracts.py#L60), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L62), [bundle/contracts.py](../src/tarel/bundle/contracts.py#L64) |
+| `bundle_version_mismatch` | [bundle/application.py](../src/tarel/bundle/application.py#L23) |
+| `bundle_wheel_duplicate` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L248) |
+| `bundle_wheel_metadata` | [bundle/resolve.py](../src/tarel/bundle/resolve.py#L246), [bundle/resolve.py](../src/tarel/bundle/resolve.py#L264) |
+| `bundle_wheel_name` | [bundle/builder.py](../src/tarel/bundle/builder.py#L173) |
+| `bundle_wheel_unsafe_path` | [bundle/builder.py](../src/tarel/bundle/builder.py#L214) |
 | `catalog_not_found` | [connectors/catalog.py](../src/tarel/connectors/catalog.py#L51) |
 | `change_report_conflict` | [graph/change_store.py](../src/tarel/graph/change_store.py#L26) |
 | `change_report_not_found` | [graph/change_store.py](../src/tarel/graph/change_store.py#L52) |
