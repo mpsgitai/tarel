@@ -52,6 +52,7 @@ from tarel.entity_resolution.evidence import (
 from tarel.expansion.contracts import ContextExpansion, ExpansionInput, ExpansionTarget
 from tarel.graph.revision import physical_graph_revision, technical_graph_fingerprint
 from tarel.graph.selective import GraphHeader, GraphObjectPage, GraphSlice
+from tarel.hub.contracts import HubEntryPoint, HubExtension, HubInstallResult, HubSuggestion
 from tarel.knowledge.contracts import KnowledgeContext, KnowledgeDocument, KnowledgeReference
 from tarel.lineage.runtime_logical import RuntimeLogicalArtifactReference, RuntimeLogicalOperation
 from tarel.logical_joins.contracts import LogicalJoin
@@ -140,6 +141,10 @@ __all__ = [
     "GraphSlice",
     "GroundingAsset",
     "GroundingBundle",
+    "HubEntryPoint",
+    "HubExtension",
+    "HubInstallResult",
+    "HubSuggestion",
     "IdentityInspection",
     "IdentityInventoryManifest",
     "IdentityInventoryPage",

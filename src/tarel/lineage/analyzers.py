@@ -52,6 +52,19 @@ def load_lineage_analyzer(name: str) -> LineageAnalyzer:
     matches = tuple(entry_points().select(group=LINEAGE_ANALYZER_GROUP, name=name))
     if not matches:
         code = "sqlglot_not_installed" if name == "sqlglot" else "lineage_analyzer_not_installed"
+        from tarel.hub.catalog import hub_hint_for_entry_point
+
+        hub_hint = hub_hint_for_entry_point(LINEAGE_ANALYZER_GROUP, name)
+        if hub_hint is not None:
+            ext_id, install_cmd = hub_hint
+            raise LineageFailure(
+                code,
+                f"Lineage analyzer {name!r} is not installed. "
+                f"Install the TAREL Hub package `tarel-lineage-{name}` "
+                f"(`{install_cmd}`).",
+                hint=install_cmd,
+                details={"hub_package": ext_id, "install_hint": install_cmd},
+            )
         raise LineageFailure(
             code,
             f"Lineage analyzer {name!r} is not installed. "

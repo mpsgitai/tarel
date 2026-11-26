@@ -30,6 +30,7 @@ _COMMAND_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("workspace", ("workspace",)),
     ("source", ("source",)),
     ("connector", ("connector",)),
+    ("hub", ("hub",)),
     ("knowledge", ("knowledge",)),
     ("provider", ("provider",)),
     ("model", ("model",)),
