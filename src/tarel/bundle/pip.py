@@ -17,7 +17,9 @@ _TAIL_LINES = 12
 
 def run_pip(arguments: Sequence[str], *, python: Path | None = None, code: str) -> str:
     """Run ``python -m pip`` and return stdout; raise with pip's last error lines on failure."""
-    command = [str(python or sys.executable), "-m", "pip", "--disable-pip-version-check"]
+    # -P: never import from the working directory, which may be a shared download folder; a
+    # planted pip/ package there would otherwise run before any hash or target check.
+    command = [str(python or sys.executable), "-P", "-m", "pip", "--disable-pip-version-check"]
     command += ["--no-input", *arguments]
     try:
         completed = subprocess.run(command, capture_output=True, text=True, check=False)

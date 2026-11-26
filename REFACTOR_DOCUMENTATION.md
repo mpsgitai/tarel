@@ -235,8 +235,8 @@ Use cases for offline bundles. The CLI dialog and the plain commands both call o
     - `build_bundle_use_case`: Build the bundle for ``recipe`` into the ZIP file ``output``. Calls `build_bundle`; raises `BundleFailure`.
     - `default_output`: default output; returns `Path`.
     - `load_recipe_use_case`: load recipe (use case); returns `Recipe`. Raises `BundleFailure`.
-    - `save_recipe_use_case`: save recipe (use case); returns `None`.
-- **Output:** returns `BundlePlan`, `BundleReport`, `Path`, `Recipe`, `tuple[Component, ...]`; writes files
+    - `save_recipe_use_case`: Write the recipe next to the bundle; like the bundle, never through a planted link.
+- **Output:** returns `BundlePlan`, `BundleReport`, `Path`, `Recipe`, `tuple[Component, ...]`; deletes files; writes temporary files
 - **Uses:** `tarel`, `tarel.bundle.builder`, `tarel.bundle.catalog`, `tarel.bundle.contracts`, `tarel.bundle.targets`
 - **Used by:** `tarel.cli._bundle_dialog`, `tarel.cli.bundle`
 

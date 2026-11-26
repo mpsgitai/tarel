@@ -248,7 +248,7 @@ def _check_install(plan: BundlePlan, root: Path, on_step: StepCallback) -> Insta
 
     on_step("Installing into a clean environment, without internet")
     venv = root / "venv"
-    _run([sys.executable, "-m", "venv", str(venv)], "bundle_venv_failed")
+    _run([sys.executable, "-P", "-m", "venv", str(venv)], "bundle_venv_failed")
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     run_pip(install, python=python, code="bundle_check_failed")
     imports = ["tarel", *(c.import_name for c in plan.components if c.import_name)]

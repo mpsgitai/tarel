@@ -394,6 +394,26 @@ class BundleFileTests(unittest.TestCase):
                 self.assertIn("b/requirements.lock", archive.namelist())
             self.assertEqual(sorted(p.name for p in first.parent.iterdir()), ["b.zip"])
 
+    def test_a_planted_recipe_link_is_not_followed(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            victim = Path(folder) / "victim.txt"
+            victim.write_text("keep", encoding="utf-8")
+            recipe = Path(folder) / "b.toml"
+            try:
+                recipe.symlink_to(victim)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            save_recipe_use_case(Recipe(WINDOWS, (), __version__), recipe)
+            self.assertEqual(victim.read_text(encoding="utf-8"), "keep")
+            self.assertFalse(recipe.is_symlink())
+            self.assertEqual(Recipe.from_toml(recipe.read_text(encoding="utf-8")).target, WINDOWS)
+
+    def test_pip_never_imports_from_the_working_directory(self) -> None:
+        done = mock.Mock(returncode=0, stdout="pip 25", stderr="")
+        with mock.patch("tarel.bundle.pip.subprocess.run", return_value=done) as run:
+            run_pip(["--version"], code="bundle_pip_unavailable")
+        self.assertEqual(run.call_args.args[0][1:4], ["-P", "-m", "pip"])
+
     def test_a_planted_partial_link_is_not_followed(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

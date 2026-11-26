@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from tarel import __version__
@@ -69,4 +71,14 @@ def load_recipe_use_case(path: Path) -> Recipe:
 
 
 def save_recipe_use_case(recipe: Recipe, path: Path) -> None:
-    path.write_text(recipe.to_toml(), encoding="utf-8", newline="\n")
+    """Write the recipe next to the bundle; like the bundle, never through a planted link."""
+    handle, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".partial", dir=path.parent)
+    partial = Path(name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(recipe.to_toml())
+        partial.chmod(0o644)
+        partial.replace(path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
