@@ -229,7 +229,7 @@ Offline install bundles: TAREL, chosen hub packages, and their wheels for one ta
 
 Use cases for offline bundles. The CLI dialog and the plain commands both call only these.
 
-- **Input:** parameters `folder: Path`, `hub: Path | None`, `on_step: StepCallback`, `output: Path`, `path: Path`, `recipe: Recipe`, `replace: bool`; reads files
+- **Input:** parameters `folder: Path`, `hub: Path | None`, `on_step: StepCallback`, `output: Path`, `path: Path`, `recipe: Recipe`, `replace: bool`, `test_install: bool`; reads files
 - **Processing:**
     - `list_components_use_case`: list components (use case); returns `tuple[Component, ...]`. Calls `available_components`.
     - `plan_bundle_use_case`: Resolve the recipe into exact requirements without downloading anything. Calls `select_components`, `BundlePlan`, `available_components`, `pip_platforms`; raises `BundleFailure`.
@@ -245,7 +245,7 @@ Use cases for offline bundles. The CLI dialog and the plain commands both call o
 
 Build one offline bundle: collect wheels, pin them by hash, prove they install, and zip them.
 
-- **Input:** parameters `handle: int`, `on_step: StepCallback`, `output: Path`, `plan: BundlePlan`, `tarel_from: Path | None`; reads files
+- **Input:** parameters `handle: int`, `on_step: StepCallback`, `output: Path`, `plan: BundlePlan`, `tarel_from: Path | None`, `test_install: bool`; reads files
 - **Processing:**
     - `build_bundle`: build bundle; returns `BundleReport`. Calls `ensure_pip`, `BundleReport`, `complete_for_target`, `run_pip`, `target_arguments`; raises `BundleFailure`.
     - `share_descriptor`: Make a new file readable by others through its descriptor; a path could be swapped.

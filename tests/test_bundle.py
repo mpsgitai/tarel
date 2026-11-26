@@ -179,8 +179,14 @@ class RecipeAndPlanTests(unittest.TestCase):
         calls: list[Path | None] = []
 
         def fake_build(
-            plan: BundlePlan, output: Path, *, tarel_from: Path | None, on_step: object
+            plan: BundlePlan,
+            output: Path,
+            *,
+            tarel_from: Path | None,
+            on_step: object,
+            test_install: bool,
         ) -> BundleReport:
+            self.assertFalse(test_install)
             calls.append(tarel_from)
             return BundleReport(output, 1, plan.target, (), "resolved", ())
 
@@ -654,9 +660,29 @@ class FailureTests(unittest.TestCase):
             mock.patch("tarel.bundle.builder.host_target", side_effect=musl),
             mock.patch("tarel.bundle.builder.run_pip") as run,
         ):
-            result = builder._check_install(plan, Path(folder), lambda _: None)
+            result, notes = builder._check_install(
+                plan, Path(folder), lambda _: None, test_install=True
+            )
         self.assertEqual(result, "resolved")
+        self.assertIn("different platform", notes[0])
         self.assertIn("--dry-run", run.call_args.args[0])
+
+    def test_a_matching_host_installs_only_when_asked(self) -> None:
+        plan = plan_bundle_use_case(Recipe(WINDOWS, (), __version__))
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch("tarel.bundle.builder.can_test_install", return_value=True),
+            mock.patch("tarel.bundle.builder.run_pip") as run,
+            mock.patch("tarel.bundle.builder._run") as execute,
+        ):
+            result, notes = builder._check_install(
+                plan, Path(folder), lambda _: None, test_install=False
+            )
+        self.assertEqual(result, "resolved")
+        self.assertIn("--test-install", notes[0])
+        self.assertEqual(run.call_count, 1)
+        self.assertIn("--dry-run", run.call_args.args[0])
+        execute.assert_not_called()
 
     def test_files_are_checked_against_the_target_before_a_host_install(self) -> None:
         plan = plan_bundle_use_case(Recipe(WINDOWS, (), __version__))
@@ -666,8 +692,10 @@ class FailureTests(unittest.TestCase):
             mock.patch("tarel.bundle.builder.run_pip") as run,
             mock.patch("tarel.bundle.builder._run"),
         ):
-            result = builder._check_install(plan, Path(folder), lambda _: None)
-        self.assertEqual(result, "installed")
+            result, notes = builder._check_install(
+                plan, Path(folder), lambda _: None, test_install=True
+            )
+        self.assertEqual((result, notes), ("installed", ()))
         first, second = (call.args[0] for call in run.call_args_list)
         self.assertIn("--dry-run", first)
         self.assertIn("win_amd64", first)

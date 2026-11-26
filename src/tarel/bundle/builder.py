@@ -41,6 +41,7 @@ def build_bundle(
     *,
     tarel_from: Path | None,
     on_step: StepCallback,
+    test_install: bool = False,
 ) -> BundleReport:
     ensure_pip()
     with tempfile.TemporaryDirectory(prefix="tarel-bundle-") as scratch:
@@ -106,7 +107,7 @@ def build_bundle(
         _write_text(root / "bundle" / "INSTALL.md", _install_guide(plan.target))
         _write_text(root / "bundle" / "bundle.json", _manifest(plan, packages))
 
-        install_check = _check_install(plan, root, on_step)
+        install_check, notes = _check_install(plan, root, on_step, test_install=test_install)
 
         on_step("Writing the bundle")
         _write_zip(root / "bundle", output)
@@ -116,7 +117,7 @@ def build_bundle(
         target=plan.target,
         packages=packages,
         install_check=install_check,
-        notes=_notes(install_check),
+        notes=notes,
     )
 
 
@@ -219,7 +220,9 @@ def _write_licenses(wheels: Path, bundle: Path) -> None:
                     target.write_bytes(archive.read(member))
 
 
-def _check_install(plan: BundlePlan, root: Path, on_step: StepCallback) -> InstallCheck:
+def _check_install(
+    plan: BundlePlan, root: Path, on_step: StepCallback, *, test_install: bool
+) -> tuple[InstallCheck, tuple[str, ...]]:
     bundle = root / "bundle"
     install = [
         "install",
@@ -242,9 +245,13 @@ def _check_install(plan: BundlePlan, root: Path, on_step: StepCallback) -> Insta
     except BundleFailure:
         # This computer cannot be a target itself (musl, PyPy, free-threaded, 32-bit); it can
         # still build for one, only without the real install.
-        return "resolved"
+        return "resolved", (_OTHER_PLATFORM,)
     if not can_test_install(plan.target, host):
-        return "resolved"
+        return "resolved", (_OTHER_PLATFORM,)
+    if not test_install:
+        # Installing and importing runs the downloaded packages' code (.pth files, imports)
+        # with this user's rights, so it happens only when asked for.
+        return "resolved", (_NOT_TESTED,)
 
     on_step("Installing into a clean environment, without internet")
     venv = root / "venv"
@@ -257,7 +264,7 @@ def _check_install(plan: BundlePlan, root: Path, on_step: StepCallback) -> Insta
         "bundle_import_failed",
         lead="The bundle installed, but a package does not import:",
     )
-    return "installed"
+    return "installed", ()
 
 
 def _run(command: list[str], code: str, *, lead: str = "Command failed:") -> None:
@@ -267,13 +274,14 @@ def _run(command: list[str], code: str, *, lead: str = "Command failed:") -> Non
         raise BundleFailure(code, "\n".join([lead, *tail]))
 
 
-def _notes(install_check: InstallCheck) -> tuple[str, ...]:
-    if install_check == "installed":
-        return ()
-    return (
-        "This machine is a different platform, so the bundle was resolved for the target "
-        "but not installed. Install it once on a matching test machine before rollout.",
-    )
+_OTHER_PLATFORM = (
+    "This machine is a different platform, so the bundle was resolved for the target "
+    "but not installed. Install it once on a matching test machine before rollout."
+)
+_NOT_TESTED = (
+    "The bundle was checked against the target but not installed. Pass --test-install to "
+    "install and import it here in a throwaway environment; that runs the packages' code."
+)
 
 
 def _manifest(plan: BundlePlan, packages: tuple[BundledPackage, ...]) -> str:

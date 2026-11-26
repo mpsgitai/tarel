@@ -62,6 +62,12 @@ def register(subcommands: Subcommands) -> None:
     build.add_argument("--replace", action="store_true", help="Overwrite an existing bundle.")
     build.add_argument("--save-recipe", type=Path, help="Also write the recipe to this file.")
     build.add_argument(
+        "--test-install",
+        action="store_true",
+        help="When this computer matches the target, also install and import the bundle in a "
+        "throwaway environment. This runs the downloaded packages' code here.",
+    )
+    build.add_argument(
         "--tarel-from",
         type=Path,
         help="Use this TAREL wheel or source checkout instead of the release from PyPI.",
@@ -189,6 +195,7 @@ def _build(args: argparse.Namespace, recipe: Recipe) -> int:
         # followed to whatever file it points at.
         output.parent.resolve() / output.name,
         replace=args.replace,
+        test_install=args.test_install,
         on_step=(lambda step: print(f"  {step} ...", flush=True)) if text else (lambda _: None),
     )
     if args.save_recipe is not None:

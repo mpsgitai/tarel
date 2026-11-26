@@ -43,9 +43,14 @@ def build_bundle_use_case(
     output: Path,
     *,
     replace: bool = False,
+    test_install: bool = False,
     on_step: StepCallback = lambda _: None,
 ) -> BundleReport:
-    """Build the bundle for ``recipe`` into the ZIP file ``output``."""
+    """Build the bundle for ``recipe`` into the ZIP file ``output``.
+
+    ``test_install`` also installs and imports the bundle in a throwaway environment when this
+    computer matches the target. That runs the downloaded packages' code here, so it is opt-in.
+    """
     if output.suffix != ".zip":
         raise BundleFailure("bundle_output_suffix", f"The bundle file must end in .zip: {output}.")
     if output.exists() and not replace:
@@ -55,7 +60,9 @@ def build_bundle_use_case(
     if not output.parent.is_dir():
         raise BundleFailure("bundle_output_folder", f"Folder does not exist: {output.parent}.")
     plan = plan_bundle_use_case(recipe)
-    return build_bundle(plan, output, tarel_from=recipe.tarel_from, on_step=on_step)
+    return build_bundle(
+        plan, output, tarel_from=recipe.tarel_from, on_step=on_step, test_install=test_install
+    )
 
 
 def default_output(recipe: Recipe, folder: Path) -> Path:

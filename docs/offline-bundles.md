@@ -91,9 +91,11 @@ transfer path, as for any other file brought into the network.
 - **Every file against the target.** Each wheel is checked against the target's tags, Python
   version, and hash, even when a real install follows: a newer computer also accepts wheels that
   need a newer glibc or macOS than the target has.
-- **A real install where possible.** When this computer matches the target (system, processor,
-  Python, and a glibc or macOS version at least as new), the bundle is also installed offline
-  into a fresh virtual environment and every included package is imported. Otherwise the report
-  says the bundle was only resolved. Install it once on a matching test computer before rollout.
+- **A real install, when asked.** With `--test-install`, and when this computer matches the
+  target (system, processor, Python, and a glibc or macOS version at least as new), the bundle
+  is also installed offline into a fresh virtual environment and every included package is
+  imported. That runs the downloaded packages' code on this computer, so it is off by default.
+  Otherwise the report says the bundle was only resolved. Install it once on a matching test
+  computer before rollout.
 - **Repeatable.** The same recipe and the same upstream wheels give a byte-identical ZIP file:
   sorted entries and fixed timestamps. The bundle records no build time, host name, or path.
