@@ -1031,7 +1031,7 @@ embedding context is mutable; separate CLI processes remain independent. The def
 does not use a reranker. No local generation server, LlamaIndex, vector database, Torch, or
 Sentence Transformers layer is involved.
 
-Install the `tarel-retrieval-llamacpp` Hub plugin for local embeddings (and optionally `tarel[vector]` to also enable native
+Install the `tarel-retrieval-llamacpp` Hub plugin (`git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/retrieval-llamacpp`) for local embeddings (and optionally `tarel[vector]` to also enable native
 SQLite ranking. The `vector` extra alone does not provide an embedding model or llama.cpp runtime.
 Neither extra downloads model weights. An existing GGUF can be used without downloading another copy:
 
