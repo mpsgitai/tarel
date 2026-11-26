@@ -1,0 +1,318 @@
+{
+  "contract_version": 1,
+  "extensions": [
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "oracledb>=26.1,<27"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.connectors",
+          "name": "oracle"
+        }
+      ],
+      "extras": [],
+      "host_contract": "connector.v1",
+      "host_versions": "tarel>=0.0.3,<0.1",
+      "id": "connector-oracle",
+      "import_name": "tarel_connector_oracle",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-oracle\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-oracle",
+      "kind": "connector",
+      "license": "MIT (adapter); driver license: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [],
+      "origin": "written in this repository",
+      "package": "tarel-connector-oracle",
+      "path": "packages/connector-oracle",
+      "real_source_evidence": "Oracle Database 23ai Free (23.26.4) container fixture; URL auth only; revoked SELECT privileges appear as absent objects (not confirmed source deletions)",
+      "recommended_extra": null,
+      "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "pymssql>=2.3,<3"
+      ],
+      "entry_points": [
+        {
+          "group": "built into the host",
+          "name": "sqlserver"
+        }
+      ],
+      "extras": [],
+      "host_contract": "connector.v1",
+      "host_versions": "part of the host",
+      "id": "connector-sqlserver",
+      "import_name": "tarel.connectors.sqlserver",
+      "install": "pip install 'tarel[sqlserver]'",
+      "install_spec": null,
+      "kind": "connector",
+      "license": "host MIT; pymssql LGPL-2.1; see docs/inventory.md",
+      "native_requirements": [
+        "FreeTDS, OpenSSL and Kerberos are bundled inside the pymssql wheel"
+      ],
+      "origin": "TAREL host",
+      "package": "tarel",
+      "path": null,
+      "real_source_evidence": "SQL Server 2025 (17.0.1000.7) on Windows: SQL login and Windows integrated auth (tarel>=0.0.6)",
+      "recommended_extra": null,
+      "status": "builtin"
+    },
+    {
+      "capabilities": [
+        "importer"
+      ],
+      "dependencies": [],
+      "entry_points": [],
+      "extras": [],
+      "host_contract": "existing knowledge use cases; no plugin group",
+      "host_versions": null,
+      "id": "importer-documents",
+      "import_name": null,
+      "install": "not available",
+      "install_spec": null,
+      "kind": "importer",
+      "license": "MIT (planned)",
+      "native_requirements": [],
+      "origin": "planned for this repository",
+      "package": null,
+      "path": null,
+      "real_source_evidence": "not started",
+      "recommended_extra": null,
+      "status": "planned"
+    },
+    {
+      "capabilities": [
+        "lineage-analysis"
+      ],
+      "dependencies": [
+        "sqlglot>=30.19,<30.20"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.lineage_analyzers",
+          "name": "sqlglot"
+        }
+      ],
+      "extras": [],
+      "host_contract": "lineage_analyzer.v1",
+      "host_versions": "tarel>=0.0.6,<0.1",
+      "id": "lineage-sqlglot",
+      "import_name": "tarel_lineage_sqlglot",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/lineage-sqlglot\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/lineage-sqlglot",
+      "kind": "lineage",
+      "license": "MIT (adapter); parser license: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [],
+      "origin": "migrated from TAREL host to Hub",
+      "package": "tarel-lineage-sqlglot",
+      "path": "packages/lineage-sqlglot",
+      "real_source_evidence": "SQLGlot 30.19.0 static lineage suite against host entry point",
+      "recommended_extra": null,
+      "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "embeddings",
+        "reranking"
+      ],
+      "dependencies": [
+        "llama-cpp-python>=0.3.16,<0.4"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.embeddings",
+          "name": "llamacpp"
+        },
+        {
+          "group": "tarel.rerankers",
+          "name": "llamacpp"
+        }
+      ],
+      "extras": [],
+      "host_contract": "retrieval_plugin.v1",
+      "host_versions": "tarel>=0.0.6,<0.1",
+      "id": "retrieval-llamacpp",
+      "import_name": "tarel_retrieval_llamacpp",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/retrieval-llamacpp\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/retrieval-llamacpp",
+      "kind": "retrieval",
+      "license": "MIT (adapter); runtime (MIT) and Qwen3 model (Apache-2.0) links: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [
+        "llama.cpp inside llama-cpp-python",
+        "GGUF model files fetched separately via pinned HTTPS + SHA-256"
+      ],
+      "origin": "migrated from TAREL host to Hub",
+      "package": "tarel-retrieval-llamacpp",
+      "path": "packages/retrieval-llamacpp",
+      "real_source_evidence": "entry-point plugin contract tests against host",
+      "recommended_extra": null,
+      "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "duckdb==2.0.0"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.connectors",
+          "name": "duckdb"
+        }
+      ],
+      "extras": [],
+      "host_contract": "connector.v1",
+      "host_versions": "tarel>=0.0.3,<0.1",
+      "id": "connector-duckdb",
+      "import_name": "tarel_connector_duckdb",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-duckdb\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-duckdb",
+      "kind": "connector",
+      "license": "MIT (adapter); driver license: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [
+        "Provided by separately installed driver wheel"
+      ],
+      "origin": "original Hub adapter",
+      "package": "tarel-connector-duckdb",
+      "path": "packages/connector-duckdb",
+      "real_source_evidence": "DuckDB 2.0.0 local file fixture (trusted local files only; no network auth)",
+      "recommended_extra": null,
+      "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "psycopg==3.3.9"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.connectors",
+          "name": "postgres"
+        }
+      ],
+      "extras": [
+        "binary"
+      ],
+      "host_contract": "connector.v1",
+      "host_versions": "tarel>=0.0.3,<0.1",
+      "id": "connector-postgres",
+      "import_name": "tarel_connector_postgres",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-postgres[binary]\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-postgres",
+      "kind": "connector",
+      "license": "MIT (adapter); driver license: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [
+        "System libpq, or optional [binary] extra (psycopg-binary)"
+      ],
+      "origin": "original Hub adapter",
+      "package": "tarel-connector-postgres",
+      "path": "packages/connector-postgres",
+      "real_source_evidence": "PostgreSQL 17.7 and 16.3 servers; URL or libpq auth (pgpass/SSPI/GSSAPI/peer); column-level SELECT privilege filtering",
+      "recommended_extra": "binary",
+      "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "PyMySQL==1.2.4"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.connectors",
+          "name": "mysql"
+        }
+      ],
+      "extras": [],
+      "host_contract": "connector.v1",
+      "host_versions": "tarel>=0.0.3,<0.1",
+      "id": "connector-mysql",
+      "import_name": "tarel_connector_mysql",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-mysql\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-mysql",
+      "kind": "connector",
+      "license": "MIT (adapter); driver license: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [],
+      "origin": "original Hub adapter",
+      "package": "tarel-connector-mysql",
+      "path": "packages/connector-mysql",
+      "real_source_evidence": "MySQL 8.4.13 and MariaDB 11.4.13 container fixtures; URL auth only; no configurable TLS CA/hostname enforcement yet (use only on trusted networks)",
+      "recommended_extra": null,
+      "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "clickhouse-connect==1.13.0"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.connectors",
+          "name": "clickhouse"
+        }
+      ],
+      "extras": [],
+      "host_contract": "connector.v1",
+      "host_versions": "tarel>=0.0.3,<0.1",
+      "id": "connector-clickhouse",
+      "import_name": "tarel_connector_clickhouse",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-clickhouse\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-clickhouse",
+      "kind": "connector",
+      "license": "MIT (adapter); driver license: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [
+        "Optional C extensions inside the clickhouse-connect wheel"
+      ],
+      "origin": "original Hub adapter",
+      "package": "tarel-connector-clickhouse",
+      "path": "packages/connector-clickhouse",
+      "real_source_evidence": "ClickHouse 25.8.33.6 container fixture; URL auth only",
+      "recommended_extra": null,
+      "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "pymongo==4.19.0"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.connectors",
+          "name": "mongodb"
+        }
+      ],
+      "extras": [],
+      "host_contract": "connector.v1",
+      "host_versions": "tarel>=0.0.3,<0.1",
+      "id": "connector-mongodb",
+      "import_name": "tarel_connector_mongodb",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-mongodb\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-mongodb",
+      "kind": "connector",
+      "license": "MIT (adapter); driver license: see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [
+        "Provided by separately installed driver wheel"
+      ],
+      "origin": "original Hub adapter",
+      "package": "tarel-connector-mongodb",
+      "path": "packages/connector-mongodb",
+      "real_source_evidence": "MongoDB 8.0 container fixture; URL auth only",
+      "recommended_extra": null,
+      "status": "experimental"
+    }
+  ]
+}

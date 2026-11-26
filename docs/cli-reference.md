@@ -4,7 +4,7 @@ Command reference for the CLI shipped in this source tree. Regenerate with `pyth
 
 Syntax, choices, defaults, required flags, and mutually exclusive groups are generated from the CLI parser. The command notes describe behavior; the linked contracts define structured inputs and outputs. Resource names in examples must be replaced with resources in your environment.
 
-**Coverage:** 169 executable commands in 31 groups.
+**Coverage:** 174 executable commands in 32 groups.
 
 ## Reading this reference
 
@@ -40,6 +40,7 @@ The main dispatcher returns 2 for recognized domain errors and writes `error [co
 | [workspace](#workspace) | 12 | Organize independent source graphs into systems, areas, schema scopes, and overlapping object zones. |
 | [source](#source) | 9 | Name a connection profile once and use it for discovery, graph creation, enrichment, and grounding. |
 | [connector](#connector) | 7 | Call a connector directly, inspect its availability, or scaffold a new adapter. |
+| [hub](#hub) | 5 | Discover, inspect, suggest, and explicitly install TAREL Hub extensions. |
 | [knowledge](#knowledge) | 4 | Attach scoped business documentation for annotation tasks. |
 | [provider](#provider) | 5 | Configure an optional structured-generation endpoint or create an adapter candidate. |
 | [model](#model) | 2 | Manage optional local embedding and reranker model artifacts. |
@@ -1514,6 +1515,167 @@ tarel connector profile [-h] --config CONFIG [--database DATABASE] --namespace N
 **Result:** Availability check, probe, canonical catalog, bounded sample/profile, or scaffold location according to the verb. Samples are ephemeral command output.
 
 CLI entry point and delegated output renderers: [src/tarel/cli/connector.py](../src/tarel/cli/connector.py).
+
+## hub
+
+**TAREL Hub.** Discover, inspect, suggest, and explicitly install TAREL Hub extensions.
+
+List, show, search, and suggest are read-only and never import plugin code. Install prints a dry-run plan by default and only executes package installation when `--yes` is explicitly passed.
+
+Contract and workflow: [contracts.md](contracts.md).
+
+Example:
+
+```bash
+tarel hub list --offline
+```
+
+ | Command | Purpose |
+ | --- | --- |
+ | [`tarel hub list`](#tarel-hub-list) | List TAREL Hub extensions and their local installation status. |
+ | [`tarel hub show`](#tarel-hub-show) | Show full metadata, security notes, and install command for one Hub extension. |
+ | [`tarel hub search`](#tarel-hub-search) | Search TAREL Hub extensions by name, dialect, capability, or evidence. |
+ | [`tarel hub suggest`](#tarel-hub-suggest) | Statically inspect a project directory and suggest matching Hub extensions. |
+ | [`tarel hub install`](#tarel-hub-install) | Plan or execute installation of one verified TAREL Hub extension. |
+
+### tarel hub list
+
+List TAREL Hub extensions and their local installation status.
+
+**Syntax**
+
+```text
+tarel hub list [-h] [--kind {connector,lineage,retrieval,importer}]
+                      [--installed | --available] [--include-planned] [--hub-url HUB_URL]
+                      [--offline] [--format {text,json}]
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `--kind` | text; `connector`, `lineage`, `retrieval`, `importer` | optional | not set | Filter extensions by kind. |
+| `--installed` | flag | optional | `False` | Show only extensions already installed in this environment. |
+| `--available` | flag | optional | `False` | Show only extensions not yet installed in this environment. |
+| `--include-planned` | flag | optional | `False` | Include planned (not yet installable) catalog entries. |
+| `--hub-url` | text | optional | not set | Override the Hub catalog JSON URL or local file path (default: TAREL_HUB_URL or official Hub). |
+| `--offline` | flag | optional | `False` | Use the bundled offline Hub catalog snapshot without network access. |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+Mutually exclusive: `--installed`, `--available`.
+
+**Result:** Catalog extension listing, detailed metadata/config template, static project suggestions, or an install plan/result according to the verb.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/hub.py](../src/tarel/cli/hub.py).
+
+### tarel hub show
+
+Show full metadata, security notes, and install command for one Hub extension.
+
+**Syntax**
+
+```text
+tarel hub show [-h] [--config-template] [--hub-url HUB_URL] [--offline]
+                      [--format {text,json}]
+                      name
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `name` | text | required | not set | Extension id, package name, or entry-point name (for example postgres or connector-postgres). |
+| `--config-template` | flag | optional | `False` | Print only the minimal safe configuration or usage template. |
+| `--hub-url` | text | optional | not set | Override the Hub catalog JSON URL or local file path (default: TAREL_HUB_URL or official Hub). |
+| `--offline` | flag | optional | `False` | Use the bundled offline Hub catalog snapshot without network access. |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** Catalog extension listing, detailed metadata/config template, static project suggestions, or an install plan/result according to the verb.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/hub.py](../src/tarel/cli/hub.py).
+
+### tarel hub search
+
+Search TAREL Hub extensions by name, dialect, capability, or evidence.
+
+**Syntax**
+
+```text
+tarel hub search [-h] [--kind {connector,lineage,retrieval,importer}] [--include-planned]
+                        [--hub-url HUB_URL] [--offline] [--format {text,json}]
+                        query
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `query` | text | required | not set | Search term, for example postgres or lineage. |
+| `--kind` | text; `connector`, `lineage`, `retrieval`, `importer` | optional | not set | Limit search results to one extension kind. |
+| `--include-planned` | flag | optional | `False` | Include planned catalog entries in search results. |
+| `--hub-url` | text | optional | not set | Override the Hub catalog JSON URL or local file path (default: TAREL_HUB_URL or official Hub). |
+| `--offline` | flag | optional | `False` | Use the bundled offline Hub catalog snapshot without network access. |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** Catalog extension listing, detailed metadata/config template, static project suggestions, or an install plan/result according to the verb.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/hub.py](../src/tarel/cli/hub.py).
+
+### tarel hub suggest
+
+Statically inspect a project directory and suggest matching Hub extensions.
+
+**Syntax**
+
+```text
+tarel hub suggest [-h] [--path PATH] [--hub-url HUB_URL] [--online] [--format {text,json}]
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `--path` | Path | optional | not set | Project directory to inspect (defaults to the current working directory). |
+| `--hub-url` | text | optional | not set | Override the Hub catalog JSON URL or local file path. |
+| `--online` | flag | optional | `False` | Fetch the live Hub catalog instead of using the bundled offline snapshot. |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** Catalog extension listing, detailed metadata/config template, static project suggestions, or an install plan/result according to the verb.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/hub.py](../src/tarel/cli/hub.py).
+
+### tarel hub install
+
+Plan or execute installation of one verified TAREL Hub extension.
+
+**Syntax**
+
+```text
+tarel hub install [-h] [--extra EXTRA] [--dry-run] [--yes] [--hub-url HUB_URL] [--offline]
+                         [--format {text,json}]
+                         name
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `name` | text | required | not set | Extension id, package name, or entry-point name (for example connector-postgres). |
+| `--extra` | text | optional | not set | Optional package extra declared by the extension (for example binary). |
+| `--dry-run` | flag | optional | `False` | Print the resolved install plan without executing pip/uv. |
+| `--yes` | flag | optional | `False` | Explicitly execute the package installation in the active Python environment. |
+| `--hub-url` | text | optional | not set | Override the Hub catalog JSON URL or local file path (default: TAREL_HUB_URL or official Hub). |
+| `--offline` | flag | optional | `False` | Use the bundled offline Hub catalog snapshot without network access. |
+| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** Catalog extension listing, detailed metadata/config template, static project suggestions, or an install plan/result according to the verb.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/hub.py](../src/tarel/cli/hub.py).
 
 ## knowledge
 
@@ -5459,11 +5621,11 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `agent_setup_failed` | [tarel/agents.py](../src/tarel/agents.py#L59) |
 | `agent_skill_exists` | [tarel/agents.py](../src/tarel/agents.py#L38) |
 | `agent_skill_missing` | [tarel/agents.py](../src/tarel/agents.py#L48) |
-| `ambiguous_connector` | [connectors/host.py](../src/tarel/connectors/host.py#L61) |
-| `ambiguous_lineage_analyzer` | [lineage/analyzers.py](../src/tarel/lineage/analyzers.py#L61) |
+| `ambiguous_connector` | [connectors/host.py](../src/tarel/connectors/host.py#L61), [connectors/host.py](../src/tarel/connectors/host.py#L245) |
+| `ambiguous_lineage_analyzer` | [lineage/analyzers.py](../src/tarel/lineage/analyzers.py#L74) |
 | `ambiguous_lineage_reference` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L805), [lineage/traversal.py](../src/tarel/lineage/traversal.py#L823) |
 | `ambiguous_logical_joins` | [logical_joins/application.py](../src/tarel/logical_joins/application.py#L240) |
-| `ambiguous_retrieval_plugin` | [retrieval/plugins.py](../src/tarel/retrieval/plugins.py#L122) |
+| `ambiguous_retrieval_plugin` | [retrieval/plugins.py](../src/tarel/retrieval/plugins.py#L140) |
 | `ambiguous_scope_selector` | [workspaces/scope.py](../src/tarel/workspaces/scope.py#L286) |
 | `ambiguous_source_mapping` | [context/grounding_application.py](../src/tarel/context/grounding_application.py#L369) |
 | `annotation_complete` | [annotations/tasks.py](../src/tarel/annotations/tasks.py#L122) |
@@ -5574,6 +5736,9 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `graph_revision_mismatch` | [graph/selective.py](../src/tarel/graph/selective.py#L482) |
 | `graph_save_failed` | [graph/store.py](../src/tarel/graph/store.py#L51), [graph/store.py](../src/tarel/graph/store.py#L99), [graph/store.py](../src/tarel/graph/store.py#L156) |
 | `history_gap` | [sync/merge.py](../src/tarel/sync/merge.py#L74) |
+| `hub_extension_not_installable` | [hub/application.py](../src/tarel/hub/application.py#L119), [hub/application.py](../src/tarel/hub/application.py#L124), [hub/application.py](../src/tarel/hub/application.py#L129) |
+| `hub_fetch_failed` | [hub/catalog.py](../src/tarel/hub/catalog.py#L257), [hub/catalog.py](../src/tarel/hub/catalog.py#L270), [hub/catalog.py](../src/tarel/hub/catalog.py#L278) |
+| `hub_install_failed` | [hub/application.py](../src/tarel/hub/application.py#L171) |
 | `identity_artifact_exists` | [discovery/identity.py](../src/tarel/discovery/identity.py#L425), [discovery/identity.py](../src/tarel/discovery/identity.py#L489) |
 | `identity_inspection_budget_exceeded` | [discovery/identity.py](../src/tarel/discovery/identity.py#L416), [discovery/identity.py](../src/tarel/discovery/identity.py#L460), [discovery/identity.py](../src/tarel/discovery/identity.py#L484) |
 | `identity_inventory_exists` | [discovery/identity.py](../src/tarel/discovery/identity.py#L404) |
@@ -5660,6 +5825,8 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_graph_selection` | [graph/selective.py](../src/tarel/graph/selective.py#L128), [graph/selective.py](../src/tarel/graph/selective.py#L164), [graph/selective.py](../src/tarel/graph/selective.py#L169), [graph/selective.py](../src/tarel/graph/selective.py#L475), [graph/selective.py](../src/tarel/graph/selective.py#L477) |
 | `invalid_grounding_limit` | [sdk/grounding.py](../src/tarel/sdk/grounding.py#L151) |
 | `invalid_grounding_scope` | [sdk/grounding.py](../src/tarel/sdk/grounding.py#L62), [sdk/grounding.py](../src/tarel/sdk/grounding.py#L90), [sdk/grounding.py](../src/tarel/sdk/grounding.py#L101), [sdk/grounding.py](../src/tarel/sdk/grounding.py#L212), [sdk/grounding.py](../src/tarel/sdk/grounding.py#L218) |
+| `invalid_hub_catalog` | [hub/catalog.py](../src/tarel/hub/catalog.py#L93), [hub/catalog.py](../src/tarel/hub/catalog.py#L98), [hub/catalog.py](../src/tarel/hub/catalog.py#L228), [hub/catalog.py](../src/tarel/hub/catalog.py#L233), [hub/catalog.py](../src/tarel/hub/catalog.py#L276), [hub/catalog.py](../src/tarel/hub/catalog.py#L285), [hub/catalog.py](../src/tarel/hub/catalog.py#L290), [hub/contracts.py](../src/tarel/hub/contracts.py#L33), [hub/contracts.py](../src/tarel/hub/contracts.py#L80) |
+| `invalid_hub_extra` | [hub/application.py](../src/tarel/hub/application.py#L138) |
 | `invalid_identity_candidate` | [discovery/runs.py](../src/tarel/discovery/runs.py#L969), [discovery/runs.py](../src/tarel/discovery/runs.py#L974), [discovery/runs.py](../src/tarel/discovery/runs.py#L985) |
 | `invalid_identity_inspection` | [discovery/identity.py](../src/tarel/discovery/identity.py#L385), [discovery/identity.py](../src/tarel/discovery/identity.py#L525), [discovery/identity.py](../src/tarel/discovery/identity.py#L532), [discovery/identity.py](../src/tarel/discovery/identity.py#L540), [discovery/identity.py](../src/tarel/discovery/identity.py#L556), [discovery/identity.py](../src/tarel/discovery/identity.py#L564), [discovery/identity.py](../src/tarel/discovery/identity.py#L572), [discovery/identity.py](../src/tarel/discovery/identity.py#L580), [discovery/identity.py](../src/tarel/discovery/identity.py#L591), [discovery/identity.py](../src/tarel/discovery/identity.py#L599), [discovery/identity.py](../src/tarel/discovery/identity.py#L604), [discovery/identity.py](../src/tarel/discovery/identity.py#L629), [discovery/identity.py](../src/tarel/discovery/identity.py#L634), [discovery/identity.py](../src/tarel/discovery/identity.py#L642), [discovery/identity.py](../src/tarel/discovery/identity.py#L647), [discovery/identity.py](../src/tarel/discovery/identity.py#L655), [discovery/runs.py](../src/tarel/discovery/runs.py#L803), [discovery/runs.py](../src/tarel/discovery/runs.py#L812), [discovery/runs.py](../src/tarel/discovery/runs.py#L827) |
 | `invalid_identity_inventory` | [discovery/checks.py](../src/tarel/discovery/checks.py#L166), [discovery/identity.py](../src/tarel/discovery/identity.py#L106), [discovery/identity.py](../src/tarel/discovery/identity.py#L131), [discovery/identity.py](../src/tarel/discovery/identity.py#L136) |
@@ -5680,7 +5847,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_lineage` | [lineage/contracts.py](../src/tarel/lineage/contracts.py#L367), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L414), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L438), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L443), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L459), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L462), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L475), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L478), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L480), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L490), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L496), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L507), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L526), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L528), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L535), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L537), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L541), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L562), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L570), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L597), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L599), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L602), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L607), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L609), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L620), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L672), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L694), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L791), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L809), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L811), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L824), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L826), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L830), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L839), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L841), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L846), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L852), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L858), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L871), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L879), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L889), [lineage/contracts.py](../src/tarel/lineage/contracts.py#L898), [lineage/core.py](../src/tarel/lineage/core.py#L714), [lineage/store.py](../src/tarel/lineage/store.py#L52), [lineage/store.py](../src/tarel/lineage/store.py#L54), [lineage/store.py](../src/tarel/lineage/store.py#L57) |
 | `invalid_lineage_analysis_cache` | [lineage/analysis_application.py](../src/tarel/lineage/analysis_application.py#L449), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L64), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L70), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L81), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L89), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L117), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L126), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L138), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L143), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L201), [lineage/analysis_cache.py](../src/tarel/lineage/analysis_cache.py#L212) |
 | `invalid_lineage_analysis_failure` | [lineage/core.py](../src/tarel/lineage/core.py#L329) |
-| `invalid_lineage_analyzer` | [lineage/analysis_application.py](../src/tarel/lineage/analysis_application.py#L218), [lineage/analyzers.py](../src/tarel/lineage/analyzers.py#L72) |
+| `invalid_lineage_analyzer` | [lineage/analysis_application.py](../src/tarel/lineage/analysis_application.py#L218), [lineage/analyzers.py](../src/tarel/lineage/analyzers.py#L85) |
 | `invalid_lineage_change` | [lineage/refresh.py](../src/tarel/lineage/refresh.py#L105), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L107), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L181), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L185), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L943), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L949), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L956), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L962) |
 | `invalid_lineage_change_report` | [lineage/change_store.py](../src/tarel/lineage/change_store.py#L57), [lineage/change_store.py](../src/tarel/lineage/change_store.py#L62) |
 | `invalid_lineage_input` | [lineage/source.py](../src/tarel/lineage/source.py#L148), [lineage/source.py](../src/tarel/lineage/source.py#L153), [lineage/source.py](../src/tarel/lineage/source.py#L173), [lineage/source.py](../src/tarel/lineage/source.py#L176), [lineage/source.py](../src/tarel/lineage/source.py#L188), [lineage/source.py](../src/tarel/lineage/source.py#L207), [lineage/source.py](../src/tarel/lineage/source.py#L210), [lineage/source.py](../src/tarel/lineage/source.py#L235), [lineage/source.py](../src/tarel/lineage/source.py#L251), [lineage/source.py](../src/tarel/lineage/source.py#L258), [lineage/source.py](../src/tarel/lineage/source.py#L274), [lineage/source.py](../src/tarel/lineage/source.py#L280), [lineage/source.py](../src/tarel/lineage/source.py#L299), [lineage/source.py](../src/tarel/lineage/source.py#L305), [lineage/source.py](../src/tarel/lineage/source.py#L312), [lineage/source.py](../src/tarel/lineage/source.py#L329), [lineage/source.py](../src/tarel/lineage/source.py#L337), [lineage/source.py](../src/tarel/lineage/source.py#L348), [lineage/source.py](../src/tarel/lineage/source.py#L354), [lineage/source.py](../src/tarel/lineage/source.py#L363), [lineage/source.py](../src/tarel/lineage/source.py#L368), [lineage/source.py](../src/tarel/lineage/source.py#L375), [lineage/source.py](../src/tarel/lineage/source.py#L381), [lineage/source.py](../src/tarel/lineage/source.py#L392), [lineage/source.py](../src/tarel/lineage/source.py#L397) |
@@ -5772,7 +5939,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_rerank_candidate` | [retrieval/rerank.py](../src/tarel/retrieval/rerank.py#L62) |
 | `invalid_response` | [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L263) |
 | `invalid_retrieval_mode` | [retrieval/ranking.py](../src/tarel/retrieval/ranking.py#L57) |
-| `invalid_retrieval_plugin` | [retrieval/plugins.py](../src/tarel/retrieval/plugins.py#L136) |
+| `invalid_retrieval_plugin` | [retrieval/plugins.py](../src/tarel/retrieval/plugins.py#L154) |
 | `invalid_retrieval_response` | [retrieval/catalog.py](../src/tarel/retrieval/catalog.py#L40), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L54), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L70), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L90), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L94), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L99), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L119), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L177), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L186), [retrieval/remote.py](../src/tarel/retrieval/remote.py#L231) |
 | `invalid_retrieval_settings` | [cli/retrieval.py](../src/tarel/cli/retrieval.py#L56), [cli/retrieval.py](../src/tarel/cli/retrieval.py#L96), [cli/retrieval.py](../src/tarel/cli/retrieval.py#L105), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L32), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L34), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L41), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L60), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L62), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L73), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L97), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L118), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L183), [ui/backend.py](../src/tarel/ui/backend.py#L509), [ui/backend.py](../src/tarel/ui/backend.py#L512), [ui/backend.py](../src/tarel/ui/backend.py#L521), [ui/backend.py](../src/tarel/ui/backend.py#L529) |
 | `invalid_retrieval_task` | [retrieval/catalog.py](../src/tarel/retrieval/catalog.py#L14) |
@@ -5867,7 +6034,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `missing_embedding_backend` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L193), [retrieval/index.py](../src/tarel/retrieval/index.py#L80), [retrieval/index.py](../src/tarel/retrieval/index.py#L201), [retrieval/index.py](../src/tarel/retrieval/index.py#L287), [retrieval/ranking.py](../src/tarel/retrieval/ranking.py#L76) |
 | `missing_focus_sources` | [focus/application.py](../src/tarel/focus/application.py#L33) |
 | `missing_lineage_scope` | [context/grounding_application.py](../src/tarel/context/grounding_application.py#L245) |
-| `missing_local_rag_dependency` | [retrieval/local.py](../src/tarel/retrieval/local.py#L45), [retrieval/plugins.py](../src/tarel/retrieval/plugins.py#L119) |
+| `missing_local_rag_dependency` | [retrieval/local.py](../src/tarel/retrieval/local.py#L45), [retrieval/plugins.py](../src/tarel/retrieval/plugins.py#L132) |
 | `missing_provider_adapter` | [providers/application.py](../src/tarel/providers/application.py#L56) |
 | `missing_relationship_reason` | [relationships/core.py](../src/tarel/relationships/core.py#L115), [relationships/core.py](../src/tarel/relationships/core.py#L425), [workspaces/core.py](../src/tarel/workspaces/core.py#L184), [workspaces/core.py](../src/tarel/workspaces/core.py#L239) |
 | `missing_sqlite_vec_dependency` | [retrieval/index.py](../src/tarel/retrieval/index.py#L730) |
@@ -6048,7 +6215,9 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `ui_operation_failed` | [ui/server.py](../src/tarel/ui/server.py#L315) |
 | `ui_source_required` | [ui/backend.py](../src/tarel/ui/backend.py#L1047), [ui/server.py](../src/tarel/ui/server.py#L207) |
 | `unauthorized_scope` | [sync/authorization.py](../src/tarel/sync/authorization.py#L27), [sync/authorization.py](../src/tarel/sync/authorization.py#L46), [sync/authorization.py](../src/tarel/sync/authorization.py#L51), [sync/authorization.py](../src/tarel/sync/authorization.py#L55) |
+| `unknown_connector` | [connectors/host.py](../src/tarel/connectors/host.py#L234), [connectors/host.py](../src/tarel/connectors/host.py#L241) |
 | `unknown_demo` | [tarel/demo.py](../src/tarel/demo.py#L365) |
+| `unknown_hub_extension` | [hub/catalog.py](../src/tarel/hub/catalog.py#L138), [hub/catalog.py](../src/tarel/hub/catalog.py#L152), [hub/catalog.py](../src/tarel/hub/catalog.py#L156) |
 | `unknown_model` | [retrieval/local.py](../src/tarel/retrieval/local.py#L53), [retrieval/settings.py](../src/tarel/retrieval/settings.py#L69) |
 | `unknown_signing_key` | [sync/admin_application.py](../src/tarel/sync/admin_application.py#L159), [sync/authorization.py](../src/tarel/sync/authorization.py#L88) |
 | `unsafe_manifest` | [connectors/contracts.py](../src/tarel/connectors/contracts.py#L103) |
@@ -6406,6 +6575,24 @@ tarel.grounding.find(query: 'str', *, graph: 'str | None' = None, workspace: 'st
 ```
 ```python
 tarel.grounding.upstream(reference: 'str', *, lineages: 'tuple[str, ...]', graph: 'str | None' = None, workspace: 'str | None' = None, selection: 'ScopeSelection | None' = None, systems: 'tuple[str, ...]' = (), graphs: 'tuple[str, ...]' = (), areas: 'tuple[str, ...]' = (), schemas: 'tuple[str, ...]' = (), zones: 'tuple[str, ...]' = (), max_hops: 'int' = 12, states: 'frozenset[str] | None' = None) -> 'UpstreamTrace'
+```
+
+#### SDK hub
+
+```python
+tarel.hub.install(name: 'str', *, extra: 'str | None' = None, dry_run: 'bool' = False, yes: 'bool' = False, hub_url: 'str | None' = None, offline: 'bool' = False) -> 'HubInstallResult'
+```
+```python
+tarel.hub.list(*, kind: 'str | None' = None, installed: 'bool | None' = None, include_planned: 'bool' = False, hub_url: 'str | None' = None, offline: 'bool' = False) -> 'tuple[HubExtension, ...]'
+```
+```python
+tarel.hub.search(query: 'str', *, kind: 'str | None' = None, include_planned: 'bool' = False, hub_url: 'str | None' = None, offline: 'bool' = False) -> 'tuple[HubExtension, ...]'
+```
+```python
+tarel.hub.show(name: 'str', *, hub_url: 'str | None' = None, offline: 'bool' = False) -> 'HubExtension'
+```
+```python
+tarel.hub.suggest(path: 'str | Path | None' = None, *, hub_url: 'str | None' = None, offline: 'bool' = True) -> 'tuple[HubSuggestion, ...]'
 ```
 
 #### SDK index

@@ -63,8 +63,11 @@ def load_local_embedding_plugin(name: str | None = None) -> LocalEmbeddingPlugin
         name=name,
         missing_message=(
             "No local embedding plugin is installed. "
-            "Install `tarel-retrieval-llamacpp` from TAREL Hub."
+            "Install `tarel-retrieval-llamacpp` from TAREL Hub "
+            "(`tarel hub install retrieval-llamacpp --yes`)."
         ),
+        hub_package="retrieval-llamacpp",
+        install_hint="tarel hub install retrieval-llamacpp --yes",
     )
     return cast(LocalEmbeddingPlugin, _instantiate(entry_point, kind="embedding"))
 
@@ -75,8 +78,11 @@ def load_local_reranker_plugin(name: str | None = None) -> LocalRerankerPlugin:
         name=name,
         missing_message=(
             "No local reranker plugin is installed. "
-            "Install `tarel-retrieval-llamacpp` from TAREL Hub."
+            "Install `tarel-retrieval-llamacpp` from TAREL Hub "
+            "(`tarel hub install retrieval-llamacpp --yes`)."
         ),
+        hub_package="retrieval-llamacpp",
+        install_hint="tarel hub install retrieval-llamacpp --yes",
     )
     return cast(LocalRerankerPlugin, _instantiate(entry_point, kind="reranker"))
 
@@ -109,6 +115,8 @@ def _select_entry_point(
     *,
     name: str | None,
     missing_message: str,
+    hub_package: str | None = None,
+    install_hint: str | None = None,
 ) -> EntryPoint:
     selected = (
         tuple(entry_points().select(group=group, name=name))
@@ -116,7 +124,17 @@ def _select_entry_point(
         else tuple(entry_points().select(group=group))
     )
     if not selected:
-        raise RetrievalFailure("missing_local_rag_dependency", missing_message)
+        details = (
+            {"hub_package": hub_package, "install_hint": install_hint}
+            if hub_package and install_hint
+            else None
+        )
+        raise RetrievalFailure(
+            "missing_local_rag_dependency",
+            missing_message,
+            hint=install_hint,
+            details=details,
+        )
     if len(selected) > 1:
         names = ", ".join(sorted(ep.name for ep in selected))
         raise RetrievalFailure(

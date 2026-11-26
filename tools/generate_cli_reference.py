@@ -101,6 +101,17 @@ GROUPS = {
         "architecture.md",
         "tarel connector check sqlserver",
     ),
+    "hub": (
+        "TAREL Hub",
+        "Discover, inspect, suggest, and explicitly install TAREL Hub extensions.",
+        (
+            "List, show, search, and suggest are read-only and never import "
+            "plugin code. Install prints a dry-run plan by default and only "
+            "executes package installation when `--yes` is explicitly passed."
+        ),
+        "contracts.md",
+        "tarel hub list --offline",
+    ),
     "knowledge": (
         "Annotation documents",
         "Attach scoped business documentation for annotation tasks.",
@@ -720,6 +731,11 @@ RESULTS = {
         "Availability check, probe, canonical catalog, bounded sample/pro"
         "file, or scaffold location according to the verb. Samples are ep"
         "hemeral command output."
+    ),
+    "hub": (
+        "Catalog extension listing, detailed metadata/config template, "
+        "static project suggestions, or an install plan/result according "
+        "to the verb."
     ),
     "knowledge": (
         "Knowledge document metadata/content, a document listing, or reso"

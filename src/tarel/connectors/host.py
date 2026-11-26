@@ -225,6 +225,25 @@ def _find_spec_without_import(module_name: str) -> Any:
 def _installed_entry_point(name: str) -> EntryPoint:
     matches = tuple(entry_points().select(group="tarel.connectors", name=name))
     if len(matches) != 1:
-        code = "unknown_connector" if not matches else "ambiguous_connector"
-        raise ConnectorFailure(code, f"Connector is not uniquely installed: {name}")
+        if not matches:
+            from tarel.hub.catalog import hub_hint_for_entry_point
+
+            hub_hint = hub_hint_for_entry_point("tarel.connectors", name)
+            if hub_hint is not None:
+                ext_id, install_cmd = hub_hint
+                raise ConnectorFailure(
+                    "unknown_connector",
+                    f"Connector is not uniquely installed: {name}. "
+                    f"Install from TAREL Hub: `{install_cmd}`.",
+                    hint=install_cmd,
+                    details={"hub_package": ext_id, "install_hint": install_cmd},
+                )
+            raise ConnectorFailure(
+                "unknown_connector",
+                f"Connector is not uniquely installed: {name}",
+            )
+        raise ConnectorFailure(
+            "ambiguous_connector",
+            f"Connector is not uniquely installed: {name}",
+        )
     return matches[0]

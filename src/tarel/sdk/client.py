@@ -15,6 +15,7 @@ from tarel.sdk.families import BindingsAPI, FamiliesAPI
 from tarel.sdk.focus import FocusAPI
 from tarel.sdk.graph import GraphAPI
 from tarel.sdk.grounding import GroundingAPI
+from tarel.sdk.hub import HubAPI
 from tarel.sdk.index import IndexAPI, ModelAPI
 from tarel.sdk.knowledge import KnowledgeAPI
 from tarel.sdk.lineage import LineageAPI
@@ -45,6 +46,7 @@ class Tarel:
         "focus",
         "graph",
         "grounding",
+        "hub",
         "index",
         "knowledge",
         "lineage",
@@ -77,6 +79,7 @@ class Tarel:
         self.context = ContextAPI(self.runtime)
         self.concepts = ConceptsAPI(self.runtime)
         self.connector = ConnectorAPI()
+        self.hub = HubAPI()
         self.discovery = DiscoveryAPI(self.runtime)
         self.entity_resolution = EntityResolutionAPI(self.runtime)
         self.reference_mapping = ReferenceMappingAPI(self.runtime)
