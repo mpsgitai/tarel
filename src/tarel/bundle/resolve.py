@@ -24,6 +24,9 @@ from tarel.bundle.contracts import BundleFailure, Target
 
 # Downloads use --no-deps, so each round adds one level of the dependency tree.
 _MAX_ROUNDS = 30
+# Neither a profile nor a short name records these; evaluating them as "" would silently drop
+# a dependency the target may need.
+_UNKNOWN_MARKERS = re.compile(r"\b(platform_release|platform_version)\b")
 _SYSTEMS = {
     "windows": ("win32", "Windows", "nt"),
     "linux": ("linux", "Linux", "posix"),
@@ -61,8 +64,6 @@ def marker_environment(target: Target, patch: str = "0") -> dict[str, str]:
         "implementation_name": "cpython",
         "platform_python_implementation": "CPython",
         "implementation_version": f"{target.python}.{patch}",
-        "platform_release": "",
-        "platform_version": "",
         "extra": "",
     }
 
@@ -189,6 +190,13 @@ def _closure(
         for text in wheel.requires:
             dependency = requirement_type(text)
             marker = dependency.marker
+            if marker is not None and _UNKNOWN_MARKERS.search(str(marker)):
+                raise BundleFailure(
+                    "bundle_marker_unknown",
+                    f"{label} needs {dependency} only on some releases of the operating "
+                    "system; a target profile does not record that, so the bundle cannot "
+                    "tell whether the target needs it.",
+                )
             if marker is None or any(
                 marker.evaluate({**environment, "extra": extra})
                 for environment in environments

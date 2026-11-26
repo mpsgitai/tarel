@@ -304,12 +304,13 @@ Target: {target.label}
 No internet connection is needed. Run these commands inside this folder:
 
 ```
-{python} -m venv .venv
-{venv_python} -m pip install --no-index --find-links wheels --require-hashes -r requirements.lock
+{python} -I -m venv .venv
+{venv_python} -I -m pip install --no-index --find-links wheels --require-hashes -r requirements.lock
 {tarel} --version
 ```
 
-`--no-index` stops pip from contacting any server. `--require-hashes` makes pip refuse any file
+`-I` keeps Python from importing anything in this folder; `--no-index` stops pip from
+contacting any server. `--require-hashes` makes pip refuse any file
 whose SHA-256 differs from `requirements.lock`, so a damaged or swapped file stops the install.
 
 Contents: `wheels/` (unmodified wheels as published upstream, plus locally built TAREL hub
@@ -327,14 +328,20 @@ def _write_zip(source: Path, output: Path) -> None:
     handle, name = tempfile.mkstemp(prefix=f".{output.name}.", suffix=".partial", dir=output.parent)
     partial = Path(name)
     try:
+        # mkstemp creates the file private to this user; a bundle is meant to be copied around.
+        share_descriptor(handle)
         with os.fdopen(handle, "wb") as stream:
             _zip_folder(source, stream, output.stem)
-        # mkstemp creates the file private to this user; a bundle is meant to be copied around.
-        partial.chmod(0o644)
         partial.replace(output)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
+
+
+def share_descriptor(handle: int) -> None:
+    """Make a new file readable by others through its descriptor; a path could be swapped."""
+    if hasattr(os, "fchmod"):  # Windows files carry no POSIX mode before Python 3.13.
+        os.fchmod(handle, 0o644)
 
 
 def _zip_folder(source: Path, destination: BinaryIO, folder: str) -> None:

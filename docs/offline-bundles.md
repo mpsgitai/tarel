@@ -59,12 +59,13 @@ A Linux name without glibc assumes glibc 2.28.
 Unzip the file and, inside its folder, run the commands from `INSTALL.md`. On Windows:
 
 ```
-py -3.12 -m venv .venv
-.venv\Scripts\python -m pip install --no-index --find-links wheels --require-hashes -r requirements.lock
+py -3.12 -I -m venv .venv
+.venv\Scripts\python -I -m pip install --no-index --find-links wheels --require-hashes -r requirements.lock
 .venv\Scripts\tarel --version
 ```
 
-`--no-index` stops pip from contacting any server. `--require-hashes` makes pip refuse any file
+`-I` keeps Python from importing anything from the bundle folder, which may be writable by
+others. `--no-index` stops pip from contacting any server. `--require-hashes` makes pip refuse any file
 whose hash differs from `requirements.lock`, so a damaged or swapped file stops the install.
 
 The hashes detect damage and mix-ups, not a deliberate swap of the whole bundle: whoever can

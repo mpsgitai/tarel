@@ -327,6 +327,14 @@ class ResolveTests(unittest.TestCase):
             names = sorted(path.name.split("-")[0] for path in wheels.glob("*.whl"))
         self.assertEqual(names, ["app", "helper"])
 
+    def test_os_release_markers_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            wheels = Path(folder)
+            write_wheel(wheels, "app", "1.0", ('helper; platform_release == "10"',))
+            with self.assertRaises(BundleFailure) as caught:
+                complete_for_target(wheels, ["app"], WINDOWS, lambda _: None)
+        self.assertEqual(caught.exception.code, "bundle_marker_unknown")
+
     def test_url_dependencies_are_refused(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             wheels = Path(folder)
@@ -461,7 +469,8 @@ class BundleFileTests(unittest.TestCase):
 
     def test_install_guide_names_the_offline_flags(self) -> None:
         guide = builder._install_guide(WINDOWS)
-        self.assertIn("py -3.12 -m venv .venv", guide)
+        self.assertIn("py -3.12 -I -m venv .venv", guide)
+        self.assertIn(r".venv\Scripts\python -I -m pip install", guide)
         self.assertIn("--no-index --find-links wheels --require-hashes", guide)
 
 

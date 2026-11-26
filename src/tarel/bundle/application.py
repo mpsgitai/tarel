@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from tarel import __version__
-from tarel.bundle.builder import StepCallback, build_bundle
+from tarel.bundle.builder import StepCallback, build_bundle, share_descriptor
 from tarel.bundle.catalog import available_components, select_components
 from tarel.bundle.contracts import BundleFailure, BundlePlan, BundleReport, Component, Recipe
 from tarel.bundle.targets import pip_platforms
@@ -75,9 +75,9 @@ def save_recipe_use_case(recipe: Recipe, path: Path) -> None:
     handle, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".partial", dir=path.parent)
     partial = Path(name)
     try:
+        share_descriptor(handle)
         with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
             stream.write(recipe.to_toml())
-        partial.chmod(0o644)
         partial.replace(path)
     except BaseException:
         partial.unlink(missing_ok=True)

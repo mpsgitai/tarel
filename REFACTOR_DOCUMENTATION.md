@@ -235,7 +235,7 @@ Use cases for offline bundles. The CLI dialog and the plain commands both call o
     - `build_bundle_use_case`: Build the bundle for ``recipe`` into the ZIP file ``output``. Calls `build_bundle`; raises `BundleFailure`.
     - `default_output`: default output; returns `Path`.
     - `load_recipe_use_case`: load recipe (use case); returns `Recipe`. Raises `BundleFailure`.
-    - `save_recipe_use_case`: Write the recipe next to the bundle; like the bundle, never through a planted link.
+    - `save_recipe_use_case`: Write the recipe next to the bundle; like the bundle, never through a planted link. Calls `share_descriptor`.
 - **Output:** returns `BundlePlan`, `BundleReport`, `Path`, `Recipe`, `tuple[Component, ...]`; deletes files; writes temporary files
 - **Uses:** `tarel`, `tarel.bundle.builder`, `tarel.bundle.catalog`, `tarel.bundle.contracts`, `tarel.bundle.targets`
 - **Used by:** `tarel.cli._bundle_dialog`, `tarel.cli.bundle`
@@ -244,9 +244,10 @@ Use cases for offline bundles. The CLI dialog and the plain commands both call o
 
 Build one offline bundle: collect wheels, pin them by hash, prove they install, and zip them.
 
-- **Input:** parameters `on_step: StepCallback`, `output: Path`, `plan: BundlePlan`, `tarel_from: Path | None`; reads files
+- **Input:** parameters `handle: int`, `on_step: StepCallback`, `output: Path`, `plan: BundlePlan`, `tarel_from: Path | None`; reads files
 - **Processing:**
     - `build_bundle`: build bundle; returns `BundleReport`. Calls `ensure_pip`, `BundleReport`, `complete_for_target`, `run_pip`, `target_arguments`; raises `BundleFailure`.
+    - `share_descriptor`: Make a new file readable by others through its descriptor; a path could be swapped.
 - **Output:** returns `BundleReport`; deletes files; writes files; writes temporary files
 - **Uses:** `tarel.bundle.contracts`, `tarel.bundle.pip`, `tarel.bundle.resolve`, `tarel.bundle.targets`
 - **Used by:** `tarel.bundle.application`
