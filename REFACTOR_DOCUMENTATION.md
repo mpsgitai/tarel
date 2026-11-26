@@ -25,6 +25,7 @@ How to read an entry:
 | `tarel.expansion` | Optional private-handle context expansion. |
 | `tarel.focus` | Persisted demand-driven slices across graphs and lineage. |
 | `tarel.graph` | Local technical and semantic graph contracts. |
+| `tarel.hub` | Discovery, inspection, project suggestion, and explicit installation for TAREL Hub. |
 | `tarel.knowledge` | Small file-first knowledge attachments for annotation context. |
 | `tarel.lineage` | Static workflow and table-lineage contracts. |
 | `tarel.logical_joins` | Optional reviewable logical joins; never physical graph edges or query executors. |
@@ -53,7 +54,7 @@ TAREL: topology, annotation, retrieval, evidence, and lineage.
 - **Input:** none (constants or declarations only)
 - **Processing:** module-level constants and imports only.
 - **Output:** no return values or effects
-- **Used by:** `tarel.bundle.application`, `tarel.cli`, `tarel.cli._bundle_dialog`, `tarel.cli.bundle`, `tarel.packages.contracts`
+- **Used by:** `tarel.bundle.application`, `tarel.cli`, `tarel.cli._bundle_dialog`, `tarel.cli.bundle`, `tarel.hub.catalog`, `tarel.packages.contracts`
 
 ### `src/tarel/__main__.py`
 
@@ -368,7 +369,7 @@ Argument groups shared by several command groups.
     - `require_graph_or_workspace`: Exactly one of the positional graph name and ``--workspace NAME``. Raises `WorkspaceFailure`.
 - **Output:** returns `tuple[str, ...]`
 - **Uses:** `tarel.knowledge.contracts`, `tarel.search`, `tarel.workspaces.contracts`
-- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.grounding`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.ui`, `tarel.cli.workspace`
+- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.grounding`, `tarel.cli.hub`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.ui`, `tarel.cli.workspace`
 
 ### `src/tarel/cli/_bundle_dialog.py`
 
@@ -411,7 +412,7 @@ Text and JSON renderers shared by several command groups.
     - `print_json`: Print ``payload`` as every ``--format json`` command does: indented, keys sorted.
 - **Output:** prints JSON to stdout; prints to the terminal
 - **Uses:** `tarel.annotations.contracts`, `tarel.connectors.contracts`, `tarel.graph.contracts`
-- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.workspace`
+- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.hub`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.workspace`
 
 ### `src/tarel/cli/_terminal.py`
 
@@ -650,6 +651,17 @@ CLI adapter for optional lazy graph reads; JSON output includes actual read stat
     - `dispatch`: Run a parsed `grounding` command; return ``None`` for other commands. Calls `require_graph_or_workspace`, `compile_workspace_grounding_use_case`, `compile_graph_grounding_use_case`.
 - **Output:** returns `int | None`; prints to the terminal
 - **Uses:** `tarel.cli._args`, `tarel.context.compiler`, `tarel.context.grounding`, `tarel.context.grounding_application`
+
+### `src/tarel/cli/hub.py`
+
+`tarel hub`: discover, inspect, suggest, and explicitly install TAREL Hub extensions.
+
+- **Input:** parameters `args: argparse.Namespace`, `subcommands: Subcommands`
+- **Processing:**
+    - `register`: Add the `hub` command group to the top-level parser. Calls `add_format_argument`.
+    - `dispatch`: Run a parsed `hub` command; return ``None`` for other commands.
+- **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
+- **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.hub.application`, `tarel.hub.contracts`
 
 ### `src/tarel/cli/index.py`
 
@@ -1039,8 +1051,8 @@ Explicit loading and checking of trusted connector manifests.
     - `load_manifest`: load manifest; returns `ConnectorManifest`. Raises `ConnectorFailure`.
     - `load_connector`: load connector; returns `Connector`. Raises `ConnectorFailure`.
 - **Output:** returns `Connector`, `ConnectorCheck`, `ConnectorManifest`, `tuple[ConnectorCheck, ...]`
-- **Uses:** `tarel.connectors.contracts`
-- **Used by:** `tarel.connectors.application`, `tarel.sources.application`
+- **Uses:** `tarel.connectors.contracts`, `tarel.hub.catalog`
+- **Used by:** `tarel.connectors.application`, `tarel.hub.application`, `tarel.sources.application`
 
 ### `src/tarel/connectors/sqlite/__init__.py`
 
@@ -1842,7 +1854,7 @@ The exception hierarchy shared by every TAREL package.
 - **Processing:**
     - `TarelError`: A rejected TAREL operation with a stable error ``code``.
 - **Output:** no return values or effects
-- **Used by:** `tarel.agents`, `tarel.annotations.contracts`, `tarel.bundle.contracts`, `tarel.cli`, `tarel.connectors.contracts`, `tarel.context.compiler`, `tarel.demo`, `tarel.discovery.contracts`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.entity_resolution.contracts`, `tarel.expansion.contracts`, `tarel.focus.contracts`, `tarel.graph.application`, `tarel.graph.contracts`, `tarel.knowledge.contracts`, `tarel.lineage.contracts`, `tarel.logical_joins.contracts`, `tarel.object_bindings.contracts`, `tarel.object_families.contracts`, `tarel.packages.contracts`, `tarel.providers.contracts`, `tarel.reference_mapping.contracts`, `tarel.relationships.core`, `tarel.retrieval.contracts`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.semantics.contracts`, `tarel.sources.contracts`, `tarel.sync.application`, `tarel.sync.contracts`, `tarel.sync.inbox`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.ui.contracts`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.workspaces.contracts`
+- **Used by:** `tarel.agents`, `tarel.annotations.contracts`, `tarel.bundle.contracts`, `tarel.cli`, `tarel.connectors.contracts`, `tarel.context.compiler`, `tarel.demo`, `tarel.discovery.contracts`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.entity_resolution.contracts`, `tarel.expansion.contracts`, `tarel.focus.contracts`, `tarel.graph.application`, `tarel.graph.contracts`, `tarel.hub.contracts`, `tarel.knowledge.contracts`, `tarel.lineage.contracts`, `tarel.logical_joins.contracts`, `tarel.object_bindings.contracts`, `tarel.object_families.contracts`, `tarel.packages.contracts`, `tarel.providers.contracts`, `tarel.reference_mapping.contracts`, `tarel.relationships.core`, `tarel.retrieval.contracts`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.semantics.contracts`, `tarel.sources.contracts`, `tarel.sync.application`, `tarel.sync.contracts`, `tarel.sync.inbox`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.ui.contracts`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.workspaces.contracts`
 
 ### `src/tarel/expansion/__init__.py`
 
@@ -2216,6 +2228,83 @@ Atomic local JSON graph store.
 
 ## `tarel`
 
+### `src/tarel/hub/__init__.py`
+
+Discovery, inspection, project suggestion, and explicit installation for TAREL Hub.
+
+- **Input:** none (constants or declarations only)
+- **Processing:** module-level constants and imports only.
+- **Output:** no return values or effects
+- **Uses:** `tarel.hub.application`, `tarel.hub.contracts`
+
+## `tarel.hub`
+
+### `src/tarel/hub/application.py`
+
+Application use cases for TAREL Hub discovery, suggestions, and installation.
+
+- **Input:** parameters `dry_run: bool`, `extra: str | None`, `hub_url: str | None`, `identifier: str`, `include_planned: bool`, `installed: bool | None`, `kind: str | None`, `offline: bool`, `path: Path | None`, `query: str`, `yes: bool`
+- **Processing:**
+    - `list_hub_extensions_use_case`: List TAREL Hub extensions with optional filters. Calls `load_hub_catalog`.
+    - `show_hub_extension_use_case`: Inspect one TAREL Hub extension by id, package name, or entry-point name. Calls `load_hub_catalog`, `resolve_hub_extension`.
+    - `search_hub_extensions_use_case`: Search TAREL Hub extensions by id, kind, capability, package, entry point, or evidence.
+    - `suggest_hub_extensions_use_case`: Suggest TAREL Hub extensions for a local project directory without executing code. Calls `load_hub_catalog`, `suggest_hub_extensions`.
+    - `install_hub_extension_use_case`: Plan or execute installation of one verified TAREL Hub extension. Calls `HubInstallResult`; raises `HubFailure`.
+- **Output:** returns `HubExtension`, `HubInstallResult`, `tuple[HubExtension, ...]`, `tuple[HubSuggestion, ...]`
+- **Uses:** `tarel.connectors.host`, `tarel.hub.catalog`, `tarel.hub.contracts`, `tarel.hub.suggest`
+- **Used by:** `tarel.cli.hub`, `tarel.hub`, `tarel.sdk.hub`
+
+### `src/tarel/hub/catalog.py`
+
+Load, enrich, and query the TAREL Hub catalog without importing plugin code.
+
+- **Input:** parameters `extension_id: str`, `extensions: tuple[HubExtension, ...]`, `group: str`, `host_version: str`, `host_versions: str | None`, `hub_url: str | None`, `identifier: str`, `name: str`, `offline: bool`; reads environment variables; reads files
+- **Processing:**
+    - `config_template_for_extension`: Return a minimal safe configuration or usage template for one Hub extension.
+    - `load_hub_catalog`: Load the TAREL Hub catalog and enrich each entry with local host status. Raises `HubFailure`.
+    - `load_bundled_hub_catalog`: Load the bundled offline Hub snapshot without touching the network.
+    - `resolve_hub_extension`: Resolve an extension by id, package name, or entry-point name. Raises `HubFailure`.
+    - `hub_hint_for_entry_point`: Return ``(extension_id, install_command)`` from the bundled snapshot, or ``None``.
+    - `is_compatible_with_host`: Check simple PEP 440 range specifiers such as ``tarel>=0.0.6,<0.1``.
+- **Output:** returns `HubExtension`, `bool`, `str | None`, `tuple[HubExtension, ...]`, `tuple[str, str] | None`
+- **Uses:** `tarel`, `tarel.hub.contracts`
+- **Used by:** `tarel.connectors.host`, `tarel.hub.application`, `tarel.lineage.analyzers`
+
+### `src/tarel/hub/contracts.py`
+
+Typed contracts for TAREL Hub catalog discovery, suggestions, and installation.
+
+- **Input:** parameters `catalog_source: str`, `compatible: bool`, `config_template: str | None`, `installed: bool`, `payload: Mapping[str, Any]`
+- **Processing:**
+    - `HubFailure`: Raised when a TAREL Hub discovery or installation operation fails.
+    - `HubEntryPoint`: One Python entry point declared by a TAREL Hub extension.
+    - `HubEntryPoint.from_dict`: from dict; returns `HubEntryPoint`.
+    - `HubEntryPoint.to_dict`: to dict; returns `dict[str, str]`.
+    - `HubExtension`: One extension entry from the TAREL Hub catalog, enriched with local host status.
+    - `HubExtension.from_dict`: from dict; returns `HubExtension`.
+    - `HubExtension.recommended_cli_install`: recommended cli install; returns `str | None`.
+    - `HubExtension.to_dict`: to dict; returns `dict[str, Any]`.
+    - `HubInstallResult`: Result of planning or executing a TAREL Hub package installation.
+    - `HubInstallResult.to_dict`: to dict; returns `dict[str, Any]`.
+    - `HubSuggestion`: A static, read-only project recommendation for a TAREL Hub extension.
+    - `HubSuggestion.to_dict`: to dict; returns `dict[str, Any]`.
+- **Output:** returns `HubEntryPoint`, `HubExtension`, `dict[str, Any]`, `dict[str, str]`, `str | None`
+- **Uses:** `tarel.errors`
+- **Used by:** `tarel.cli.hub`, `tarel.hub`, `tarel.hub.application`, `tarel.hub.catalog`, `tarel.hub.suggest`, `tarel.sdk`, `tarel.sdk.hub`
+
+### `src/tarel/hub/suggest.py`
+
+Static, read-only project scanner that suggests relevant TAREL Hub extensions.
+
+- **Input:** parameters `extensions: tuple[HubExtension, ...]`, `root: Path`; reads environment variables
+- **Processing:**
+    - `suggest_hub_extensions`: Inspect a workspace directory and env variable names without executing code. Calls `HubSuggestion`.
+- **Output:** returns `tuple[HubSuggestion, ...]`
+- **Uses:** `tarel.hub.contracts`
+- **Used by:** `tarel.hub.application`
+
+## `tarel`
+
 ### `src/tarel/knowledge/__init__.py`
 
 Small file-first knowledge attachments for annotation context.
@@ -2386,7 +2475,7 @@ Extension point for external static SQL lineage analyzers (`tarel.lineage_analyz
     - `list_lineage_analyzers`: List installed static lineage analyzer names without importing them.
     - `load_lineage_analyzer`: Load one installed static lineage analyzer by entry-point name. Raises `LineageFailure`.
 - **Output:** returns `LineageAnalyzer`, `StaticLineageAnalysisResult`, `bool`, `str`, `tuple[str, ...]`
-- **Uses:** `tarel.lineage.contracts`, `tarel.lineage.source`
+- **Uses:** `tarel.hub.catalog`, `tarel.lineage.contracts`, `tarel.lineage.source`
 - **Used by:** `tarel.lineage.analysis_application`
 
 ### `src/tarel/lineage/application.py`
@@ -3763,7 +3852,7 @@ Small embedded Python surface over TAREL application use cases.
 - **Input:** none (constants or declarations only)
 - **Processing:** module-level constants and imports only.
 - **Output:** no return values or effects
-- **Uses:** `tarel.context.caching`, `tarel.context.grounding`, `tarel.context.guidance`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.discovery.logical_program`, `tarel.discovery.programs`, `tarel.discovery.runs`, `tarel.entity_resolution.candidates`, `tarel.entity_resolution.evidence`, `tarel.expansion.contracts`, `tarel.graph.revision`, `tarel.graph.selective`, `tarel.knowledge.contracts`, `tarel.lineage.runtime_logical`, `tarel.logical_joins.contracts`, `tarel.object_bindings.application`, `tarel.object_bindings.contracts`, `tarel.object_families.application`, `tarel.object_families.contracts`, `tarel.reference_mapping.contracts`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.sdk.client`, `tarel.sdk.setup`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.sources.application`, `tarel.sources.contracts`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.workspaces.scope`
+- **Uses:** `tarel.context.caching`, `tarel.context.grounding`, `tarel.context.guidance`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.discovery.logical_program`, `tarel.discovery.programs`, `tarel.discovery.runs`, `tarel.entity_resolution.candidates`, `tarel.entity_resolution.evidence`, `tarel.expansion.contracts`, `tarel.graph.revision`, `tarel.graph.selective`, `tarel.hub.contracts`, `tarel.knowledge.contracts`, `tarel.lineage.runtime_logical`, `tarel.logical_joins.contracts`, `tarel.object_bindings.application`, `tarel.object_bindings.contracts`, `tarel.object_families.application`, `tarel.object_families.contracts`, `tarel.reference_mapping.contracts`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.sdk.client`, `tarel.sdk.setup`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.sources.application`, `tarel.sources.contracts`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.workspaces.scope`
 
 ## `tarel.sdk`
 
@@ -3821,7 +3910,7 @@ The ``Tarel`` client: one object per state directory, one facade per domain.
     - `Tarel`: One embedded TAREL client bound to an explicit local state directory.
     - `Tarel.root`: root; returns `Path`.
 - **Output:** returns `Path`
-- **Uses:** `tarel.retrieval.settings`, `tarel.runtime`, `tarel.sdk.annotation`, `tarel.sdk.connectors`, `tarel.sdk.context`, `tarel.sdk.discovery`, `tarel.sdk.families`, `tarel.sdk.focus`, `tarel.sdk.graph`, `tarel.sdk.grounding`, `tarel.sdk.index`, `tarel.sdk.knowledge`, `tarel.sdk.lineage`, `tarel.sdk.logical`, `tarel.sdk.providers`, `tarel.sdk.relationship`, `tarel.sdk.retrieval`, `tarel.sdk.search`, `tarel.sdk.semantic`, `tarel.sdk.sources`, `tarel.sdk.sync`, `tarel.sdk.view`, `tarel.sdk.workspace`
+- **Uses:** `tarel.retrieval.settings`, `tarel.runtime`, `tarel.sdk.annotation`, `tarel.sdk.connectors`, `tarel.sdk.context`, `tarel.sdk.discovery`, `tarel.sdk.families`, `tarel.sdk.focus`, `tarel.sdk.graph`, `tarel.sdk.grounding`, `tarel.sdk.hub`, `tarel.sdk.index`, `tarel.sdk.knowledge`, `tarel.sdk.lineage`, `tarel.sdk.logical`, `tarel.sdk.providers`, `tarel.sdk.relationship`, `tarel.sdk.retrieval`, `tarel.sdk.search`, `tarel.sdk.semantic`, `tarel.sdk.sources`, `tarel.sdk.sync`, `tarel.sdk.view`, `tarel.sdk.workspace`
 - **Used by:** `tarel.sdk`
 
 ### `src/tarel/sdk/connectors.py`
@@ -3969,6 +4058,22 @@ Low-level read-only connector operations for embedded harnesses.
     - `GroundingAPI.upstream`: upstream; returns `UpstreamTrace`. Calls `trace_upstream_use_case`, `resolve_workspace_scope`; raises `WorkspaceFailure`.
 - **Output:** returns `GroundingAsset`, `GroundingBundle`, `UpstreamTrace`
 - **Uses:** `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.context.output`, `tarel.lineage.application`, `tarel.lineage.traversal`, `tarel.sdk._base`, `tarel.sdk._scope`, `tarel.workspaces.contracts`, `tarel.workspaces.scope`
+- **Used by:** `tarel.sdk.client`
+
+### `src/tarel/sdk/hub.py`
+
+TAREL Hub discovery, project suggestion, and explicit installation facade.
+
+- **Input:** parameters `dry_run: bool`, `extra: str | None`, `hub_url: str | None`, `include_planned: bool`, `installed: bool | None`, `kind: str | None`, `name: str`, `offline: bool`, `path: str | Path | None`, `query: str`, `yes: bool`
+- **Processing:**
+    - `HubAPI`: Discover, inspect, suggest, and explicitly install TAREL Hub extensions.
+    - `HubAPI.list`: list; returns `tuple[HubExtension, ...]`. Calls `list_hub_extensions_use_case`.
+    - `HubAPI.show`: show; returns `HubExtension`. Calls `show_hub_extension_use_case`.
+    - `HubAPI.search`: search; returns `tuple[HubExtension, ...]`. Calls `search_hub_extensions_use_case`.
+    - `HubAPI.suggest`: suggest; returns `tuple[HubSuggestion, ...]`. Calls `suggest_hub_extensions_use_case`.
+    - `HubAPI.install`: install; returns `HubInstallResult`. Calls `install_hub_extension_use_case`.
+- **Output:** returns `HubExtension`, `HubInstallResult`, `tuple[HubExtension, ...]`, `tuple[HubSuggestion, ...]`
+- **Uses:** `tarel.hub.application`, `tarel.hub.contracts`
 - **Used by:** `tarel.sdk.client`
 
 ### `src/tarel/sdk/index.py`
