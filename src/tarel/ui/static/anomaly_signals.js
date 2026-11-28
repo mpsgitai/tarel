@@ -109,12 +109,11 @@ function applyAnomalyCanvasDecorations(cy = state.cy) {
       if (!isPulseLens) return;
       const item = byId.get(node.id());
       const anomaly = objectAnomaly(item);
-      if (!anomaly) return;
-      if (anomaly.state === "anomalous") node.addClass("pulse-anomalous");
+      if (anomaly?.state === "anomalous") node.addClass("pulse-anomalous");
       else if (downstream.has(node.id())) node.addClass("pulse-downstream");
-      else if (anomaly.state === "active") node.addClass("pulse-active");
-      else if (anomaly.state === "static") node.addClass("pulse-static");
-      else if (anomaly.state === "empty") node.addClass("pulse-empty");
+      else if (anomaly?.state === "active") node.addClass("pulse-active");
+      else if (anomaly?.state === "static") node.addClass("pulse-static");
+      else if (anomaly?.state === "empty") node.addClass("pulse-empty");
     });
   });
 
@@ -123,12 +122,11 @@ function applyAnomalyCanvasDecorations(cy = state.cy) {
     if (!isPulseLens) return;
     const item = byId.get(card.dataset.id);
     const anomaly = objectAnomaly(item);
-    if (!anomaly) return;
-    if (anomaly.state === "anomalous") card.classList.add("pulse-anomalous");
+    if (anomaly?.state === "anomalous") card.classList.add("pulse-anomalous");
     else if (downstream.has(card.dataset.id)) card.classList.add("pulse-downstream");
-    else if (anomaly.state === "active") card.classList.add("pulse-active");
-    else if (anomaly.state === "static") card.classList.add("pulse-static");
-    else if (anomaly.state === "empty") card.classList.add("pulse-empty");
+    else if (anomaly?.state === "active") card.classList.add("pulse-active");
+    else if (anomaly?.state === "static") card.classList.add("pulse-static");
+    else if (anomaly?.state === "empty") card.classList.add("pulse-empty");
   });
 }
 

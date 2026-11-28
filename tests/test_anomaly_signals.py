@@ -380,6 +380,46 @@ class UIAnomalyBackendTests(unittest.TestCase):
             )
             self.assertTrue(stale_orders["anomaly"]["stale"])
 
+    def test_browser_edge_shifts_respect_object_scope(self) -> None:
+        from tarel.ui.payloads.graph import browser_workspace
+        from tarel.workspaces.contracts import WorkspaceDocument
+        from tarel.workspaces.scope import ResolvedScope, ResolvedScopeObject, ScopeSelection
+
+        graph = _sample_graph()
+        with tempfile.TemporaryDirectory() as tmp:
+            anomaly_dir = Path(tmp) / "anomaly"
+            anomaly_dir.mkdir()
+            (anomaly_dir / "retail.signals.json").write_text(
+                json.dumps(_valid_signals_payload(graph)), encoding="utf-8"
+            )
+            loaded = load_anomaly_signals_for_graphs((graph,), anomaly_dir=anomaly_dir)
+            scope = ResolvedScope(
+                workspace="ws",
+                selection=ScopeSelection(objects=("retail:table:main.empty_staging",)),
+                graph_names=("retail",),
+                objects=(
+                    ResolvedScopeObject(
+                        graph="retail",
+                        object_id="table:main.empty_staging",
+                        label="main.empty_staging",
+                        type="table",
+                        namespace="main",
+                        system="core",
+                        area="staging",
+                        zones=(),
+                    ),
+                ),
+                warnings=(),
+                scope_hash="scope-1",
+            )
+            payload = browser_workspace(
+                (graph,),
+                scope,
+                workspace=WorkspaceDocument(name="ws", systems=()),
+                anomaly_signals=loaded,
+            )
+            self.assertEqual(payload["anomaly"]["edge_shifts"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

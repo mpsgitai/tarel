@@ -450,6 +450,8 @@ def _browser_payload(
             }
             for graph_name in sorted(anomaly_signals.files)
             for shift in anomaly_signals.files[graph_name].edge_shifts
+            if (graph_name, shift.upstream_object_id) in allowed_objects
+            and (graph_name, shift.downstream_object_id) in allowed_objects
         ]
         payload["anomaly"] = {
             "edge_shifts": edge_shifts,
