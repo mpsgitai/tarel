@@ -251,7 +251,11 @@ def _trace_downstream_on(network: Network, reference: str, *, max_hops: int) -> 
                 network.nodes[node_id].value
                 for node_id in reached
                 if node_id != start_id
-                and not any(feeds(item) for item in outgoing.get(node_id, ()))
+                # A table that merges into itself still ends the chain.
+                and not any(
+                    feeds(item) and item.target_id != node_id
+                    for item in outgoing.get(node_id, ())
+                )
             ),
             key=lambda item: (item.reference.casefold(), item.id),
         )

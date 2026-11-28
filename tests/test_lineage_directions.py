@@ -60,6 +60,29 @@ class DirectionTests(TestCase):
         self.assertIn("No downstream lineage was found for the selected reference.", trace.warnings)
         self.assertFalse([item for item in trace.warnings if "cycle" in item])
 
+    def test_a_terminal_table_that_merges_into_itself_is_still_an_impact(self) -> None:
+        graph, lineage = _fixture()
+        evidence = lineage.claims[0].evidence
+        merge = LineageWriteUnit(
+            id="merge-raw-and-self",
+            definition_id=lineage.definitions[0].id,
+            operation="merge",
+            target="Demo.mart.Sales",
+            state="draft",
+            evidence=evidence,
+            sources=(
+                LineageWriteSource("Demo.raw.Sales", "business_data", (), evidence),
+                LineageWriteSource("Demo.mart.Sales", "business_data", (), evidence),
+            ),
+        )
+
+        trace = trace_lineage(
+            (replace(lineage, write_units=(merge,)),), (graph,), "Demo.raw.Sales",
+            direction="down",
+        )
+
+        self.assertEqual([item.reference for item in trace.impacts], ["Demo.mart.Sales"])
+
     def test_an_ambiguous_write_target_is_reported_downstream(self) -> None:
         graph, lineage = _fixture()
 

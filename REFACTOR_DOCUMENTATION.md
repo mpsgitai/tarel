@@ -4090,7 +4090,7 @@ Search use cases: rank the objects of one graph or a workspace scope for a query
     - `resolve_graph_object_scope`: Resolve explicit graph boundaries while preserving an intentionally empty scope. Calls `focus_object_allowlist`; raises `SearchFailure`.
     - `resolve_graph_object_scope_use_case`: Return every physical object allowed by one graph working scope. Uses the graph store.
 - **Output:** returns `GraphDocument`, `SearchResults`, `tuple[str, ...]`, `tuple[tuple[str, ...], bool, tuple[str, ...]]`
-- **Uses:** `tarel.annotations.states`, `tarel.focus.application`, `tarel.graph.contracts`, `tarel.object_families.search`, `tarel.retrieval.application`, `tarel.retrieval.contracts`, `tarel.retrieval.ranking`, `tarel.retrieval.rerank`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.search`, `tarel.workspaces.application`, `tarel.workspaces.retrieval`
+- **Uses:** `tarel.annotations.states`, `tarel.focus.application`, `tarel.graph.contracts`, `tarel.object_families.search`, `tarel.retrieval.application`, `tarel.retrieval.contracts`, `tarel.retrieval.ranking`, `tarel.retrieval.rerank`, `tarel.retrieval.settings`, `tarel.runtime`, `tarel.search`, `tarel.workspaces.application`, `tarel.workspaces.retrieval`, `tarel.workspaces.scope`
 - **Used by:** `tarel.cli.search`, `tarel.context.application`, `tarel.sdk.search`, `tarel.ui.query_tools`
 
 ### `src/tarel/retrieval/settings.py`
@@ -5884,7 +5884,7 @@ Pure aggregation of per-graph retrieval results for one workspace scope.
 
 Resolve deterministic object scopes across workspace graphs.
 
-- **Input:** parameters `allowed_by_graph: Mapping[str, frozenset[str]]`, `graphs: Mapping[str, GraphDocument]`, `scope: ResolvedScope`, `selection: ScopeSelection | None`, `warnings: tuple[str, ...]`, `workspace: WorkspaceDocument`
+- **Input:** parameters `allowed_by_graph: Mapping[str, frozenset[str]]`, `excluded: tuple[str, ...]`, `graphs: Mapping[str, GraphDocument]`, `scope: ResolvedScope`, `selection: ScopeSelection | None`, `warnings: tuple[str, ...]`, `workspace: WorkspaceDocument`
 - **Processing:**
     - `ScopeSelection`: record with fields systems, graphs, areas, schemas, zones, focuses, objects.
     - `ScopeSelection.to_dict`: to dict; returns `dict[str, list[str]]`.
@@ -5894,9 +5894,10 @@ Resolve deterministic object scopes across workspace graphs.
     - `ResolvedScope.to_dict`: to dict; returns `dict[str, object]`.
     - `resolve_scope`: Resolve one workspace selection without querying or mutating its graphs. Calls `validate_system_references`; raises `WorkspaceFailure`.
     - `intersect_scope_objects`: Apply one explicit object boundary without treating an empty set as unrestricted.
+    - `exclude_scope_graphs`: Drop whole graphs from a scope; the hash then describes the narrower boundary.
 - **Output:** returns `ResolvedScope`, `dict[str, list[str]]`, `dict[str, object]`
 - **Uses:** `tarel.graph.contracts`, `tarel.workspaces.contracts`, `tarel.workspaces.core`
-- **Used by:** `tarel.cli.workspace`, `tarel.context.application`, `tarel.sdk`, `tarel.sdk._scope`, `tarel.sdk.context`, `tarel.sdk.grounding`, `tarel.sdk.lineage`, `tarel.sdk.search`, `tarel.sdk.view`, `tarel.sdk.workspace`, `tarel.ui.payloads.families`, `tarel.ui.payloads.graph`, `tarel.workspaces`, `tarel.workspaces.application`, `tarel.workspaces.projection`, `tarel.workspaces.retrieval`
+- **Used by:** `tarel.cli.workspace`, `tarel.context.application`, `tarel.retrieval.search_application`, `tarel.sdk`, `tarel.sdk._scope`, `tarel.sdk.context`, `tarel.sdk.grounding`, `tarel.sdk.lineage`, `tarel.sdk.search`, `tarel.sdk.view`, `tarel.sdk.workspace`, `tarel.ui.payloads.families`, `tarel.ui.payloads.graph`, `tarel.workspaces`, `tarel.workspaces.application`, `tarel.workspaces.projection`, `tarel.workspaces.retrieval`
 
 ### `src/tarel/workspaces/store.py`
 

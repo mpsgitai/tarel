@@ -33,7 +33,12 @@ from tarel.workspaces.retrieval import (
     structural_signatures,
     validate_diversity,
 )
-from tarel.workspaces.scope import ResolvedScope, ResolvedScopeObject, ScopeSelection
+from tarel.workspaces.scope import (
+    ResolvedScope,
+    ResolvedScopeObject,
+    ScopeSelection,
+    exclude_scope_graphs,
+)
 
 
 class _State(TestCase):
@@ -236,6 +241,20 @@ class SearchDiversityTests(TestCase):
 
         self.assertEqual(len(combined.hits), 4)
         self.assertEqual(combined.duplicates_collapsed, 0)
+
+    def test_excluding_graphs_changes_the_scope_hash(self) -> None:
+        scope, _results = _search_fixture()
+        real = ResolvedScope(scope.workspace, scope.selection, scope.graph_names, scope.objects,
+                             "")
+        real = exclude_scope_graphs(real, ())
+
+        hashes = {
+            exclude_scope_graphs(real, excluded).scope_hash
+            for excluded in ((), ("ddl-a",), ("ddl-b",))
+        }
+
+        self.assertEqual(len(hashes), 3)
+        self.assertEqual(exclude_scope_graphs(real, ("ddl-a",)).graph_names, ("ddl-b", "mart"))
 
     def test_invalid_diversity_options_are_retryable(self) -> None:
         with self.assertRaises(SearchFailure) as raised:

@@ -40,6 +40,7 @@ from tarel.workspaces.retrieval import (
     structural_signatures,
     validate_diversity,
 )
+from tarel.workspaces.scope import exclude_scope_graphs
 
 
 def search_graph_use_case(
@@ -164,11 +165,7 @@ def search_workspace_use_case(
         if any(fnmatchcase(name, pattern) for pattern in exclude_graphs)
     )
     if excluded:
-        scope = replace(
-            scope,
-            graph_names=tuple(name for name in scope.graph_names if name not in excluded),
-            objects=tuple(item for item in scope.objects if item.graph not in excluded),
-        )
+        scope = exclude_scope_graphs(scope, excluded)
     selected_states = selected_annotation_states(
         annotation_states,
         validated_only=validated_only,
