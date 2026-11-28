@@ -514,6 +514,93 @@ def with_logical_context_hints(
     return _fit_character_budget(replace(result, logical_hints=hints.keep_first(lower)))
 
 
+def with_anomaly_signals(
+    result: ContextResult, anomaly_signals: dict[str, object]
+) -> ContextResult:
+    """Attach opt-in anomaly signals within ``max_characters`` without changing ``stable``."""
+    current = _with_character_counts(replace(result, anomaly_signals=anomaly_signals))
+    if current.context_characters <= current.max_characters:
+        return current
+
+    raw_objects = anomaly_signals.get("objects")
+    objects_map: dict[str, dict[str, object]] = (
+        {
+            key: dict(val)
+            for key, val in raw_objects.items()
+            if isinstance(key, str) and isinstance(val, dict)
+        }
+        if isinstance(raw_objects, dict)
+        else {}
+    )
+    raw_shifts = anomaly_signals.get("edge_shifts")
+    edge_shifts: list[object] = list(raw_shifts) if isinstance(raw_shifts, list) else []
+
+    def candidate(
+        objs: dict[str, dict[str, object]],
+        shifts: list[object],
+        *,
+        truncated: bool = True,
+    ) -> ContextResult:
+        payload: dict[str, object] = {
+            "edge_shifts": shifts,
+            "missing_graphs": list(anomaly_signals.get("missing_graphs", []))
+            if isinstance(anomaly_signals.get("missing_graphs"), list)
+            else [],
+            "objects": objs,
+            "observed_at": anomaly_signals.get("observed_at"),
+            "stale_graphs": list(anomaly_signals.get("stale_graphs", []))
+            if isinstance(anomaly_signals.get("stale_graphs"), list)
+            else [],
+            "truncated": truncated,
+        }
+        return _with_character_counts(replace(result, anomaly_signals=payload))
+
+    # Stage 1: drop verbose evidence_sql from findings while keeping summaries and metadata.
+    stripped: dict[str, dict[str, object]] = {}
+    for oid, entry in objects_map.items():
+        findings = entry.get("active_findings")
+        if isinstance(findings, list):
+            compact_findings = [
+                {k: v for k, v in f.items() if k != "evidence_sql"}
+                if isinstance(f, dict)
+                else f
+                for f in findings
+            ]
+            stripped[oid] = {**entry, "active_findings": compact_findings}
+        else:
+            stripped[oid] = dict(entry)
+    probe = candidate(stripped, edge_shifts)
+    if probe.context_characters <= probe.max_characters:
+        return probe
+
+    # Stage 2: prioritize anomalous and empty objects first; trim findings/shifts/objects to fit.
+    def priority(item: tuple[str, dict[str, object]]) -> tuple[int, str]:
+        state = item[1].get("state")
+        rank = 0 if state == "anomalous" else 1 if state == "empty" else 2
+        return (rank, item[0])
+
+    ordered = sorted(stripped.items(), key=priority)
+    kept_objects: dict[str, dict[str, object]] = {}
+    for oid, entry in ordered:
+        trial = {**kept_objects, oid: entry}
+        if candidate(trial, []).context_characters <= result.max_characters:
+            kept_objects = trial
+            continue
+        # If even one anomalous object is too large due to findings, keep its state summary.
+        compact_entry = {**entry, "active_findings": []}
+        trial_compact = {**kept_objects, oid: compact_entry}
+        if candidate(trial_compact, []).context_characters <= result.max_characters:
+            kept_objects = trial_compact
+
+    kept_shifts: list[object] = []
+    for shift in edge_shifts:
+        trial_shift = candidate(kept_objects, [*kept_shifts, shift])
+        if trial_shift.context_characters <= result.max_characters:
+            kept_shifts.append(shift)
+
+    return candidate(kept_objects, kept_shifts)
+
+
 def _trim_context(result: ContextResult) -> ContextResult | None:
     if result.logical_hints is not None and result.logical_hints.items:
         return replace(result, logical_hints=result.logical_hints.trim_last())

@@ -661,6 +661,12 @@
       {selector: "node.health-orphan", style: {"border-color": t.warn, "border-width": far ? 5 : 3, "underlay-color": t.warn, "underlay-opacity": .16, "underlay-padding": 6}},
       {selector: "node.health-isolated-unannotated", style: {"border-style": "dotted", "border-color": t.err, "border-width": far ? 4.5 : 3}},
       {selector: "node.health-ok", style: {"border-color": t.ok, "border-width": far ? 4.5 : 2.5}},
+      {selector: "node.pulse-anomalous", style: {"border-color": t.err, "border-width": far ? 5.5 : 3.5, "underlay-color": t.err, "underlay-opacity": .18, "underlay-padding": 7}},
+      {selector: "node.pulse-downstream", style: {"border-style": "dashed", "border-color": t.warn, "border-width": far ? 4.5 : 2.5, "underlay-color": t.warn, "underlay-opacity": .12, "underlay-padding": 5}},
+      {selector: "node.pulse-active", style: {"border-color": t.ok, "border-width": far ? 4.5 : 2.2}},
+      {selector: "node.pulse-static", style: {"border-color": t.ink3, "border-width": far ? 3.5 : 1.6}},
+      {selector: "node.pulse-empty", style: {"border-style": "dashed", "border-color": t.ink3, "border-width": far ? 4.5 : 2.2, "opacity": .6}},
+      {selector: "edge[anomalyShift]", style: {"line-color": t.warn, "target-arrow-color": t.warn, "width": far ? 2.4 : 3.2, "opacity": 1, "label": "data(shiftLabel)", "color": "#fef3c7", "font-size": 10, "font-weight": 700, "text-background-color": "#78350f", "text-background-opacity": .92, "text-background-padding": 3, "text-background-shape": "roundrectangle", "text-border-color": t.warn, "text-border-width": 1, "text-border-opacity": .85}},
     ];
   }
 
@@ -867,6 +873,11 @@
       card.classList.toggle("health-ok", node.hasClass("health-ok"));
       card.classList.toggle("health-filter-match", node.hasClass("health-filter-match"));
       card.classList.toggle("health-filter-dim", node.hasClass("health-filter-dim"));
+      card.classList.toggle("pulse-anomalous", node.hasClass("pulse-anomalous"));
+      card.classList.toggle("pulse-downstream", node.hasClass("pulse-downstream"));
+      card.classList.toggle("pulse-active", node.hasClass("pulse-active"));
+      card.classList.toggle("pulse-static", node.hasClass("pulse-static"));
+      card.classList.toggle("pulse-empty", node.hasClass("pulse-empty"));
     });
     for (const [id, card] of ui.cards) if (!wanted.has(id)) { card.remove(); ui.cards.delete(id); }
   }

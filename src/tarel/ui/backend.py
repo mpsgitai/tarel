@@ -10,6 +10,7 @@ from typing import Any
 
 from tarel.annotations.application import decide_annotation_use_case, edit_annotation_use_case
 from tarel.annotations.contracts import AnnotationFailure
+from tarel.anomaly_signals import load_anomaly_signals_for_graphs, resolve_anomaly_dir
 from tarel.discovery.coverage_application import list_query_linked_coverages_use_case
 from tarel.entity_resolution.application import find_entity_resolution_candidates_for_graph_use_case
 from tarel.focus.application import list_focuses_use_case, load_focus_use_case
@@ -110,6 +111,7 @@ class TarelUIBackend:
     def __init__(self, config: UIConfig, *, runtime: TarelRuntime | None = None) -> None:
         self.config = config
         self.runtime = runtime
+        self._anomaly_enabled = bool(config.anomaly or config.anomaly_dir is not None)
         self._lineages = list(config.lineages)
         self._flow_objects: list[dict[str, Any]] | None = None
         self._flow_cache: tuple[object, LineageFlowModel] | None = None
@@ -154,7 +156,12 @@ class TarelUIBackend:
     ) -> dict[str, Any]:
         names = self.config.focuses if focus_names is None else focus_names
         fallback_reason = "workspace_requires_full_projection"
-        if family_mode is not None and not self.config.workspace and not derived:
+        if (
+            family_mode is not None
+            and not self.config.workspace
+            and not derived
+            and not self._anomaly_enabled
+        ):
             from tarel.ui.lazy_family_view import try_lazy_family_graph_view_use_case
 
             attempted = try_lazy_family_graph_view_use_case(
@@ -204,6 +211,14 @@ class TarelUIBackend:
         ) if names else ()
         documents = tuple(
             load_lineage_use_case(name, runtime=self.runtime) for name in self._lineages
+        )
+        anomaly_signals = (
+            load_anomaly_signals_for_graphs(
+                graphs,
+                anomaly_dir=resolve_anomaly_dir(self.runtime, self.config.anomaly_dir),
+            )
+            if self._anomaly_enabled
+            else None
         )
         if workspace is not None and scope is not None:
             families = (
@@ -262,6 +277,7 @@ class TarelUIBackend:
                 object_families=families.families if families else (),
                 object_family_stale_graphs=families.stale_graphs if families else (),
                 focus_documents=selected_focuses if family_mode is not None else (),
+                anomaly_signals=anomaly_signals,
             )
         else:
             families = (
@@ -309,6 +325,7 @@ class TarelUIBackend:
                 object_families=families.families if families else (),
                 object_family_stale_graphs=families.stale_graphs if families else (),
                 focus_documents=selected_focuses if family_mode is not None else (),
+                anomaly_signals=anomaly_signals,
             )
         payload["focuses"] = browser_focus_catalog(
             focus_documents,

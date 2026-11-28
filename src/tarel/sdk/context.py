@@ -173,6 +173,8 @@ class ContextAPI(RuntimeAPI):
         object_ids: tuple[str, ...] = (),
         scope_object_ids: tuple[str, ...] = (),
         focuses: tuple[str, ...] = (),
+        include_anomaly: bool = False,
+        anomaly_dir: str | Path | None = None,
     ) -> ContextResult:
         return compile_context_use_case(
             name,
@@ -194,6 +196,8 @@ class ContextAPI(RuntimeAPI):
             object_ids=object_ids,
             scope_object_ids=scope_object_ids,
             focuses=focuses,
+            include_anomaly=include_anomaly,
+            anomaly_dir=optional_path(anomaly_dir),
             runtime=self._runtime,
         )
 
@@ -224,6 +228,8 @@ class ContextAPI(RuntimeAPI):
         validated_only: bool = False,
         logical_hints: str | None = None,
         object_ids: tuple[str, ...] = (),
+        include_anomaly: bool = False,
+        anomaly_dir: str | Path | None = None,
     ) -> ContextResult:
         focus_names = workspace_focuses(selection, focuses)
         systems, graphs, areas, schemas, zones = workspace_scope_arguments(
@@ -258,5 +264,7 @@ class ContextAPI(RuntimeAPI):
             validated_only=validated_only,
             logical_hints=logical_hints,
             object_ids=object_ids,
+            include_anomaly=include_anomaly,
+            anomaly_dir=optional_path(anomaly_dir),
             runtime=self._runtime,
         )

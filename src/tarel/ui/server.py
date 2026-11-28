@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from tarel.annotations.contracts import AnnotationFailure
+from tarel.anomaly_signals import AnomalySignalsError
 from tarel.context.compiler import ContextFailure
 from tarel.entity_resolution.contracts import EntityResolutionFailure
 from tarel.expansion.contracts import ContextExpansionFailure
@@ -142,7 +143,7 @@ class _Handler(BaseHTTPRequestHandler):
             "estate_navigation.js",
             "architecture.js", "architecture_actions.js", "architecture.css",
             "atlas.css", "atlas.js", "lineage_flows.js",
-            "health_signals.js", "compact_retrieval.js", "system_blocks.js",
+            "health_signals.js", "anomaly_signals.js", "compact_retrieval.js", "system_blocks.js",
         }:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -193,6 +194,8 @@ def run_ui(
     family_mode: str | None = None,
     architecture_file: Path | None = None,
     architecture_edit: bool = False,
+    anomaly: bool = False,
+    anomaly_dir: Path | None = None,
     port: int = 0,
     open_browser: bool = True,
     search_mode: str = "lexical",
@@ -223,6 +226,8 @@ def run_ui(
             family_mode=family_mode,
             architecture_file=architecture_file,
             architecture_edit=architecture_edit,
+            anomaly=anomaly,
+            anomaly_dir=anomaly_dir,
             search_mode=search_mode,
             model_path=model_path,
             n_threads=n_threads,
@@ -231,7 +236,7 @@ def run_ui(
     )
     try:
         backend.bootstrap()
-    except ArchitectureFailure as exc:
+    except (ArchitectureFailure, AnomalySignalsError) as exc:
         raise _ui_failure(exc) from exc
     server = _Server(("127.0.0.1", port), backend, secrets.token_urlsafe(32))
     address = f"http://127.0.0.1:{server.server_port}/"
@@ -263,6 +268,7 @@ def _ui_failure(exc: Exception) -> UIFailure:
         exc,
         (
             AnnotationFailure,
+            AnomalySignalsError,
             ContextFailure,
             ContextExpansionFailure,
             EntityResolutionFailure,

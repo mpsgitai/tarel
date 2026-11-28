@@ -81,6 +81,16 @@ def register(subcommands: Subcommands) -> None:
     add_annotation_state_arguments(context_build)
     add_logical_hint_arguments(context_build)
     context_build.add_argument(
+        "--include-anomaly",
+        action="store_true",
+        help="Attach opt-in anomaly signals from .tarel/anomaly/ to the dynamic packet.",
+    )
+    context_build.add_argument(
+        "--anomaly-dir",
+        type=Path,
+        help="Explicit directory of <graph>.signals.json sidecars (implies --include-anomaly).",
+    )
+    context_build.add_argument(
         "--brief", action="store_true",
         help="Print only compact orientation, coverage, gaps, and continuity identity.",
     )
@@ -244,6 +254,9 @@ def _render_context(
     if result.logical_hints is not None:
         print("Logical hint omissions and warnings:")
         print(canonical_json(result.logical_hints.dynamic_dict()))
+    if result.anomaly_signals is not None:
+        print("Anomaly signals:")
+        print(canonical_json(result.anomaly_signals))
     if result.paths:
         print("Expansion paths:")
         for path in result.paths:
@@ -320,6 +333,8 @@ def _run_build(args: argparse.Namespace) -> int:
         ),
         "validated_only": args.validated_only,
         "object_ids": tuple(args.object_ids or ()),
+        "include_anomaly": bool(args.include_anomaly or args.anomaly_dir is not None),
+        "anomaly_dir": args.anomaly_dir,
     }
     require_graph_or_workspace(args)
     if args.workspace:

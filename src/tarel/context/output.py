@@ -251,6 +251,9 @@ class ContextPacket:
     # Limits of the vectors behind this selection. They describe this retrieval, not the metadata,
     # so they stay out of the stable part and its reusable hash.
     retrieval_warnings: tuple[str, ...] = ()
+    # Opt-in data-pulse and anomaly signals belong strictly to the dynamic part so stable_hash
+    # and reusable prompt prefixes never change when signals are attached.
+    anomaly_signals: dict[str, object] | None = None
 
     def stable_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -292,6 +295,8 @@ class ContextPacket:
         }
         if self.logical_hints is not None:
             payload["logical_hints"] = self.logical_hints.dynamic_dict()
+        if self.anomaly_signals is not None:
+            payload["anomaly_signals"] = self.anomaly_signals
         return payload
 
     def to_dict(self) -> dict[str, object]:

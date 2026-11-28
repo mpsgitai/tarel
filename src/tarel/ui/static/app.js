@@ -140,6 +140,7 @@ function renderAll() {
   $("#toggle-derived-relations").title = state.familyMode ? "Family view owns its logical projection. Switch to physical objects to change this layer." : "Read logical-topology metadata on demand; no execution.";
   renderLogicalTopologyNotices();
   renderFamilyNotices();
+  if (typeof syncAnomalyUI === "function") syncAnomalyUI();
   if (typeof renderHealthFilterBar === "function") renderHealthFilterBar();
   renderObjectList();
   renderFocuses();
@@ -226,12 +227,13 @@ function renderObjectList(resetLimit = true) {
     const ref = !logical && typeof objectContextRef === "function" ? objectContextRef(item) : "";
     const checked = ref && typeof queryTools !== "undefined" && queryTools.selectedObjects.has(ref);
     const micro = typeof healthMicroBadges === "function" ? healthMicroBadges(item) : "";
+    const spark = typeof anomalyListSparkline === "function" ? anomalyListSparkline(item) : "";
     return `
     <div class="object-row${item.id === state.selectedId ? " is-active" : ""}" data-object="${escapeAttr(item.id)}" role="button" tabindex="0" draggable="${logical ? "false" : "true"}">
       ${logical ? '<span class="hit-check-spacer"></span>' : `<input type="checkbox" class="row-check" data-object-check="${escapeAttr(ref)}" aria-label="Select ${escapeAttr(item.name)} for context" ${checked ? "checked" : ""} />`}
       <span class="kind-icon">${family ? "F" : logical ? "D" : item.type === "view" ? "V" : "T"}</span>
       <span class="object-copy"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.graph)} · ${escapeHtml(item.namespace)} · ${item.fields.length} fields${family ? ` · ${item.object_family.member_count} members` : ""}${memberships.length ? ` · ${memberships.length} focus${memberships.length === 1 ? "" : "es"}` : ""}</small></span>
-      <span class="row-tail">${micro}<i class="state-dot ${escapeAttr(objectState)}" title="${escapeAttr(objectState)}"></i></span>
+      <span class="row-tail">${spark}${micro}<i class="state-dot ${escapeAttr(objectState)}" title="${escapeAttr(objectState)}"></i></span>
     </div>`;
   }).join("") + (remaining > 0
     ? `<div class="list-more-row"><button id="load-more-objects" type="button" class="quiet-button">Show ${Math.min(200, remaining).toLocaleString()} more · ${remaining.toLocaleString()} remaining</button></div>`
@@ -574,6 +576,12 @@ function renderGraph() {
       {selector: ".health-ok", style: {"border-color": "#10b981", "border-width": 2}},
       {selector: ".health-filter-dim", style: {"opacity": .2}},
       {selector: ".health-filter-match", style: {"opacity": 1, "border-width": 3}},
+      {selector: ".pulse-anomalous", style: {"border-color": "#f43f5e", "border-width": 3.5, "background-color": "#2b161d"}},
+      {selector: ".pulse-downstream", style: {"border-color": "#f59e0b", "border-style": "dashed", "border-width": 2.5}},
+      {selector: ".pulse-active", style: {"border-color": "#10b981", "border-width": 2}},
+      {selector: ".pulse-static", style: {"border-color": "#64748b", "border-width": 1.5}},
+      {selector: ".pulse-empty", style: {"border-style": "dashed", "border-color": "#94a3b8", "border-width": 2, "opacity": .52}},
+      {selector: "edge[anomalyShift]", style: {"line-color": "#f59e0b", "target-arrow-color": "#f59e0b", "width": 3.5, "label": "data(shiftLabel)", "color": "#fef3c7", "font-size": 10, "font-weight": 700, "text-background-color": "#78350f", "text-background-opacity": .92, "text-background-padding": 3, "text-background-shape": "roundrectangle", "text-border-color": "#f59e0b", "text-border-width": 1, "text-border-opacity": .85}},
     ],
   });
   bindCanvasZoom();
@@ -746,6 +754,7 @@ function renderInspector() {
   $("#inspector").innerHTML = `
     ${inspectorHeading(`${item.type} · ${item.graph} · ${item.namespace}`, item.name, item.label, item.id)}
     ${typeof healthInspectorSummary === "function" ? healthInspectorSummary(item) : ""}
+    ${typeof anomalyInspectorSection === "function" ? anomalyInspectorSection(item) : ""}
     ${typeof inspectorSearchMatchCard === "function" ? inspectorSearchMatchCard(item) : ""}
     ${sourceChangeNotice(item.source_change)}
     ${annotation ? `<section class="detail-section tarel-semantics"><h3>TAREL annotation</h3><p class="description">${escapeHtml(annotation.description)}</p>
@@ -759,6 +768,7 @@ function renderInspector() {
     ${relationshipList(relationships)}`;
   $$('[data-related-object]').forEach(button => button.addEventListener("click", () => selectObject(button.dataset.relatedObject)));
   $$(".field-quick-annotation").forEach(form => form.addEventListener("submit", saveQuickFieldAnnotation));
+  if (typeof bindAnomalyInspectorEvents === "function") bindAnomalyInspectorEvents(item);
   mountOptionalInformation(item);
 }
 
