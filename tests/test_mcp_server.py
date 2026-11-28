@@ -494,6 +494,23 @@ class TestTarelMcpServer(unittest.TestCase):
             denied = dispatcher.focus(action="list")
             self.assertEqual(denied["status"], "error")
             self.assertEqual(denied["code"], "wall_blocked")
+            # after_tool_call runs on structured error responses too (for audit/redaction)
+            self.assertTrue(denied["policy_audited"])
+            self.assertIn("after:tarel_focus", audit_log)
+
+            # Upstream limit enforcement
+            capped_up = dispatcher.lineage_trace(
+                mode="upstream",
+                reference="main.vw_revenue_by_region",
+                lineages=["retail-etl"],
+                graphs=["retail"],
+                limit=1,
+            )
+            self.assertEqual(capped_up["status"], "ok")
+            self.assertEqual(capped_up["returned_hops"], 1)
+            self.assertEqual(capped_up["total_hops"], 2)
+            self.assertEqual(capped_up["omitted_hops"], 1)
+            self.assertTrue(capped_up["truncated"])
 
             allowed = dispatcher.catalog_overview()
             self.assertEqual(allowed["status"], "ok")

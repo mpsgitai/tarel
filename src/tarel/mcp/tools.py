@@ -120,10 +120,14 @@ class TarelMcpDispatcher:
                     )
                 if decision.override_args is not None:
                     effective_args = dict(decision.override_args)
-            result = handler(effective_args)
-            return self.policy_hook.after_tool_call(ctx, result)
+            payload = handler(effective_args)
         except Exception as exc:
-            return format_mcp_error(exc)
+            payload = format_mcp_error(exc)
+
+        try:
+            return self.policy_hook.after_tool_call(ctx, payload)
+        except Exception as hook_exc:
+            return format_mcp_error(hook_exc)
 
     # ------------------------------------------------------------------
     # Tool 1: tarel_catalog_overview
@@ -672,6 +676,7 @@ class TarelMcpDispatcher:
             graph=graph_name,
             workspace=ws_name,
             lineages=lineage_names,
+            sources=(source,) if source is not None else (),
             seed_limit=min(3, max_obj),
             max_objects=max_obj,
             max_characters=max_chars,
@@ -786,6 +791,13 @@ class TarelMcpDispatcher:
         )
         ws_name = _optional_str(args.get("workspace"))
 
+        limit_val, limit_clamped = clamp_int(
+            args.get("limit", DEFAULT_LINEAGE_LIMIT),
+            minimum=1,
+            maximum=MAX_LINEAGE_LIMIT,
+            field_name="limit",
+        )
+
         if mode == "upstream":
             if ws_name is not None and not graph_names:
                 trace = self._client.lineage.upstream_workspace(
@@ -801,25 +813,45 @@ class TarelMcpDispatcher:
                     graphs=graph_names,
                     max_hops=max_hops_val,
                 )
+            trace_dict = trace.to_dict()
+            all_hops = trace_dict["hops"]
+            all_origins = trace_dict["origins"]
+            assert isinstance(all_hops, list) and isinstance(all_origins, list)
+            omitted_hops = max(0, len(all_hops) - limit_val)
+            omitted_origins = max(0, len(all_origins) - limit_val)
+            truncated = bool(
+                trace.truncated
+                or limit_clamped
+                or omitted_hops > 0
+                or omitted_origins > 0
+            )
+            capped_hops = all_hops[:limit_val]
+            capped_origins = all_origins[:limit_val]
+            trace_dict["hops"] = capped_hops
+            trace_dict["origins"] = capped_origins
+            trace_dict["truncated"] = truncated
             return {
                 "status": "ok",
                 "mode": "upstream",
                 "lineages": list(lineage_names),
                 "graphs": list(graph_names),
-                "truncated": trace.truncated,
-                "trace": trace.to_dict(),
+                "limit": limit_val,
+                "returned_hops": len(capped_hops),
+                "total_hops": len(all_hops),
+                "omitted_hops": omitted_hops,
+                "omitted_origins": omitted_origins,
+                "truncated": truncated,
+                "trace": trace_dict,
             }
 
-        # mode == "downstream": forward BFS over lineage table edges
-        limit_val, limit_clamped = clamp_int(
-            args.get("limit", DEFAULT_LINEAGE_LIMIT),
-            minimum=1,
-            maximum=MAX_LINEAGE_LIMIT,
-            field_name="limit",
-        )
+        # mode == "downstream": forward BFS over scope- and alias-aware lineage table edges
+        resolved_graphs = graph_names
+        if ws_name is not None and not resolved_graphs:
+            resolved_graphs = self._client.workspace.scope(ws_name).graph_names
         return self._trace_downstream(
             reference=reference,
             lineage_names=lineage_names,
+            graph_names=resolved_graphs,
             max_hops=max_hops_val,
             limit=limit_val,
             limit_clamped=limit_clamped,
@@ -859,20 +891,25 @@ class TarelMcpDispatcher:
         *,
         reference: str,
         lineage_names: tuple[str, ...],
+        graph_names: tuple[str, ...],
         max_hops: int,
         limit: int,
         limit_clamped: bool,
     ) -> dict[str, Any]:
+        alias_map = self._build_catalog_alias_map(graph_names)
         needle = reference.strip().casefold()
+        needle_canonical = alias_map.get(needle)
         adjacency: dict[tuple[str, ...], list[dict[str, Any]]] = {}
         canonical_names: dict[tuple[str, ...], str] = {}
         for lineage_name in lineage_names:
             for table_item in self._client.lineage.tables(lineage_name):
                 src = table_item.source
                 target = table_item.target
-                src_key = _scoped_downstream_key(lineage_name, table_item.via_definition, src)
+                src_key = _scoped_downstream_key(
+                    lineage_name, table_item.via_definition, src, alias_map
+                )
                 target_key = _scoped_downstream_key(
-                    lineage_name, table_item.via_definition, target
+                    lineage_name, table_item.via_definition, target, alias_map
                 )
                 canonical_names.setdefault(src_key, src)
                 canonical_names.setdefault(target_key, target)
@@ -892,7 +929,7 @@ class TarelMcpDispatcher:
         start_keys = [
             key
             for key in adjacency
-            if _downstream_key_matches(key, needle)
+            if _downstream_key_matches(key, needle, needle_canonical)
         ]
         if not start_keys:
             return {
@@ -949,6 +986,28 @@ class TarelMcpDispatcher:
             "returned_count": len(hops),
             "total_count": len(hops),
             "truncated": truncated,
+        }
+
+    def _build_catalog_alias_map(self, graph_names: tuple[str, ...]) -> dict[str, str]:
+        """Map qualified & unqualified catalog spellings to canonical graph object IDs."""
+        alias_candidates: dict[str, set[str]] = {}
+        for graph_name in graph_names:
+            doc = self._client.graph.load(graph_name)
+            catalog = doc.catalog.strip().casefold()
+            for node in doc.nodes:
+                if node.type not in {"table", "view"}:
+                    continue
+                canonical = f"{graph_name}:{node.id}"
+                label = node.label.strip().casefold()
+                spellings = {label, node.id.strip().casefold()}
+                if catalog and not label.startswith(f"{catalog}."):
+                    spellings.add(f"{catalog}.{label}")
+                for spelling in spellings:
+                    alias_candidates.setdefault(spelling, set()).add(canonical)
+        return {
+            spelling: next(iter(targets))
+            for spelling, targets in alias_candidates.items()
+            if len(targets) == 1
         }
 
     # ------------------------------------------------------------------
@@ -1290,14 +1349,25 @@ def _scoped_downstream_key(
     lineage_name: str,
     via_definition: str,
     reference: str,
+    alias_map: dict[str, str],
 ) -> tuple[str, ...]:
-    """Keep temporary tables scoped to their lineage document and definition."""
+    """Keep temporary tables scoped and resolve catalog aliases for persistent tables."""
+    cleaned = reference.strip().casefold()
     scope = temporary_scope(reference)
     if scope is not None:
-        return ("temp", lineage_name, via_definition, scope, reference.strip().casefold())
-    return ("persistent", reference.strip().casefold())
+        return ("temp", lineage_name, via_definition, scope, cleaned)
+    canonical = alias_map.get(cleaned)
+    if canonical is not None:
+        return ("catalog", canonical)
+    return ("persistent", cleaned)
 
 
-def _downstream_key_matches(key: tuple[str, ...], needle: str) -> bool:
+def _downstream_key_matches(
+    key: tuple[str, ...],
+    needle: str,
+    needle_canonical: str | None,
+) -> bool:
+    if key[0] == "catalog" and needle_canonical is not None and key[1] == needle_canonical:
+        return True
     name = key[-1]
     return name == needle or name.endswith(f".{needle}") or needle.endswith(f".{name}")
