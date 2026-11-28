@@ -97,7 +97,9 @@ def measure_coverage(
         if isinstance(grain_value, str) and grain_value.strip():
             grain += 1
         if annotation is None:
-            fields = field_counts.setdefault(graph.name, _field_counts(graph))
+            if graph.name not in field_counts:
+                field_counts[graph.name] = _field_counts(graph)
+            fields = field_counts[graph.name]
             row_count = node.metadata.get("row_count")
             missing.append(
                 UnannotatedObject(

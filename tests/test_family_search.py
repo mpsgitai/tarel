@@ -173,3 +173,19 @@ class FamilyNameSearchTests(TestCase):
                 family_mode="include_candidates",
             ).to_dict(),
         )
+
+
+    def test_per_graph_cap_also_covers_family_hits(self) -> None:
+        workspace = define_system(
+            create_workspace("estate"), "sales", graph_names=("commerce",),
+            graphs={"commerce": self.graph},
+        )
+        self.sdk.runtime.workspace_store().save(workspace)
+
+        result = self.sdk.search.workspace(
+            "estate", "sales", family_mode="include_candidates",
+            diversity="per_graph", max_per_graph=1,
+        )
+
+        self.assertEqual(len([hit for hit in result.hits if hit.source_graph == "commerce"]), 1)
+        self.assertGreater(dict(result.omitted_by_diversity)["commerce"], 0)

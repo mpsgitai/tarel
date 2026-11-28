@@ -14,6 +14,7 @@ from test_focus import _fixture
 from tarel.annotations.coverage import measure_coverage
 from tarel.cli import main
 from tarel.cli._pretty import Pretty, render_error, visible_len
+from tarel.cli._pretty_lineage import render_lineage
 from tarel.cli._terminal import Style
 from tarel.errors import TarelError
 from tarel.graph.contracts import GraphAnnotation
@@ -82,6 +83,27 @@ class PrimitiveTests(TestCase):
                 "     └─ reads shared  (see above)",
             ],
         )
+
+    def test_branches_through_a_folded_cycle_stay_attached(self) -> None:
+        payload = {
+            "direction": "up", "start": "A", "summary": {"nodes": 4, "edges": 2},
+            "nodes": {key: {"kind": "table"} for key in "ABCD"},
+            "edges": [
+                {"d": 2, "rel": "derived_from", "from": "D", "to": "B"},
+                {"d": 3, "rel": "derived_from", "from": "C", "to": "D"},
+            ],
+            "cycles": [{"members": ["A", "B"], "internal_edges": 2}],
+            "origins": ["C"], "warnings": [],
+        }
+        output = _Utf8Buffer()
+        with mock.patch.dict(os.environ, {"COLUMNS": "80"}), redirect_stdout(output):
+            render_lineage(payload)
+
+        text = output.getvalue()
+        self.assertIn("↻ same cycle as B [table]", text)
+        self.assertIn("derived_from ← D [table]", text)
+        self.assertIn("derived_from ← C [table]", text)
+        self.assertNotIn("no edges in this direction", text)
 
     def test_ascii_fallback_uses_only_ascii(self) -> None:
         page = Pretty(_ASCII, 60)

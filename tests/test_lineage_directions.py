@@ -120,6 +120,23 @@ class BatchTests(TestCase):
              "without_lineage": 1},
         )
 
+    def test_batch_keeps_warnings_that_belong_to_one_reference(self) -> None:
+        graph, lineage = _fixture()
+        batch = trace_lineage_batch(
+            (lineage,), (graph,), ("Demo.mart.Sales", "Demo.raw.Sales"), direction="down",
+        )
+        hidden = "Downstream may be incomplete: x in lineage y is ambiguous and may refer to z."
+        first, second = batch.traces
+        batch = replace(
+            batch, traces=(first, replace(second, warnings=(*second.warnings, hidden))),
+        )
+
+        compact = compact_batch_dict(batch)
+
+        self.assertIn(hidden, compact["reference_warnings"]["Demo.raw.Sales"])
+        self.assertNotIn(hidden, compact["reference_warnings"].get("Demo.mart.Sales", []))
+        self.assertNotIn(hidden, compact.get("warnings", []))
+
     def test_duplicate_references_are_rejected(self) -> None:
         graph, lineage = _fixture()
 

@@ -13,7 +13,6 @@ Two optional, deterministic passes run after ranking and before the limit:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import replace
 
@@ -77,7 +76,7 @@ def combine_workspace_search(
         ordered, collapsed = _collapse_duplicates(ordered, signatures)
     omitted: dict[str, int] = {}
     if diversity == "per_graph":
-        ordered, omitted = _per_graph(ordered, max_per_graph or DEFAULT_MAX_PER_GRAPH)
+        ordered, omitted = cap_per_graph(ordered, max_per_graph or DEFAULT_MAX_PER_GRAPH)
     ranked = tuple(ordered[:limit])
     terms = tuple(sorted({term for result in results for term in result.terms}))
     return SearchResults(
@@ -138,7 +137,8 @@ def structural_signatures(
 
 
 def _normalized(value: str) -> str:
-    return re.sub(r"[^0-9a-z]", "", value.casefold())
+    """Lowercase letters and digits of any script; punctuation, spaces and case are ignored."""
+    return "".join(character for character in value.casefold() if character.isalnum())
 
 
 def _collapse_duplicates(
@@ -163,7 +163,8 @@ def _collapse_duplicates(
     return kept, collapsed
 
 
-def _per_graph(hits: list[SearchHit], cap: int) -> tuple[list[SearchHit], dict[str, int]]:
+def cap_per_graph(hits: list[SearchHit], cap: int) -> tuple[list[SearchHit], dict[str, int]]:
+    """Keep the first ``cap`` hits of each graph in rank order; count the rest per graph."""
     counts: dict[str, int] = {}
     omitted: dict[str, int] = {}
     kept = []

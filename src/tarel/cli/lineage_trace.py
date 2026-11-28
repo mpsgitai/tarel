@@ -261,6 +261,13 @@ def _run_batch(args: argparse.Namespace) -> int:
     errors = payload.get("errors")
     for reference, error in (errors.items() if isinstance(errors, dict) else ()):
         print(f"{reference}: error [{error['code']}] {error['message']}")
+    notes = payload.get("reference_warnings")
+    for reference, items in (notes.items() if isinstance(notes, dict) else ()):
+        for item in items:
+            print(f"{reference}: warning: {item}")
+    shared = payload.get("warnings")
+    for item in shared if isinstance(shared, list) else ():
+        print(f"warning: {item}")
     print(f"summary: {payload['summary']}")
     return 0
 

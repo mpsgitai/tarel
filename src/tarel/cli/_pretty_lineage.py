@@ -36,14 +36,15 @@ def render_lineage(payload: Mapping[str, Any]) -> None:
         if direction == "both":
             page.section("Upstream")
         page.add()
-        _tree(page, start, [item for item in edges if item.get("dir") != "down"], nodes, up=True)
+        upstream = [item for item in edges if item.get("dir") != "down"]
+        _tree(page, start, upstream, nodes, up=True, cycles=payload.get("cycles", ()))
     if direction in {"down", "both"}:
         if direction == "both":
             page.section("Downstream")
         page.add()
         # Only a "both" trace marks its downstream rows; a "down" trace has no other rows.
         down = edges if direction == "down" else [item for item in edges if item.get("dir")]
-        _tree(page, start, down, nodes, up=False)
+        _tree(page, start, down, nodes, up=False, cycles=payload.get("cycles", ()))
     _node_list(page, "Origins", payload.get("origins", ()), nodes)
     _node_list(page, "Impacts", payload.get("impacts", ()), nodes)
     _cycles(page, payload.get("cycles", ()))
@@ -79,7 +80,10 @@ def render_focus(payload: Mapping[str, Any]) -> None:
     page.summary([f"sources: {', '.join(payload.get('sources', ()))}"])
     page.section("Lineage flow")
     page.add()
-    _tree(page, start, list(payload.get("edges", ())), nodes, up=True)
+    _tree(
+        page, start, list(payload.get("edges", ())), nodes, up=True,
+        cycles=payload.get("cycles", ()),
+    )
     _node_list(page, "Origins", payload.get("origins", ()), nodes, limit=12)
     _cycles(page, payload.get("cycles", ()))
     page.footer(
@@ -136,7 +140,18 @@ def render_batch(payload: Mapping[str, Any]) -> None:
             ],
             stylers={1: page.style.bad},
         )
-    page.footer(_facts(payload), hints=["tarel lineage trace REF for one tree with evidence"])
+    notes: Mapping[str, Any] = payload.get("reference_warnings", {})
+    if notes:
+        page.section("Warnings per reference", len(notes))
+        for reference, items in notes.items():
+            page.add(f"  {page.style.bold(reference)}")
+            for item in items:
+                page.text(f"{page.style.symbol('warn')} {item}", indent=4, styler=page.style.warn)
+    page.footer(
+        _facts(payload),
+        warnings=[str(item) for item in payload.get("warnings", ())],
+        hints=["tarel lineage trace REF for one tree with evidence"],
+    )
     page.emit()
 
 
@@ -147,6 +162,7 @@ def _tree(
     nodes: Mapping[str, Mapping[str, Any]],
     *,
     up: bool,
+    cycles: Any = (),
 ) -> None:
     children: dict[str, list[tuple[str, str, str]]] = {}
     arrow = page.style.symbol("left" if up else "right")
@@ -161,6 +177,15 @@ def _tree(
             notes.append(f"x{edge['edge_count']}")
         relation = page.style.dim(f"{edge['rel']} {arrow}")
         children.setdefault(str(parent), []).append((relation, str(child), "  ".join(notes)))
+    # A folded cycle drops the edges between its members, so the members are linked here again;
+    # otherwise branches entering the cycle elsewhere would hang loose from the start.
+    link = page.style.dim(f"{page.style.symbol('cycle')} same cycle as")
+    for cycle in cycles:
+        members = [str(item) for item in cycle.get("members", ())]
+        for member in members:
+            children.setdefault(member, []).extend(
+                (link, other, "") for other in members if other != member
+            )
     if not children.get(start):
         page.add("  " + _label(page, start, nodes))
         page.text("no edges in this direction", indent=4, styler=page.style.dim)

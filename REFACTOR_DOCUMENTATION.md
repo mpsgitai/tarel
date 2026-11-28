@@ -5845,12 +5845,13 @@ Deterministic in-memory graph projection for one resolved workspace scope.
 
 Pure aggregation of per-graph retrieval results for one workspace scope.
 
-- **Input:** parameters `diversity: str`, `graph: GraphDocument`, `limit: int`, `max_per_graph: int | None`, `mode: str`, `object_ids: frozenset[str]`, `query: str`, `results: tuple[SearchResults, ...]`, `scope: ResolvedScope`, `signatures: Mapping[tuple[str, str], str] | None`
+- **Input:** parameters `cap: int`, `diversity: str`, `graph: GraphDocument`, `hits: list[SearchHit]`, `limit: int`, `max_per_graph: int | None`, `mode: str`, `object_ids: frozenset[str]`, `query: str`, `results: tuple[SearchResults, ...]`, `scope: ResolvedScope`, `signatures: Mapping[tuple[str, str], str] | None`
 - **Processing:**
     - `combine_workspace_search`: combine workspace search; returns `SearchResults`. Calls `SearchResults`, `workspace_graph_name`, `SearchHit`, `scoped_node_id`, `FieldSearchHit`.
     - `validate_diversity`: validate diversity; returns `None`. Raises `SearchFailure`.
     - `structural_signatures`: Object name plus sorted column names, lowercased and stripped of non-alphanumerics.
-- **Output:** returns `SearchResults`, `dict[str, str]`
+    - `cap_per_graph`: Keep the first ``cap`` hits of each graph in rank order; count the rest per graph.
+- **Output:** returns `SearchResults`, `dict[str, str]`, `tuple[list[SearchHit], dict[str, int]]`
 - **Uses:** `tarel.graph.contracts`, `tarel.search`, `tarel.workspaces.projection`, `tarel.workspaces.scope`
 - **Used by:** `tarel.retrieval.search_application`
 

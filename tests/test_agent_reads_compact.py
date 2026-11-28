@@ -4,10 +4,13 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import TestCase
+from unittest import TestCase, mock
 
 from test_focus import _fixture, _run_cli
 
+from tarel.annotations import coverage as coverage_module
+from tarel.connectors.contracts import CatalogField, CatalogObject, CatalogResult
+from tarel.graph.build import build_graph_from_catalog
 from tarel.graph.freshness import freshness_block
 from tarel.graph.observation import GraphObservation
 from tarel.graph.reads import graph_slice_use_case
@@ -85,6 +88,19 @@ class CompactSliceTests(_State):
         self.assertEqual(
             json.loads(output)["freshness"], {"missing": ["demo"], "stale": "unverified"},
         )
+
+
+class CoverageCostTests(TestCase):
+    def test_field_counts_are_computed_once_per_graph(self) -> None:
+        graph, _lineage = _fixture()
+        objects = [(graph, node) for node in graph.nodes if node.type == "table"]
+
+        with mock.patch.object(
+            coverage_module, "_field_counts", wraps=coverage_module._field_counts,
+        ) as counted:
+            coverage_module.measure_coverage("graph:demo", objects, limit=1)
+
+        self.assertEqual(counted.call_count, 1)
 
 
 class FreshnessTests(TestCase):
@@ -187,6 +203,26 @@ class SearchDiversityTests(TestCase):
         signatures = structural_signatures(graph, ids)
 
         self.assertEqual(sorted(set(signatures.values())), ["sales|saleid", "unusedsales|saleid"])
+
+    def test_signatures_keep_letters_of_any_script(self) -> None:
+        graph = build_graph_from_catalog(
+            "cjk",
+            CatalogResult(
+                connector="test", source_type="database", catalog="C", dialect="ansi",
+                objects=tuple(
+                    CatalogObject(
+                        namespace="main", name=name, kind="table",
+                        fields=(CatalogField("SaleId", 1, "integer", False),),
+                    )
+                    for name in ("客户", "订单")
+                ),
+            ),
+        )
+        ids = frozenset(node.id for node in graph.nodes if node.type == "table")
+
+        self.assertEqual(
+            sorted(structural_signatures(graph, ids).values()), ["客户|saleid", "订单|saleid"],
+        )
 
     def test_equal_objects_inside_one_graph_never_fold(self) -> None:
         scope, results = _search_fixture()

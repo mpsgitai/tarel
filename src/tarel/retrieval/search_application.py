@@ -34,6 +34,8 @@ from tarel.search import (
 )
 from tarel.workspaces.application import load_workspace_scope
 from tarel.workspaces.retrieval import (
+    DEFAULT_MAX_PER_GRAPH,
+    cap_per_graph,
     combine_workspace_search,
     structural_signatures,
     validate_diversity,
@@ -269,6 +271,15 @@ def search_workspace_use_case(
         )
     )
     combined = with_family_hits(combined, families, limit=limit)
+    if diversity == "per_graph" and families:
+        # Family hits are prepended after the physical cap; cap the combined list again.
+        capped, extra = cap_per_graph(list(combined.hits), max_per_graph or DEFAULT_MAX_PER_GRAPH)
+        omitted = dict(combined.omitted_by_diversity)
+        for graph, count in extra.items():
+            omitted[graph] = omitted.get(graph, 0) + count
+        combined = replace(
+            combined, hits=tuple(capped), omitted_by_diversity=tuple(sorted(omitted.items())),
+        )
     return rerank_results(
         combined, tuple(loaded[name] for name in scope.graph_names), runtime=runtime,
         limit=requested_limit, n_threads=n_threads,
