@@ -204,6 +204,17 @@ GROUPS = {
         "browser-workflows.md",
         "tarel ui --workspace enterprise --lineage sales-etl",
     ),
+    "mcp": (
+        "MCP server",
+        "Serve TAREL's metadata, retrieval, grounding, and lineage tools over MCP.",
+        (
+            "Requires an explicit --state-root (or TAREL_STATE_ROOT) and the optional"
+            " tarel[mcp] dependency. Defaults to the read-only meta profile; --profile"
+            " meta-write adds draft annotation proposals while protecting reviewed state."
+        ),
+        "mcp.md",
+        "tarel mcp serve --state-root /path/to/.tarel --workspace enterprise",
+    ),
     "lineage": (
         "Static and runtime lineage",
         (
@@ -774,6 +785,10 @@ RESULTS = {
         "ccounting."
     ),
     "ui": "Local server startup information; the process serves the browser until stopped.",
+    "mcp": (
+        "Runs an MCP server over stdio or streamable-http until stopped. Tool responses"
+        " are structured JSON with explicit truncation metadata and structured errors."
+    ),
     "lineage": (
         "The selected lineage document/projection, provider-run result, t"
         "ask/proposal result, review list/decision, or upstream trace. Th"

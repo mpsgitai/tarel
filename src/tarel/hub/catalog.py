@@ -63,6 +63,12 @@ _CONFIG_TEMPLATES: dict[str, str] = {
         'url = "mssql://readonly_user:password@127.0.0.1:1433/analytics"\n'
         "# Or set TAREL_SQLSERVER_URL in the environment (overrides [sqlserver].url).\n"
     ),
+    "connector-mcp": (
+        "[mcp]\n"
+        'url = "/abs/path/to/mcp-source.yaml"\n'
+        "# Points to a JSON/YAML/TOML MCP connector config with explicit allowed_tools.\n"
+        "# Or set TAREL_MCP_URL in the environment (overrides [mcp].url).\n"
+    ),
     "lineage-sqlglot": (
         "# No connector config required. Run static SQL analysis on a lineage source document:\n"
         "#   tarel lineage analyze <name> --source lineage-source.json "

@@ -313,6 +313,38 @@
       "real_source_evidence": "MongoDB 8.0 container fixture; URL auth only",
       "recommended_extra": null,
       "status": "experimental"
+    },
+    {
+      "capabilities": [
+        "connector"
+      ],
+      "dependencies": [
+        "mcp>=1.10,<3"
+      ],
+      "entry_points": [
+        {
+          "group": "tarel.connectors",
+          "name": "mcp"
+        }
+      ],
+      "extras": [
+        "yaml"
+      ],
+      "host_contract": "connector.v1",
+      "host_versions": "tarel>=0.0.6,<0.1",
+      "id": "connector-mcp",
+      "import_name": "tarel_connector_mcp",
+      "install": "uv pip install \"git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-mcp\"",
+      "install_spec": "git+https://github.com/mpsgitai/tarel-hub.git#subdirectory=packages/connector-mcp",
+      "kind": "connector",
+      "license": "MIT (adapter); MCP SDK license (MIT): see package THIRD_PARTY_NOTICES.md",
+      "native_requirements": [],
+      "origin": "written in this repository",
+      "package": "tarel-connector-mcp",
+      "path": "packages/connector-mcp",
+      "real_source_evidence": "Local stdio read-only SQLite MCP server E2E (probe, discover_catalog, sample_rows, profile_object) + allowlist and fail-closed unit suite",
+      "recommended_extra": null,
+      "status": "experimental"
     }
   ]
 }
