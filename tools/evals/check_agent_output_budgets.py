@@ -113,11 +113,17 @@ def _phase_two_checks(tarel: Callable[..., Run]) -> list[Check]:
 
     base = ("graph", "slice", "lakehouse-iceberg", *_GOLD_SLICE, "--format", "json")
     full_slice, compact_slice = tarel(*base), tarel(*base, "--view", "compact")
-    share = len(compact_slice.stdout) / max(len(full_slice.stdout), 1)
-    checks.append(Check(
-        "5-object slice compact share", share <= 0.25,
-        f"{share:.1%} ({len(compact_slice.stdout)} B)", "<= 25%",
-    ))
+    if full_slice.code or compact_slice.code or not full_slice.stdout:
+        checks.append(Check(
+            "5-object slice compact share", False,
+            f"exit {full_slice.code}/{compact_slice.code}", "<= 25%",
+        ))
+    else:
+        share = len(compact_slice.stdout) / len(full_slice.stdout)
+        checks.append(Check(
+            "5-object slice compact share", share <= 0.25,
+            f"{share:.1%} ({len(compact_slice.stdout)} B)", "<= 25%",
+        ))
 
     index = tarel("workspace", "show", "gesamtsystem", "--depth", "index", "--format", "json")
     size = len(index.stdout.encode("utf-8"))

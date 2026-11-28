@@ -3138,14 +3138,14 @@ Deterministic upstream traversal across stored lineage and technical graphs.
     - `UpstreamTrace.to_dict`: to dict; returns `dict[str, object]`.
     - `UpstreamTrace.to_compact_dict`: Each node once and each edge as one short row; see :mod:`tarel.lineage.projection`. Calls `compact_trace_dict`.
     - `NetworkEdge`: record with fields id, source_id, target_id, relation, state, lineage, role, via_definition ….
-    - `Network`: record with fields nodes, edges, ambiguities.
+    - `Network`: record with fields nodes, edges, ambiguities, hidden_downstream.
     - `Network.aliases`: aliases; returns `dict[str, tuple[str, ...]]`.
     - `find_lineage_references`: find lineage references; returns `tuple[LineageReference, ...]`. Calls `rank_bm25`; raises `LineageFailure`.
     - `trace_upstream`: trace upstream; returns `UpstreamTrace`.
     - `hop_from_edge`: hop from edge; returns `LineageHop`.
     - `validate_trace_arguments`: validate trace arguments; returns `None`. Raises `LineageFailure`.
     - `trace_upstream_on`: Trace one reference over a network built once, so a batch pays for it only once.
-    - `build_network`: build network; returns `Network`. Calls `declared_catalogs`, `session_roots`.
+    - `build_network`: build network; returns `Network`. Calls `declared_catalogs`, `session_roots`, `resolve_reference`.
     - `resolve_start`: resolve start; returns `str`. Raises `LineageFailure`.
 - **Output:** returns `LineageHop`, `Network`, `UpstreamTrace`, `dict[str, object]`, `dict[str, tuple[str, ...]]`, `str`, `tuple[LineageReference, ...]`
 - **Uses:** `tarel.annotations.states`, `tarel.graph.contracts`, `tarel.lineage.contracts`, `tarel.lineage.projection`, `tarel.lineage.resolution`, `tarel.retrieval.bm25`, `tarel.retrieval.contracts`

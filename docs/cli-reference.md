@@ -5969,7 +5969,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `agent_skill_missing` | [tarel/agents.py](../src/tarel/agents.py#L48) |
 | `ambiguous_connector` | [connectors/host.py](../src/tarel/connectors/host.py#L61), [connectors/host.py](../src/tarel/connectors/host.py#L245) |
 | `ambiguous_lineage_analyzer` | [lineage/analyzers.py](../src/tarel/lineage/analyzers.py#L74) |
-| `ambiguous_lineage_reference` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L828), [lineage/traversal.py](../src/tarel/lineage/traversal.py#L865) |
+| `ambiguous_lineage_reference` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L852), [lineage/traversal.py](../src/tarel/lineage/traversal.py#L889) |
 | `ambiguous_logical_joins` | [logical_joins/application.py](../src/tarel/logical_joins/application.py#L240) |
 | `ambiguous_retrieval_plugin` | [retrieval/plugins.py](../src/tarel/retrieval/plugins.py#L140) |
 | `ambiguous_scope` | [mcp/tools.py](../src/tarel/mcp/tools.py#L1196) |
@@ -6242,7 +6242,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_lineage_batch` | [lineage/directions.py](../src/tarel/lineage/directions.py#L125) |
 | `invalid_lineage_change` | [lineage/refresh.py](../src/tarel/lineage/refresh.py#L105), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L107), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L181), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L185), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L943), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L949), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L956), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L962) |
 | `invalid_lineage_change_report` | [lineage/change_store.py](../src/tarel/lineage/change_store.py#L57), [lineage/change_store.py](../src/tarel/lineage/change_store.py#L62) |
-| `invalid_lineage_direction` | [lineage/directions.py](../src/tarel/lineage/directions.py#L266) |
+| `invalid_lineage_direction` | [lineage/directions.py](../src/tarel/lineage/directions.py#L276) |
 | `invalid_lineage_input` | [lineage/source.py](../src/tarel/lineage/source.py#L148), [lineage/source.py](../src/tarel/lineage/source.py#L153), [lineage/source.py](../src/tarel/lineage/source.py#L173), [lineage/source.py](../src/tarel/lineage/source.py#L176), [lineage/source.py](../src/tarel/lineage/source.py#L188), [lineage/source.py](../src/tarel/lineage/source.py#L207), [lineage/source.py](../src/tarel/lineage/source.py#L210), [lineage/source.py](../src/tarel/lineage/source.py#L235), [lineage/source.py](../src/tarel/lineage/source.py#L251), [lineage/source.py](../src/tarel/lineage/source.py#L258), [lineage/source.py](../src/tarel/lineage/source.py#L274), [lineage/source.py](../src/tarel/lineage/source.py#L280), [lineage/source.py](../src/tarel/lineage/source.py#L299), [lineage/source.py](../src/tarel/lineage/source.py#L305), [lineage/source.py](../src/tarel/lineage/source.py#L312), [lineage/source.py](../src/tarel/lineage/source.py#L329), [lineage/source.py](../src/tarel/lineage/source.py#L337), [lineage/source.py](../src/tarel/lineage/source.py#L348), [lineage/source.py](../src/tarel/lineage/source.py#L354), [lineage/source.py](../src/tarel/lineage/source.py#L363), [lineage/source.py](../src/tarel/lineage/source.py#L368), [lineage/source.py](../src/tarel/lineage/source.py#L375), [lineage/source.py](../src/tarel/lineage/source.py#L381), [lineage/source.py](../src/tarel/lineage/source.py#L392), [lineage/source.py](../src/tarel/lineage/source.py#L397) |
 | `invalid_lineage_limit` | [context/grounding_application.py](../src/tarel/context/grounding_application.py#L240) |
 | `invalid_lineage_name` | [lineage/change_store.py](../src/tarel/lineage/change_store.py#L75), [lineage/store.py](../src/tarel/lineage/store.py#L79) |
@@ -6250,9 +6250,9 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_lineage_review` | [cli/lineage.py](../src/tarel/cli/lineage.py#L240), [lineage/review.py](../src/tarel/lineage/review.py#L32), [lineage/review.py](../src/tarel/lineage/review.py#L52) |
 | `invalid_lineage_revision` | [lineage/change_store.py](../src/tarel/lineage/change_store.py#L80) |
 | `invalid_lineage_run` | [lineage/analysis_application.py](../src/tarel/lineage/analysis_application.py#L63), [lineage/analysis_application.py](../src/tarel/lineage/analysis_application.py#L216) |
-| `invalid_lineage_search` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L197), [lineage/traversal.py](../src/tarel/lineage/traversal.py#L199) |
+| `invalid_lineage_search` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L199), [lineage/traversal.py](../src/tarel/lineage/traversal.py#L201) |
 | `invalid_lineage_target` | [lineage/core.py](../src/tarel/lineage/core.py#L746) |
-| `invalid_lineage_trace` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L425), [lineage/traversal.py](../src/tarel/lineage/traversal.py#L431) |
+| `invalid_lineage_trace` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L427), [lineage/traversal.py](../src/tarel/lineage/traversal.py#L433) |
 | `invalid_logical_endpoint` | [topology/endpoint_contracts.py](../src/tarel/topology/endpoint_contracts.py#L43), [topology/endpoint_contracts.py](../src/tarel/topology/endpoint_contracts.py#L51), [topology/endpoint_contracts.py](../src/tarel/topology/endpoint_contracts.py#L56), [topology/endpoint_contracts.py](../src/tarel/topology/endpoint_contracts.py#L77), [topology/endpoints.py](../src/tarel/topology/endpoints.py#L231) |
 | `invalid_logical_endpoint_mode` | [topology/endpoints.py](../src/tarel/topology/endpoints.py#L229) |
 | `invalid_logical_endpoint_schema` | [topology/endpoints.py](../src/tarel/topology/endpoints.py#L262) |
@@ -6397,7 +6397,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `lineage_item_not_found` | [lineage/review.py](../src/tarel/lineage/review.py#L68) |
 | `lineage_not_found` | [lineage/application.py](../src/tarel/lineage/application.py#L335), [lineage/trace_application.py](../src/tarel/lineage/trace_application.py#L87), [mcp/tools.py](../src/tarel/mcp/tools.py#L781) |
 | `lineage_provider_required` | [lineage/analysis_application.py](../src/tarel/lineage/analysis_application.py#L220) |
-| `lineage_reference_not_found` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L816), [ui/backend.py](../src/tarel/ui/backend.py#L711) |
+| `lineage_reference_not_found` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L840), [ui/backend.py](../src/tarel/ui/backend.py#L711) |
 | `lineage_refresh_mismatch` | [lineage/refresh.py](../src/tarel/lineage/refresh.py#L217) |
 | `lineage_required` | [ui/backend.py](../src/tarel/ui/backend.py#L721) |
 | `lineage_save_failed` | [lineage/store.py](../src/tarel/lineage/store.py#L41) |
@@ -6430,7 +6430,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `missing_config` | [connectors/application.py](../src/tarel/connectors/application.py#L189) |
 | `missing_database` | [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L612) |
 | `missing_dependency` | [connectors/host.py](../src/tarel/connectors/host.py#L109), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L227), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L284), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L349), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L427), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L525), [mcp/server.py](../src/tarel/mcp/server.py#L45) |
-| `missing_embedding_backend` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L204), [retrieval/index.py](../src/tarel/retrieval/index.py#L80), [retrieval/index.py](../src/tarel/retrieval/index.py#L201), [retrieval/index.py](../src/tarel/retrieval/index.py#L287), [retrieval/ranking.py](../src/tarel/retrieval/ranking.py#L76) |
+| `missing_embedding_backend` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L206), [retrieval/index.py](../src/tarel/retrieval/index.py#L80), [retrieval/index.py](../src/tarel/retrieval/index.py#L201), [retrieval/index.py](../src/tarel/retrieval/index.py#L287), [retrieval/ranking.py](../src/tarel/retrieval/ranking.py#L76) |
 | `missing_focus_sources` | [focus/application.py](../src/tarel/focus/application.py#L34) |
 | `missing_graph` | [mcp/tools.py](../src/tarel/mcp/tools.py#L611) |
 | `missing_grounding_input` | [mcp/tools.py](../src/tarel/mcp/tools.py#L663) |
@@ -6447,7 +6447,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `model_changed_during_load` | [retrieval/application.py](../src/tarel/retrieval/application.py#L402), [retrieval/application.py](../src/tarel/retrieval/application.py#L408), [retrieval/application.py](../src/tarel/retrieval/application.py#L414), [tarel/runtime.py](../src/tarel/runtime.py#L109), [tarel/runtime.py](../src/tarel/runtime.py#L117) |
 | `model_checksum_mismatch` | [retrieval/local.py](../src/tarel/retrieval/local.py#L86), [retrieval/local.py](../src/tarel/retrieval/local.py#L114) |
 | `model_download_failed` | [retrieval/local.py](../src/tarel/retrieval/local.py#L124) |
-| `model_index_mismatch` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L330), [retrieval/index.py](../src/tarel/retrieval/index.py#L604), [retrieval/index.py](../src/tarel/retrieval/index.py#L678), [retrieval/index.py](../src/tarel/retrieval/index.py#L719), [retrieval/index.py](../src/tarel/retrieval/index.py#L725), [retrieval/vectors.py](../src/tarel/retrieval/vectors.py#L23) |
+| `model_index_mismatch` | [lineage/traversal.py](../src/tarel/lineage/traversal.py#L332), [retrieval/index.py](../src/tarel/retrieval/index.py#L604), [retrieval/index.py](../src/tarel/retrieval/index.py#L678), [retrieval/index.py](../src/tarel/retrieval/index.py#L719), [retrieval/index.py](../src/tarel/retrieval/index.py#L725), [retrieval/vectors.py](../src/tarel/retrieval/vectors.py#L23) |
 | `model_not_found` | [retrieval/local.py](../src/tarel/retrieval/local.py#L63) |
 | `namespace_not_found` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L264) |
 | `no_profile_fields` | [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L455) |

@@ -7,7 +7,7 @@ point into a short file list, and sources, freshness, limits and warnings close 
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from tarel.cli._pretty import Pretty
@@ -140,16 +140,13 @@ def render_batch(payload: Mapping[str, Any]) -> None:
             ],
             stylers={1: page.style.bad},
         )
-    notes: Mapping[str, Any] = payload.get("reference_warnings", {})
-    if notes:
-        page.section("Warnings per reference", len(notes))
-        for reference, items in notes.items():
-            page.add(f"  {page.style.bold(reference)}")
-            for item in items:
-                page.text(f"{page.style.symbol('warn')} {item}", indent=4, styler=page.style.warn)
+    grouped: Mapping[str, Sequence[str]] = payload.get("warnings", {})
     page.footer(
         _facts(payload),
-        warnings=[str(item) for item in payload.get("warnings", ())],
+        warnings=[
+            f"{text} ({'all references' if refs == ['*'] else ', '.join(refs)})"
+            for text, refs in grouped.items()
+        ],
         hints=["tarel lineage trace REF for one tree with evidence"],
     )
     page.emit()

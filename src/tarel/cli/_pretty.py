@@ -189,24 +189,28 @@ class Pretty:
         """
         self.add(" " * indent + label(root))
         expanded = {root}
-
-        def walk(node: str, prefix: str) -> None:
-            kids = children.get(node, ())
-            for position, (edge, child, extra) in enumerate(kids):
-                last = position == len(kids) - 1
-                branch = self.style.symbol("elbow" if last else "tee")
-                repeat = child in expanded
-                note = self.style.dim("  (see above)") if repeat and children.get(child) else ""
-                tail = f"  {self.style.dim(extra)}" if extra else ""
-                line = f"{prefix}{self.style.dim(branch)} {edge} {label(child)}{tail}{note}"
-                self.add(" " * indent + line)
-                if not repeat:
-                    expanded.add(child)
-                    walk(child, prefix + ("   " if last else pipe))
-
         pipe = self.style.dim(self.style.symbol("pipe")) + " "
-
-        walk(root, "")
+        # An explicit stack instead of recursion: a wide DAG can make one depth-first path far
+        # longer than Python's call stack, even when every node is only a few hops away.
+        stack: list[tuple[Sequence[tuple[str, str, str]], int, str]] = [
+            (children.get(root, ()), 0, "")
+        ]
+        while stack:
+            kids, position, prefix = stack.pop()
+            if position >= len(kids):
+                continue
+            stack.append((kids, position + 1, prefix))
+            edge, child, extra = kids[position]
+            last = position == len(kids) - 1
+            branch = self.style.symbol("elbow" if last else "tee")
+            repeat = child in expanded
+            note = self.style.dim("  (see above)") if repeat and children.get(child) else ""
+            tail = f"  {self.style.dim(extra)}" if extra else ""
+            row = f"{prefix}{self.style.dim(branch)} {edge} {label(child)}{tail}{note}"
+            self.add(" " * indent + row)
+            if not repeat:
+                expanded.add(child)
+                stack.append((children.get(child, ()), 0, prefix + ("   " if last else pipe)))
 
     def footer(
         self,

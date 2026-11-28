@@ -189,9 +189,6 @@ def _trace_downstream_on(network: Network, reference: str, *, max_hops: int) -> 
     for edge in network.edges:
         outgoing.setdefault(edge.source_id, []).append(edge)
 
-    def feeds(edge: NetworkEdge) -> bool:
-        return edge.relation != "field_of" or bool(outgoing.get(edge.target_id))
-
     hidden_by: dict[str, list[str]] = {}
     for items in network.ambiguities.values():
         for ambiguity in items:
@@ -201,6 +198,19 @@ def _trace_downstream_on(network: Network, reference: str, *, max_hops: int) -> 
                     f"{ambiguity.lineage} is ambiguous and may refer to "
                     f"{network.nodes[candidate].value.reference}."
                 )
+    for node_id, items in network.hidden_downstream.items():
+        for ambiguity in items:
+            hidden_by.setdefault(node_id, []).append(
+                f"Downstream may be incomplete: {network.nodes[node_id].value.reference} writes "
+                f"to {ambiguity.reference} (lineage {ambiguity.lineage}), which matches "
+                f"{len(ambiguity.candidates)} objects."
+            )
+
+    def feeds(edge: NetworkEdge) -> bool:
+        # A field is worth visiting when it feeds something, or when an ambiguity may hide that.
+        return edge.relation != "field_of" or bool(
+            outgoing.get(edge.target_id) or hidden_by.get(edge.target_id)
+        )
 
     queue: deque[tuple[str, int, tuple[str, ...]]] = deque([(start_id, 0, (start_id,))])
     seen_depth = {start_id: 0}

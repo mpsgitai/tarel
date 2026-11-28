@@ -60,6 +60,37 @@ class DirectionTests(TestCase):
         self.assertIn("No downstream lineage was found for the selected reference.", trace.warnings)
         self.assertFalse([item for item in trace.warnings if "cycle" in item])
 
+    def test_an_ambiguous_write_target_is_reported_downstream(self) -> None:
+        graph, lineage = _fixture()
+
+        trace = trace_lineage(
+            (lineage,), (graph, replace(graph, name="demo-copy")), "dbt.model.sales",
+            direction="down",
+        )
+
+        self.assertEqual(trace.downstream, ())
+        self.assertTrue(
+            any("writes to Demo.mart.Sales" in item and "matches 2 objects" in item
+                for item in trace.warnings),
+            trace.warnings,
+        )
+
+    def test_an_ambiguous_field_consumer_is_reported_for_its_table(self) -> None:
+        graph, lineage = _fixture()
+        claim = replace(lineage.claims[0], id="read-field", target="Demo.raw.Sales.SaleId")
+        documents = (replace(lineage, claims=(claim,)),)
+        graphs = (graph, replace(graph, name="demo-copy"))
+
+        trace = trace_lineage(
+            documents, graphs, "graph:demo:object:Demo/raw/Sales", direction="down",
+        )
+
+        self.assertTrue(
+            any(item.startswith("Downstream may be incomplete: Demo.raw.Sales.SaleId")
+                for item in trace.warnings),
+            trace.warnings,
+        )
+
     def test_up_matches_the_existing_upstream_trace(self) -> None:
         graph, lineage = _fixture()
 
@@ -133,9 +164,7 @@ class BatchTests(TestCase):
 
         compact = compact_batch_dict(batch)
 
-        self.assertIn(hidden, compact["reference_warnings"]["Demo.raw.Sales"])
-        self.assertNotIn(hidden, compact["reference_warnings"].get("Demo.mart.Sales", []))
-        self.assertNotIn(hidden, compact.get("warnings", []))
+        self.assertEqual(compact["warnings"][hidden], ["Demo.raw.Sales"])
 
     def test_duplicate_references_are_rejected(self) -> None:
         graph, lineage = _fixture()

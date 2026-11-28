@@ -167,15 +167,15 @@ def compact_batch_dict(
     does this depend on"; ``lineage trace REF`` shows how.
     """
     chains = {item.query: _chain(item) for item in batch.traces}
-    # Warnings every trace shares are listed once; the rest stay with their reference, so an
+    # Each warning once, with the references it applies to ("*" when it applies to all), so an
     # incomplete trace (e.g. hidden by an ambiguous reference) never looks like "no lineage".
-    shared = (
-        set.intersection(*(set(item.warnings) for item in batch.traces)) if batch.traces else set()
-    )
-    per_reference = {
-        item.query: sorted(set(item.warnings) - shared)
-        for item in batch.traces
-        if set(item.warnings) - shared
+    grouped: dict[str, list[str]] = {}
+    for item in batch.traces:
+        for warning in item.warnings:
+            grouped.setdefault(warning, []).append(item.query)
+    warnings = {
+        text: ["*"] if len(references) == len(batch.traces) > 1 else sorted(references)
+        for text, references in sorted(grouped.items())
     }
     depths = [max((hop.depth for hop in _hops(item)), default=0) for item in batch.traces]
     with_lineage = sum(bool(_hops(item)) for item in batch.traces)
@@ -188,7 +188,6 @@ def compact_batch_dict(
         "freshness": dict(freshness) if freshness else None,
         "next": {"trace": "lineage trace REF --view compact"},
         "null_policy": "omitted",
-        "reference_warnings": dict(sorted(per_reference.items())),
         "resolution": dict(resolution) if resolution else None,
         "summary": {
             "failed": len(batch.failures),
@@ -206,7 +205,7 @@ def compact_batch_dict(
         },
         "truncated": any(item.truncated for item in batch.traces),
         "view": "compact",
-        "warnings": sorted(shared),
+        "warnings": warnings,
     }
     return {
         key: value for key, value in sorted(payload.items()) if value not in (None, {}, [])

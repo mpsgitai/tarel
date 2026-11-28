@@ -1558,6 +1558,8 @@ carry `"dir": "down"`. The full JSON record has `upstream`, `downstream`, `origi
 A chain lists stored objects (tables, views, fields, unresolved names) by distance, nearest first.
 Objects at the same distance appear in brackets, and lineage definitions are counted in
 `summary.jobs` instead of being listed. Downstream chains use `->`; `both` joins the two with ` | `.
+`warnings` maps each warning text to the references it applies to (`["*"]` for all of them), so
+a trace that ambiguity may have left incomplete never reads as "no lineage".
 
 ### Freshness
 

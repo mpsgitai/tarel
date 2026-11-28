@@ -105,6 +105,14 @@ class PrimitiveTests(TestCase):
         self.assertIn("derived_from ← C [table]", text)
         self.assertNotIn("no edges in this direction", text)
 
+    def test_deep_trees_render_without_recursion(self) -> None:
+        page = Pretty(_PLAIN, 80)
+        children = {f"n{index}": [("reads", f"n{index + 1}", "")] for index in range(5000)}
+
+        page.tree("n0", children, lambda key: key)
+
+        self.assertEqual(len(page.lines), 5001)
+
     def test_ascii_fallback_uses_only_ascii(self) -> None:
         page = Pretty(_ASCII, 60)
         page.header("Lineage", "x", ["table"])

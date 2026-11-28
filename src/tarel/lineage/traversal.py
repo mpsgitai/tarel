@@ -175,6 +175,8 @@ class Network:
     edges: tuple[NetworkEdge, ...]
     # Node id -> ambiguous references that could be part of that node's upstream.
     ambiguities: dict[str, tuple[_Ambiguity, ...]] = field(default_factory=dict)
+    # Node id -> ambiguous write targets of that node: its downstream may be missing an edge.
+    hidden_downstream: dict[str, tuple[_Ambiguity, ...]] = field(default_factory=dict)
 
     def aliases(self) -> dict[str, tuple[str, ...]]:
         result: dict[str, list[str]] = {}
@@ -512,6 +514,7 @@ def build_network(
     edges: list[NetworkEdge] = []
     definitions: dict[tuple[str, str], str] = {}
     ambiguities: dict[str, list[_Ambiguity]] = {}
+    hidden: dict[str, list[_Ambiguity]] = {}
 
     for document in sorted(documents, key=lambda item: item.name):
         summaries = {item.definition_id: item.summary for item in document.analyses}
@@ -569,6 +572,11 @@ def build_network(
         for node_id in (key,) if isinstance(key, str) else key:
             ambiguities.setdefault(node_id, []).append(ambiguity)
 
+    def hide(writers: tuple[str, ...], item: ReferenceResolution, lineage: str) -> None:
+        ambiguity = _Ambiguity(item.reference, item.candidates, lineage)
+        for node_id in writers:
+            hidden.setdefault(node_id, []).append(ambiguity)
+
     for document in sorted(documents, key=lambda item: item.name):
         steps = _steps_by_definition(document)
         definitions_by_id = document.definition_by_id()
@@ -601,8 +609,10 @@ def build_network(
             definition = definitions_by_id[materialization.definition_id]
             target = resolve(materialization.target, document, definition)
             if target.node_id is None:
-                # The write may land in any candidate, so each one has an unknown upstream.
+                # The write may land in any candidate, so each one has an unknown upstream,
+                # and the writing definition has an unknown downstream.
                 defer(target.candidates, target, document.name)
+                hide((source_id,), target, document.name)
                 continue
             edges.append(
                 NetworkEdge(
@@ -626,6 +636,19 @@ def build_network(
             target = resolve(unit.target, document, definition)
             if target.node_id is None:
                 defer(target.candidates, target, document.name)
+                # Look the sources up without adding unresolved nodes: only the warning needs them.
+                writers = tuple(
+                    found.node_id
+                    for found in (
+                        resolve_reference(
+                            item.target, document, definition, index, declared[document.name],
+                        )
+                        for item in unit.sources
+                    )
+                    if found.node_id is not None
+                )
+                hide((definitions[(document.name, unit.definition_id)], *writers), target,
+                     document.name)
                 continue
             for upstream in unit.sources:
                 source = resolve(upstream.target, document, definition)
@@ -657,6 +680,7 @@ def build_network(
             key: tuple(sorted(set(values), key=_ambiguity_key))
             for key, values in ambiguities.items()
         },
+        {key: tuple(sorted(set(values), key=_ambiguity_key)) for key, values in hidden.items()},
     )
 
 

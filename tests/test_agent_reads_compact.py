@@ -1,7 +1,9 @@
 """Compact graph slices, tiered workspace overviews, search diversity and freshness."""
 
+import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase, mock
@@ -281,3 +283,33 @@ def _search_fixture() -> tuple[ResolvedScope, tuple[SearchResults, ...]]:
         for graph, hits in per_graph.items()
     )
     return scope, results
+
+
+class BudgetScriptTests(TestCase):
+    def test_a_failed_slice_never_passes_the_share_check(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        path = root / "tools" / "evals" / "check_agent_output_budgets.py"
+        spec = importlib.util.spec_from_file_location("check_agent_output_budgets", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        # Its dataclasses resolve their module through sys.modules while it executes.
+        with mock.patch.dict(sys.modules, {spec.name: module}):
+            spec.loader.exec_module(module)
+
+        replies = {
+            ("lineage", "upstream"): {"summary": {"unresolved": 0}},
+            ("lineage", "downstream"): {"nodes": {}},
+            ("graph", "objects"): {"objects": []},
+            ("search", "--workspace"): {"hits": []},
+        }
+
+        def tarel(*arguments: str) -> object:
+            if arguments[:2] == ("graph", "slice"):
+                if "--view" in arguments:
+                    return module.Run(2, "", '{"error": {"code": "invalid_graph"}}')
+                return module.Run(0, "x" * 100, "")
+            return module.Run(0, json.dumps(replies.get(arguments[:2], {})), "")
+
+        checks = {item.name: item for item in module._phase_two_checks(tarel)}
+
+        self.assertFalse(checks["5-object slice compact share"].passed)
