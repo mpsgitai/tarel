@@ -38,11 +38,19 @@ function lineageAssetElement(item) {
 function lineageFlowElements(flows, visibleObjectIds) {
   const assets = flows.nodes.filter(item => item.kind === "asset").map(lineageAssetElement);
   const known = new Set([...visibleObjectIds, ...assets.map(item => item.data.id)]);
-  const edges = flows.edges.filter(item => known.has(item.source) && known.has(item.target)).map(item => ({data: {
-    id: item.id, source: item.source, target: item.target, type: "lineage", state: item.state,
-    indirect: item.indirect || undefined, processCount: distinctLineageProcesses(item).length,
-    label: lineageEdgeLabel(item), flowEdge: item.id,
-  }}));
+  const edges = flows.edges.filter(item => known.has(item.source) && known.has(item.target)).map(item => {
+    const shift = typeof anomalyEdgeShiftForEdge === "function" ? anomalyEdgeShiftForEdge(item) : null;
+    const data = {
+      id: item.id, source: item.source, target: item.target, type: "lineage", state: item.state,
+      indirect: item.indirect || undefined, processCount: distinctLineageProcesses(item).length,
+      label: lineageEdgeLabel(item), flowEdge: item.id,
+    };
+    if (shift) {
+      data.anomalyShift = true;
+      data.shiftLabel = typeof formatEdgeShiftBadge === "function" ? formatEdgeShiftBadge(shift) : "shift";
+    }
+    return {data};
+  });
   return [...assets, ...edges];
 }
 

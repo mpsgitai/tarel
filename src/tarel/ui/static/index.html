@@ -103,6 +103,7 @@
             <div id="project-search-status" class="project-search-status" role="status" aria-live="polite" hidden></div>
             <div id="family-notices" class="topology-notices" role="status" hidden></div>
             <div id="logical-topology-notices" class="topology-notices" role="status" hidden></div>
+            <div id="anomaly-status-notice" class="topology-notices anomaly-status-notice" role="status" hidden></div>
             <div id="object-list" class="object-list" aria-label="Graph objects"></div>
             <div id="context-action-bar" class="context-action-bar" role="region" aria-label="Selected objects context actions" hidden>
               <span id="context-action-count" class="context-action-count">0 selected</span>
@@ -125,7 +126,7 @@
               <div class="toolbar-actions">
                 <button id="open-objects" class="quiet-button mobile-only" aria-controls="object-sidebar" aria-expanded="false">Objects</button>
                 <div id="canvas-mode-group" class="canvas-mode" role="group" aria-label="Canvas mode"><button id="architecture-mode" class="chip" data-canvas-mode="architecture" hidden>Architecture</button><button class="chip is-active" data-canvas-mode="space">Structure</button><button class="chip" data-canvas-mode="lineage">Lineage</button></div>
-                <div id="canvas-lens-group" class="canvas-mode canvas-lens" role="group" aria-label="Canvas color lens"><button type="button" class="chip is-active" data-canvas-lens="schema" aria-pressed="true" title="Color nodes by schema &amp; object type">Schema</button><button type="button" class="chip" data-canvas-lens="health" aria-pressed="false" title="Highlight empty tables, lineage orphans and unannotated objects">Health</button></div>
+                <div id="canvas-lens-group" class="canvas-mode canvas-lens" role="group" aria-label="Canvas color lens"><button type="button" class="chip is-active" data-canvas-lens="schema" aria-pressed="true" title="Color nodes by schema &amp; object type">Schema</button><button type="button" class="chip" data-canvas-lens="health" aria-pressed="false" title="Highlight empty tables, lineage orphans and unannotated objects">Health</button><button type="button" id="pulse-lens-btn" class="chip" data-canvas-lens="pulse" aria-pressed="false" title="Highlight data pulse, active anomalies and downstream symptoms" hidden>Pulse</button></div>
                 <div id="level-switch" class="canvas-mode level-switch" role="group" aria-label="Level"><button id="show-systems" class="chip" aria-pressed="false" title="Return to the system overview; preserve other source filters">Systems</button><button id="show-all" class="chip" title="Show every object in the current filters">All objects</button></div>
                 <select id="system-jump" aria-label="Open a system" hidden></select>
                 <button id="fit-graph" class="quiet-button moved-to-inspector" title="Show the selected object and its immediate neighbours" tabindex="-1" aria-hidden="true">Neighbours</button>
@@ -155,6 +156,14 @@
               <span><i class="hl-swatch is-orphan"></i>No lineage</span>
               <span><i class="hl-swatch is-isolated"></i>Isolated + unannotated</span>
               <span><i class="hl-swatch is-ok"></i>Reviewed</span>
+            </div>
+            <div id="pulse-legend" class="health-legend pulse-legend" aria-label="Pulse lens legend" hidden>
+              <strong>Pulse lens</strong>
+              <span><i class="hl-swatch is-pulse-anomalous"></i>Anomalous</span>
+              <span><i class="hl-swatch is-pulse-downstream"></i>Downstream affected</span>
+              <span><i class="hl-swatch is-pulse-active"></i>Active</span>
+              <span><i class="hl-swatch is-pulse-static"></i>Static</span>
+              <span><i class="hl-swatch is-empty"></i>Empty</span>
             </div>
             <div id="canvas-busy" class="canvas-busy" role="status" aria-live="polite" hidden><span class="canvas-busy-spinner" aria-hidden="true"></span><strong>Drawing objects…</strong><small>Large views take a few seconds; the page responds again when the graph appears.</small></div>
             <div class="canvas-zoom" role="group" aria-label="Graph zoom">
@@ -332,6 +341,7 @@
     <script src="/architecture_actions.js"></script>
     <script src="/lineage_flows.js"></script>
     <script src="/health_signals.js"></script>
+    <script src="/anomaly_signals.js"></script>
     <script src="/compact_retrieval.js"></script>
     <script src="/system_blocks.js"></script>
     <script src="/app.js"></script>

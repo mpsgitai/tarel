@@ -610,3 +610,42 @@ footer #footer-status { margin-left: auto; }
 .bundle-sample { padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--black); }
 .bundle-sample strong, .bundle-sample small { display: block; overflow-wrap: anywhere; }
 .bundle-sample small { margin-top: 2px; color: var(--subtle); }
+/* Opt-in anomaly & pulse signals */
+.health-chip.is-anomaly:not(:disabled) { border-color: rgb(245 158 11 / 55%); color: #fcd34d; }
+.health-chip.is-anomaly.is-active { border-color: #f43f5e; background: rgb(244 63 94 / 20%); color: #fda4af; }
+.anomaly-notice-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.anomaly-mini-spark { flex: none; display: block; overflow: visible; }
+.hl-swatch.is-pulse-anomalous { border-color: #f43f5e; background: #2b161d; }
+.hl-swatch.is-pulse-downstream { border-style: dashed; border-color: #f59e0b; }
+.hl-swatch.is-pulse-active { border-color: #10b981; }
+.hl-swatch.is-pulse-static { border-color: #64748b; }
+.anomaly-inspector-panel { margin: 8px 0 12px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-low); }
+.anomaly-inspector-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; cursor: pointer; font-size: 12px; list-style: none; }
+.anomaly-inspector-summary::-webkit-details-marker { display: none; }
+.anomaly-summary-title { font-weight: 600; color: var(--text); }
+.anomaly-summary-meta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
+.anomaly-state-pill { padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; border: 1px solid var(--line); }
+.anomaly-state-pill.is-anomalous { background: rgb(244 63 94 / 16%); border-color: rgb(244 63 94 / 50%); color: #fda4af; }
+.anomaly-state-pill.is-active { background: rgb(16 185 129 / 14%); border-color: rgb(16 185 129 / 45%); color: #6ee7b7; }
+.anomaly-state-pill.is-static { background: rgb(100 116 139 / 16%); border-color: rgb(100 116 139 / 45%); color: #cbd5e1; }
+.anomaly-state-pill.is-empty { border-style: dashed; border-color: #94a3b8; color: #cbd5e1; }
+.anomaly-stale-pill { padding: 1px 5px; border-radius: 999px; background: rgb(245 158 11 / 18%); color: #fcd34d; font-size: 10px; font-weight: 600; }
+.anomaly-inspector-body { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.anomaly-meta-line { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--subtle); }
+.anomaly-spark-wrap { padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--black); }
+.anomaly-detail-spark { display: block; }
+.anomaly-spark-caption { display: block; margin-top: 4px; font-size: 10.5px; color: var(--subtle); }
+.anomaly-finding-card { padding: 8px; border: 1px solid rgb(244 63 94 / 32%); border-radius: 5px; background: rgb(244 63 94 / 6%); display: grid; gap: 6px; }
+.anomaly-finding-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; }
+.anomaly-finding-cat { font-weight: 600; color: #fda4af; }
+.anomaly-finding-summary { margin: 0; font-size: 12px; color: var(--text); }
+.anomaly-dist-box { display: grid; gap: 5px; padding: 6px; border-radius: 4px; background: var(--black); border: 1px solid var(--line); }
+.anomaly-dist-row { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); }
+.anomaly-dist-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-high); }
+.anomaly-dist-seg { height: 100%; }
+.anomaly-dist-legend { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 10.5px; color: var(--subtle); }
+.anomaly-dist-key { display: inline-flex; align-items: center; gap: 4px; }
+.anomaly-dist-key i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.anomaly-downstream-note { margin: 0; font-size: 11px; color: #fcd34d; }
+.anomaly-finding-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.anomaly-finding-actions button { min-height: 24px; padding: 2px 8px; font-size: 11px; }
