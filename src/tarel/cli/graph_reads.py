@@ -6,6 +6,7 @@ import argparse
 
 from tarel.cli._args import Subcommands, add_format_argument, add_view_argument
 from tarel.cli._output import print_json, render_compact
+from tarel.cli._pretty_catalog import render_graph_header, render_graph_objects, render_slice
 from tarel.graph.reads import (
     graph_freshness_use_case,
     graph_header_use_case,
@@ -23,7 +24,7 @@ def register(commands: Subcommands) -> None:
             name, help=f"Selective graph {name}; graph.json stays authoritative."
         )
         parser.add_argument("name")
-        add_format_argument(parser)
+        add_format_argument(parser, pretty=name != "rebuild-index")
         if name in {"objects", "slice"}:
             parser.add_argument(
                 "--object", action="append", dest="object_ids", required=name == "slice",
@@ -69,9 +70,11 @@ def dispatch(args: argparse.Namespace) -> int | None:
             expected_revision=args.revision,
             include_containment=args.include_containment,
         )
-        if args.view == "compact":
+        if args.view == "compact" or args.format == "pretty":
             compact = result.to_compact_dict(freshness=graph_freshness_use_case((args.name,)))
-            if args.format == "json":
+            if args.format == "pretty":
+                render_slice(compact)
+            elif args.format == "json":
                 render_compact(compact, output_format="json")
             else:
                 _render_compact_slice(compact)
@@ -80,6 +83,10 @@ def dispatch(args: argparse.Namespace) -> int | None:
         return None
     if args.format == "json":
         print_json(result.to_dict(), ensure_ascii=False)
+    elif args.format == "pretty" and isinstance(result, GraphHeader):
+        render_graph_header(result, graph_freshness_use_case((args.name,)))
+    elif args.format == "pretty" and isinstance(result, GraphObjectPage):
+        render_graph_objects(result)
     else:
         _render_text(result)
     return 0

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tarel.cli._args import Subcommands, add_format_argument, add_view_argument
 from tarel.cli._output import print_json, render_compact
+from tarel.cli._pretty_lineage import render_focus
 from tarel.focus.application import build_focus_use_case, list_focuses_use_case, load_focus_use_case
 from tarel.focus.contracts import FocusDocument
 from tarel.graph.reads import graph_freshness_use_case
@@ -38,7 +39,7 @@ def register(subcommands: Subcommands) -> None:
     focus_show = focus_commands.add_parser("show", help="Show one persisted focus snapshot.")
     focus_show.add_argument("name")
     add_view_argument(focus_show)
-    add_format_argument(focus_show)
+    add_format_argument(focus_show, pretty=True)
 
     focus_list = focus_commands.add_parser("list", help="List persisted focus snapshots.")
     add_format_argument(focus_list)
@@ -105,12 +106,13 @@ def _run_build(args: argparse.Namespace) -> int:
 
 def _run_show(args: argparse.Namespace) -> int:
     focus = load_focus_use_case(args.name)
-    if args.view == "compact":
+    if args.view == "compact" or args.format == "pretty":
         graphs = tuple(item.name for item in focus.sources if item.kind == "graph")
-        render_compact(
-            focus.to_compact_dict(freshness=graph_freshness_use_case(graphs)),
-            output_format=args.format,
-        )
+        payload = focus.to_compact_dict(freshness=graph_freshness_use_case(graphs))
+        if args.format == "pretty":
+            render_focus(payload)
+        else:
+            render_compact(payload, output_format=args.format)
         return 0
     _render_focus(focus, output_format=args.format)
     return 0

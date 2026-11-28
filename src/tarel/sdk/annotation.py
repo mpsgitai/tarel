@@ -10,6 +10,7 @@ from tarel.annotations.application import (
     AnnotationApplyResult,
     AnnotationBatchResult,
     AnnotationReviewResult,
+    annotation_coverage_use_case,
     apply_annotation_use_case,
     decide_annotation_use_case,
     edit_annotation_use_case,
@@ -20,6 +21,7 @@ from tarel.annotations.application import (
     show_annotation_use_case,
 )
 from tarel.annotations.contracts import AnnotationTask
+from tarel.annotations.coverage import AnnotationCoverage
 from tarel.annotations.review import AnnotationReviewRecord
 from tarel.connectors.contracts import SampleResult
 from tarel.knowledge.contracts import DEFAULT_MAX_KNOWLEDGE_CHARACTERS
@@ -94,6 +96,20 @@ class AnnotationAPI(RuntimeAPI):
             knowledge_document_ids=knowledge_documents,
             knowledge_workspace=knowledge_workspace,
             max_knowledge_characters=max_knowledge_characters,
+            runtime=self._runtime,
+        )
+
+    def coverage(
+        self,
+        *,
+        graph: str | None = None,
+        workspace: str | None = None,
+        systems: tuple[str, ...] = (),
+        limit: int = 50,
+    ) -> AnnotationCoverage:
+        """Annotation, role and grain coverage; ``.to_dict()`` gives the compact JSON."""
+        return annotation_coverage_use_case(
+            graph_name=graph, workspace_name=workspace, systems=systems, limit=limit,
             runtime=self._runtime,
         )
 

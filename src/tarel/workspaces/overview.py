@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from tarel.compact import omit_empty
+from tarel.errors import unknown_name_error
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure, WorkspaceSystem
 
 DEPTHS = ("index", "zones", "full")
@@ -34,6 +35,7 @@ def build_workspace_overview(
     *,
     depth: str = "index",
     stats: Mapping[str, GraphStats] | None = None,
+    systems: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if depth not in DEPTHS:
         raise WorkspaceFailure(
@@ -45,9 +47,17 @@ def build_workspace_overview(
         )
     if depth == "full":
         return workspace.to_dict()
-    systems = [
+    known = {item.name for item in workspace.systems}
+    for name in systems:
+        if name not in known:
+            raise unknown_name_error(
+                WorkspaceFailure, "system_not_found", f"System not found: {name}",
+                param="systems", value=name, accepted=known, noun="system",
+            )
+    selected = [
         _system(item, depth=depth, stats=stats)
         for item in sorted(workspace.systems, key=lambda value: value.name)
+        if not systems or item.name in systems
     ]
     return omit_empty(
         {
@@ -61,7 +71,8 @@ def build_workspace_overview(
             else {"full": "depth=full"},
             "relationship_count": len(workspace.relationships),
             "system_count": len(workspace.systems),
-            "systems": systems,
+            "systems": selected,
+            "systems_filter": list(systems),
             "truncated": False,
         }
     )

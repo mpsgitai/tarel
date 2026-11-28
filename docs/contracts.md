@@ -1492,6 +1492,30 @@ self-loop, cycle and null rules to a stored focus. Its nodes keep the full membe
 `depth` and annotation `state`. It adds `name`, `revision`, `sources` and
 `summary.duplicates_merged`. Its edges carry no evidence, because a focus snapshot stores none.
 
+### Human reading mode
+
+`--format pretty` is a third rendering of the same payload, for people at a terminal: titled
+sections, aligned tables, lineage as a tree, bars for coverage and budgets. It is offered only by
+read commands that have such a layout (`workspace show`, `graph header|objects|slice`,
+`lineage upstream|trace|downstream|batch`, `focus show`, `search`, `context build`,
+`annotation coverage`). Other commands reject the value instead of printing text under that name.
+Its layout is not a contract: scripts read `text` or `json`, which are unchanged.
+`TAREL_FORMAT=pretty` makes it the default only where the default would be `text`, and an unknown
+value prints a warning and is ignored. Colour appears only on a terminal and never with
+`NO_COLOR`, symbols fall back to ASCII where the console cannot encode them, and the width follows
+the terminal (`COLUMNS` overrides it). A column that is empty in every row is left out, and long
+cells end in an ellipsis; paths lose their beginning so the file name stays visible.
+
+### Annotation coverage
+
+`tarel annotation coverage --graph NAME | --workspace NAME [--system S]` (SDK:
+`annotation.coverage(...)`) counts tables and views by annotation state (`validated`,
+`review_required`, `draft`, `deferred`, `rejected`, `unannotated`). It reports `annotated_pct`
+(non-rejected annotations), `role_coverage_pct` (annotations naming a role) and
+`grain_coverage_pct` (objects whose metadata states a grain), and lists unannotated objects with
+their field count, ordered by stored `row_count` (largest first, objects without one last), then
+by label. A row count is never estimated. The default output is compact JSON on one line.
+
 ### Source resolution
 
 `lineage find|upstream|trace|downstream|batch` choose their sources by one rule

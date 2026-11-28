@@ -14,6 +14,7 @@ from tarel.cli._args import (
     require_graph_or_workspace,
 )
 from tarel.cli._output import print_json
+from tarel.cli._pretty_catalog import render_search
 from tarel.retrieval.search_application import search_graph_use_case, search_workspace_use_case
 from tarel.search import SearchFailure, SearchFilters, SearchResults
 
@@ -44,7 +45,7 @@ def register(subcommands: Subcommands) -> None:
     _add_search_filter_arguments(search)
     _add_workspace_result_arguments(search)
     add_annotation_state_arguments(search)
-    add_format_argument(search)
+    add_format_argument(search, pretty=True)
 
 
 
@@ -142,6 +143,9 @@ def _add_workspace_result_arguments(parser: argparse.ArgumentParser) -> None:
 def _render_search_results(results: SearchResults, *, output_format: str) -> None:
     if output_format == "json":
         print_json(results.to_dict())
+        return
+    if output_format == "pretty":
+        render_search(results)
         return
     print(f"Search: {results.query}")
     if results.workspace:

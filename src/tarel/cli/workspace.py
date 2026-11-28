@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from tarel.cli._args import Subcommands, add_format_argument, add_scope_arguments
 from tarel.cli._output import print_json, render_compact
+from tarel.cli._pretty_catalog import render_workspace
 from tarel.workspaces.application import (
     add_workspace_relationship_use_case,
     create_workspace_use_case,
@@ -57,7 +58,11 @@ def register(subcommands: Subcommands) -> None:
         "--stats", action="store_true",
         help="With index or zones: add object counts and annotated_pct per system.",
     )
-    add_format_argument(workspace_show)
+    workspace_show.add_argument(
+        "--system", action="append", dest="systems",
+        help="With index or zones: show only this system; repeatable.",
+    )
+    add_format_argument(workspace_show, pretty=True)
 
     workspace_scope = workspace_commands.add_parser(
         "scope",
@@ -292,11 +297,16 @@ def _run_list(args: argparse.Namespace) -> int:
 
 
 def _run_show(args: argparse.Namespace) -> int:
-    if args.depth != "full":
+    if args.depth != "full" or args.format == "pretty":
+        # Pretty never prints member lists; for --depth full it shows the zones tier.
+        depth = "zones" if args.depth == "full" else args.depth
         overview = workspace_overview_use_case(
-            args.name, depth=args.depth, include_stats=args.stats,
+            args.name, depth=depth, include_stats=args.stats,
+            systems=tuple(args.systems or ()),
         )
-        if args.format == "json":
+        if args.format == "pretty":
+            render_workspace(overview)
+        elif args.format == "json":
             render_compact(overview, output_format="json")
         else:
             _render_overview(overview)

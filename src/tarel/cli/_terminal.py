@@ -12,8 +12,16 @@ import sys
 from dataclasses import dataclass
 from typing import TextIO
 
-_SYMBOLS = {"ok": "✓", "fail": "✗", "pointer": "›", "rule": "─", "busy": "◦", "dot": "·"}
-_ASCII = {"ok": "+", "fail": "x", "pointer": ">", "rule": "-", "busy": "*", "dot": "-"}
+_SYMBOLS = {
+    "ok": "✓", "fail": "✗", "pointer": "›", "rule": "─", "busy": "◦", "dot": "·",
+    "tee": "├─", "elbow": "└─", "pipe": "│ ", "left": "←", "right": "→", "cycle": "↻",
+    "full": "█", "empty": "░", "bullet": "•", "ellipsis": "…", "square": "■", "warn": "!",
+}
+_ASCII = {
+    "ok": "+", "fail": "x", "pointer": ">", "rule": "-", "busy": "*", "dot": "-",
+    "tee": "|-", "elbow": "`-", "pipe": "| ", "left": "<-", "right": "->", "cycle": "@",
+    "full": "#", "empty": ".", "bullet": "*", "ellipsis": "...", "square": "#", "warn": "!",
+}
 
 
 @dataclass(frozen=True)
@@ -59,6 +67,9 @@ class Style:
     def bad(self, value: str) -> str:
         return self._wrap("31", value)
 
+    def warn(self, value: str) -> str:
+        return self._wrap("33", value)
+
 
 def _enable_windows_ansi() -> bool:
     # A sys.platform check (not os.name) lets mypy type ctypes.windll on every platform.
@@ -80,3 +91,12 @@ def _enable_windows_ansi() -> bool:
 
 def is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+FORMAT_ENVIRONMENT = "TAREL_FORMAT"
+
+
+def preferred_format() -> str | None:
+    """``TAREL_FORMAT`` when it names a known format; ``tarel.cli.main`` warns about others."""
+    value = os.environ.get(FORMAT_ENVIRONMENT, "").strip()
+    return value if value in {"text", "pretty"} else None

@@ -18,6 +18,7 @@ from tarel.cli._args import (
     require_graph_or_workspace,
 )
 from tarel.cli._output import print_json
+from tarel.cli._pretty_catalog import render_context
 from tarel.context.application import (
     compile_context_prefix_use_case,
     compile_context_use_case,
@@ -84,7 +85,7 @@ def register(subcommands: Subcommands) -> None:
         "--brief", action="store_true",
         help="Print only compact orientation, coverage, gaps, and continuity identity.",
     )
-    add_format_argument(context_build)
+    add_format_argument(context_build, pretty=True)
 
     context_prefix = context_commands.add_parser(
         "prefix",
@@ -151,6 +152,9 @@ def dispatch(args: argparse.Namespace) -> int | None:
 def _render_context(
     result: ContextResult, *, output_format: str, brief_only: bool = False,
 ) -> None:
+    if output_format == "pretty":
+        render_context(result, describe_context_use_case(result))
+        return
     if brief_only:
         _render_context_brief(describe_context_use_case(result), output_format=output_format)
         return

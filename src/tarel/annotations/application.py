@@ -14,6 +14,7 @@ from tarel.annotations.contracts import (
     AnnotationRunResult,
     AnnotationTask,
 )
+from tarel.annotations.coverage import AnnotationCoverage, measure_coverage
 from tarel.annotations.review import (
     AnnotationReviewRecord,
     annotation_review_record,
@@ -33,6 +34,7 @@ from tarel.knowledge.application import knowledge_contexts_for_tasks, validate_k
 from tarel.knowledge.contracts import DEFAULT_MAX_KNOWLEDGE_CHARACTERS
 from tarel.providers.host import load_provider
 from tarel.runtime import TarelRuntime, resolve_runtime
+from tarel.workspaces.application import load_workspace_scope
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,3 +423,48 @@ def _plan_graph_annotations(
         profiles_by_target=profiles,
         knowledge_by_target=knowledge,
     )
+
+
+def annotation_coverage_use_case(
+    *,
+    graph_name: str | None = None,
+    workspace_name: str | None = None,
+    systems: tuple[str, ...] = (),
+    limit: int = 50,
+    runtime: TarelRuntime | None = None,
+) -> AnnotationCoverage:
+    """Annotation, role and grain coverage of one graph or a workspace scope."""
+    if (graph_name is None) == (workspace_name is None):
+        raise AnnotationFailure(
+            "invalid_coverage_scope",
+            "Annotation coverage needs exactly one of a graph or a workspace.",
+            hint="Pass --graph NAME, or --workspace NAME (optionally with --system).",
+            retryable=True,
+        )
+    if systems and workspace_name is None:
+        raise AnnotationFailure(
+            "invalid_coverage_scope",
+            "--system narrows a workspace; it needs --workspace.",
+            hint="Add --workspace NAME, or drop --system.",
+            retryable=True,
+        )
+    if not 1 <= limit <= 1000:
+        raise AnnotationFailure(
+            "invalid_coverage_limit", "Coverage limit must be between 1 and 1000.", retryable=True,
+        )
+    if graph_name is not None:
+        graph = resolve_runtime(runtime).graph_store().load(graph_name)
+        objects = [(graph, node) for node in graph.nodes if node.type in {"table", "view"}]
+        return measure_coverage(f"graph:{graph_name}", objects, limit=limit)
+    assert workspace_name is not None
+    _workspace, loaded, scope = load_workspace_scope(
+        workspace_name, systems=systems, runtime=runtime,
+    )
+    nodes = {name: graph.node_by_id() for name, graph in loaded.items()}
+    selected = [
+        (loaded[item.graph], nodes[item.graph][item.object_id])
+        for item in scope.objects
+        if item.object_id in nodes.get(item.graph, {})
+    ]
+    label = f"workspace:{workspace_name}" + (f" systems={','.join(systems)}" if systems else "")
+    return measure_coverage(label, selected, limit=limit)

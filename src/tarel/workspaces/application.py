@@ -80,6 +80,7 @@ def workspace_overview_use_case(
     *,
     depth: str = "index",
     include_stats: bool = False,
+    systems: tuple[str, ...] = (),
     runtime: TarelRuntime | None = None,
 ) -> dict[str, object]:
     """A tiered overview (index, zones or full); ``include_stats`` reads object counts."""
@@ -88,9 +89,12 @@ def workspace_overview_use_case(
     stats = None
     if include_stats and depth != "full":
         store = state.graph_store()
-        graphs = sorted({graph for system in workspace.systems for graph in system.graphs})
+        graphs = sorted({
+            graph for system in workspace.systems if not systems or system.name in systems
+            for graph in system.graphs
+        })
         stats = {graph: _graph_stats(store, graph) for graph in graphs}
-    return build_workspace_overview(workspace, depth=depth, stats=stats)
+    return build_workspace_overview(workspace, depth=depth, stats=stats, systems=systems)
 
 
 def _graph_stats(store: FileGraphStore, name: str) -> GraphStats:

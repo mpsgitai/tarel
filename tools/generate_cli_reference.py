@@ -478,6 +478,12 @@ NOTES = {
         "m other graphs into the best hit's duplicates list. --role always f"
         "ilters; on sparsely annotated scopes a warning gives role_coverage_pct."
     ),
+    "annotation coverage": (
+        "Counts objects by annotation state with annotated, role and grain "
+        "coverage for one --graph or a --workspace (narrowed by --system), "
+        "and lists unannotated objects by stored row_count, then label. Pri"
+        "nts compact JSON on one line; --format pretty draws bars and tables."
+    ),
     "lineage trace": (
         "Defaults to the compact view. Without --lineage it reads every loc"
         "al lineage document and, without --graph, the graphs their qualif"
@@ -1323,6 +1329,22 @@ lines = [
         "or example context expansion omissions or unknown context impact"
         "). Inspect structured status and omissions, not only the exit co"
         "de. This is not an exhaustive external-driver failure catalog."
+    ),
+    "",
+    "## Human reading mode",
+    "",
+    (
+        "Read commands with a human layout accept --format pretty: worksp"
+        "ace show, graph header/objects/slice, lineage upstream/trace/down"
+        "stream/batch, focus show, search, context build and annotation co"
+        "verage. It draws titled sections, aligned tables and lineage trees"
+        " from the same payload as the other formats, uses colour only on a"
+        " terminal and never with NO_COLOR, falls back to ASCII on consoles"
+        " that cannot encode box-drawing symbols, and follows the terminal "
+        "width (COLUMNS overrides it). TAREL_FORMAT=pretty makes it the def"
+        "ault where a command would otherwise print text; JSON defaults and"
+        " --format text stay unchanged. Errors print as a short block with "
+        "the hint, suggestion and accepted values on stderr."
     ),
     "",
     "## Command index",

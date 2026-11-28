@@ -47,10 +47,11 @@ class WorkspaceAPI(RuntimeAPI):
 
     def overview(
         self, name: str, *, depth: str = "index", stats: bool = False,
+        systems: tuple[str, ...] = (),
     ) -> dict[str, object]:
         """``index``: systems and counts; ``zones``: adds areas and zones; ``full``: document."""
         return workspace_overview_use_case(
-            name, depth=depth, include_stats=stats, runtime=self._runtime,
+            name, depth=depth, include_stats=stats, systems=systems, runtime=self._runtime,
         )
 
     def define_system(

@@ -4,7 +4,7 @@ Command reference for the CLI shipped in this source tree. Regenerate with `pyth
 
 Syntax, choices, defaults, required flags, and mutually exclusive groups are generated from the CLI parser. The command notes describe behavior; the linked contracts define structured inputs and outputs. Resource names in examples must be replaced with resources in your environment.
 
-**Coverage:** 182 executable commands in 34 groups.
+**Coverage:** 183 executable commands in 34 groups.
 
 ## Reading this reference
 
@@ -26,6 +26,10 @@ Repeated values of a workspace scope facet form a union; different facets narrow
 ## Exit status and errors
 
 The main dispatcher returns 2 for recognized domain errors. With --format text it writes `error [code]: message` and, when known, `hint: ...` to stderr; with --format json it writes one `{"error": {...}}` object to stderr (code, message, retryable, optional hint and details) and leaves stdout empty. Retryable errors name the rejected parameter and the accepted values or a corrected `suggestion` in details. Argument parsing errors also normally use status 2. Successful operations normally return 0. Some operations use 1 for an incomplete/unknown outcome (for example context expansion omissions or unknown context impact). Inspect structured status and omissions, not only the exit code. This is not an exhaustive external-driver failure catalog.
+
+## Human reading mode
+
+Read commands with a human layout accept --format pretty: workspace show, graph header/objects/slice, lineage upstream/trace/downstream/batch, focus show, search, context build and annotation coverage. It draws titled sections, aligned tables and lineage trees from the same payload as the other formats, uses colour only on a terminal and never with NO_COLOR, falls back to ASCII on consoles that cannot encode box-drawing symbols, and follows the terminal width (COLUMNS overrides it). TAREL_FORMAT=pretty makes it the default where a command would otherwise print text; JSON defaults and --format text stay unchanged. Errors print as a short block with the hint, suggestion and accepted values on stderr.
 
 ## Command index
 
@@ -64,7 +68,7 @@ The main dispatcher returns 2 for recognized domain errors. With --format text i
 | [search](#search) | 1 | Find graph anchors by technical names and business meaning. |
 | [context](#context) | 6 | Build a bounded context packet, prepare a stable prefix, compare packets, or expand pinned metadata. |
 | [grounding](#grounding) | 1 | Combine a context packet with source identity, dialects, and selected lineage information. |
-| [annotation](#annotation) | 9 | Plan knowledge work, hand a task to the harness, apply a proposal, and review its meaning. |
+| [annotation](#annotation) | 10 | Plan knowledge work, hand a task to the harness, apply a proposal, and review its meaning. |
 | [relationship](#relationship) | 6 | Propose, probe, discover, and review physical field relationships. |
 | [retrieval](#retrieval) | 3 | Select embedding and reranker models independently across local and HTTP providers. |
 
@@ -919,7 +923,9 @@ Show one workspace hierarchy.
 **Syntax**
 
 ```text
-tarel workspace show [-h] [--depth {index,zones,full}] [--stats] [--format {text,json}] name
+tarel workspace show [-h] [--depth {index,zones,full}] [--stats] [--system SYSTEMS]
+                            [--format {text,json,pretty}]
+                            name
 ```
 
 **Arguments and options**
@@ -930,7 +936,8 @@ tarel workspace show [-h] [--depth {index,zones,full}] [--stats] [--format {text
 | `name` | text | required | not set | Name of the resource operated on by this command; see the command purpose. |
 | `--depth` | text; `index`, `zones`, `full` | optional | `full` | index: systems and counts; zones: plus areas and zones; full: the document (default). index and zones print JSON on one line. |
 | `--stats` | flag | optional | `False` | With index or zones: add object counts and annotated_pct per system. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--system` | text | optional; repeatable | not set | With index or zones: show only this system; repeatable. |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** Workspace definition, resolved scope/zone, or relationship records according to the verb. Scope output identifies selected graph objects and its scope hash.
 
@@ -2273,7 +2280,7 @@ Selective graph header; graph.json stays authoritative.
 **Syntax**
 
 ```text
-tarel graph header [-h] [--format {text,json}] name
+tarel graph header [-h] [--format {text,json,pretty}] name
 ```
 
 **Arguments and options**
@@ -2282,7 +2289,7 @@ tarel graph header [-h] [--format {text,json}] name
 | --- | --- | --- | --- | --- |
 | `-h, --help` | flag | optional | — | show this help message and exit |
 | `name` | text | required | not set | Name of the resource operated on by this command; see the command purpose. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** A graph summary for build/show, change information for refresh, annotation progress/summary, or selective header/page/slice records. Selective results carry complete-source identity and read accounting.
 
@@ -2295,8 +2302,9 @@ Selective graph objects; graph.json stays authoritative.
 **Syntax**
 
 ```text
-tarel graph objects [-h] [--format {text,json}] [--object OBJECT_IDS] [--namespace NAMESPACE]
-                           [--revision REVISION] [--offset OFFSET] [--limit LIMIT]
+tarel graph objects [-h] [--format {text,json,pretty}] [--object OBJECT_IDS]
+                           [--namespace NAMESPACE] [--revision REVISION] [--offset OFFSET]
+                           [--limit LIMIT]
                            name
 ```
 
@@ -2306,7 +2314,7 @@ tarel graph objects [-h] [--format {text,json}] [--object OBJECT_IDS] [--namespa
 | --- | --- | --- | --- | --- |
 | `-h, --help` | flag | optional | — | show this help message and exit |
 | `name` | text | required | not set | Name of the resource operated on by this command; see the command purpose. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 | `--object` | text | optional; repeatable | not set | Object label (main.orders) or stable ID; repeatable. |
 | `--namespace` | text | optional | not set | Namespace/schema filter. |
 | `--revision` | text | optional | not set | Revision pin for this operation. |
@@ -2326,8 +2334,9 @@ Use exact object IDs from graph objects. The returned slice is a subset: preserv
 **Syntax**
 
 ```text
-tarel graph slice [-h] [--format {text,json}] --object OBJECT_IDS [--namespace NAMESPACE]
-                         [--revision REVISION] [--no-containment] [--view {full,compact}]
+tarel graph slice [-h] [--format {text,json,pretty}] --object OBJECT_IDS
+                         [--namespace NAMESPACE] [--revision REVISION] [--no-containment]
+                         [--view {full,compact}]
                          name
 ```
 
@@ -2337,7 +2346,7 @@ tarel graph slice [-h] [--format {text,json}] --object OBJECT_IDS [--namespace N
 | --- | --- | --- | --- | --- |
 | `-h, --help` | flag | optional | — | show this help message and exit |
 | `name` | text | required | not set | Name of the resource operated on by this command; see the command purpose. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 | `--object` | text | required; repeatable | not set | Object label (main.orders) or stable ID; repeatable. |
 | `--namespace` | text | optional | not set | Namespace/schema filter. |
 | `--revision` | text | optional | not set | Revision pin for this operation. |
@@ -3030,7 +3039,7 @@ Same-named objects only stop a trace that depends on them. They are settled only
 tarel lineage upstream [-h] [--lineage LINEAGES] [--graph GRAPHS] [--source SOURCES]
                               [--workspace WORKSPACE] [--no-auto-catalog] [--max-hops MAX_HOPS]
                               [--state {draft,review_required,validated}] [--view {full,compact}]
-                              [--format {text,json}]
+                              [--format {text,json,pretty}]
                               reference
 ```
 
@@ -3048,7 +3057,7 @@ tarel lineage upstream [-h] [--lineage LINEAGES] [--graph GRAPHS] [--source SOUR
 | `--max-hops` | int | optional | `12` | Maximum traversal/expansion depth. |
 | `--state` | text; `draft`, `review_required`, `validated` | optional; repeatable | not set | Selected review state. |
 | `--view` | text; `full`, `compact` | optional | `full` | full: the complete record (default). compact: each node once, edges as short rows, empty fields omitted; JSON is printed on one line. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** The selected lineage document/projection, provider-run result, task/proposal result, review list/decision, or upstream trace. The exact envelope depends on the verb and --view. next returns a task or a completed/no-task outcome.
 
@@ -3066,7 +3075,7 @@ Defaults to the compact view. Without --lineage it reads every local lineage doc
 tarel lineage trace [-h] [--direction {up,down,both}] [--lineage LINEAGES] [--graph GRAPHS]
                            [--source SOURCES] [--workspace WORKSPACE] [--no-auto-catalog]
                            [--max-hops MAX_HOPS] [--state {draft,review_required,validated}]
-                           [--view {compact,full}] [--format {text,json}]
+                           [--view {compact,full}] [--format {text,json,pretty}]
                            reference
 ```
 
@@ -3085,7 +3094,7 @@ tarel lineage trace [-h] [--direction {up,down,both}] [--lineage LINEAGES] [--gr
 | `--max-hops` | int | optional | `12` | Maximum traversal/expansion depth. |
 | `--state` | text; `draft`, `review_required`, `validated` | optional; repeatable | not set | Selected review state. |
 | `--view` | text; `compact`, `full` | optional | `compact` | compact (default): nodes once, short edge rows. full: complete JSON record. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** The selected lineage document/projection, provider-run result, task/proposal result, review list/decision, or upstream trace. The exact envelope depends on the verb and --view. next returns a task or a completed/no-task outcome.
 
@@ -3101,7 +3110,7 @@ Shortcut for `lineage trace REF --direction down`: what this reference feeds.
 tarel lineage downstream [-h] [--lineage LINEAGES] [--graph GRAPHS] [--source SOURCES]
                                 [--workspace WORKSPACE] [--no-auto-catalog] [--max-hops MAX_HOPS]
                                 [--state {draft,review_required,validated}] [--view {compact,full}]
-                                [--format {text,json}]
+                                [--format {text,json,pretty}]
                                 reference
 ```
 
@@ -3119,7 +3128,7 @@ tarel lineage downstream [-h] [--lineage LINEAGES] [--graph GRAPHS] [--source SO
 | `--max-hops` | int | optional | `12` | Maximum traversal/expansion depth. |
 | `--state` | text; `draft`, `review_required`, `validated` | optional; repeatable | not set | Selected review state. |
 | `--view` | text; `compact`, `full` | optional | `compact` | compact (default): nodes once, short edge rows. full: complete JSON record. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** The selected lineage document/projection, provider-run result, task/proposal result, review list/decision, or upstream trace. The exact envelope depends on the verb and --view. next returns a task or a completed/no-task outcome.
 
@@ -3137,7 +3146,7 @@ Builds the lineage network once for all references and prints one chain per refe
 tarel lineage batch [-h] [--direction {up,down,both}] [--lineage LINEAGES] [--graph GRAPHS]
                            [--source SOURCES] [--workspace WORKSPACE] [--no-auto-catalog]
                            [--max-hops MAX_HOPS] [--state {draft,review_required,validated}]
-                           [--format {text,json}]
+                           [--format {text,json,pretty}]
                            REFERENCE [REFERENCE ...]
 ```
 
@@ -3155,7 +3164,7 @@ tarel lineage batch [-h] [--direction {up,down,both}] [--lineage LINEAGES] [--gr
 | `--no-auto-catalog` | flag | optional | `True` | Without --lineage/--graph, do not add the graphs the lineage documents name. |
 | `--max-hops` | int | optional | `12` | Maximum traversal/expansion depth. |
 | `--state` | text; `draft`, `review_required`, `validated` | optional; repeatable | not set | Selected review state. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** The selected lineage document/projection, provider-run result, task/proposal result, review list/decision, or upstream trace. The exact envelope depends on the verb and --view. next returns a task or a completed/no-task outcome.
 
@@ -4821,7 +4830,7 @@ Show one persisted focus snapshot.
 **Syntax**
 
 ```text
-tarel focus show [-h] [--view {full,compact}] [--format {text,json}] name
+tarel focus show [-h] [--view {full,compact}] [--format {text,json,pretty}] name
 ```
 
 **Arguments and options**
@@ -4831,7 +4840,7 @@ tarel focus show [-h] [--view {full,compact}] [--format {text,json}] name
 | `-h, --help` | flag | optional | — | show this help message and exit |
 | `name` | text | required | not set | Name of the resource operated on by this command; see the command purpose. |
 | `--view` | text; `full`, `compact` | optional | `full` | full: the complete record (default). compact: each node once, edges as short rows, empty fields omitted; JSON is printed on one line. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** Saved focus/listing with seed, source revisions, members, hops, warnings, and truncation.
 
@@ -4895,7 +4904,7 @@ tarel search [-h] [--namespace NAMESPACE] [--limit LIMIT]
                     [--diversity {none,per_graph}] [--max-per-graph MAX_PER_GRAPH]
                     [--collapse-duplicates]
                     [--annotation-state {draft,validated,rejected,deferred,review_required}]
-                    [--validated-only] [--format {text,json}]
+                    [--validated-only] [--format {text,json,pretty}]
                     [name] query
 ```
 
@@ -4930,7 +4939,7 @@ tarel search [-h] [--namespace NAMESPACE] [--limit LIMIT]
 | `--collapse-duplicates` | flag | optional | `False` | Fold hits with the same object and column names (any case or punctuation) into the best-ranked one, which lists them under duplicates. |
 | `--annotation-state` | text; `draft`, `validated`, `rejected`, `deferred`, `review_required` | optional; repeatable | not set | Include semantic annotations in one or more review states. |
 | `--validated-only` | flag | optional | `False` | Include only human-validated semantic annotations. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** Ranked metadata matches and selection information, not data rows.
 
@@ -5009,7 +5018,7 @@ tarel context build [-h] [--namespace NAMESPACE] [--seed-limit SEED_LIMIT]
                            [--annotation-state {draft,validated,rejected,deferred,review_required}]
                            [--validated-only]
                            [--logical-hints {confirmed_only,confirmed_then_candidates,include_candidates}]
-                           [--brief] [--format {text,json}]
+                           [--brief] [--format {text,json,pretty}]
                            [name] query
 ```
 
@@ -5044,7 +5053,7 @@ tarel context build [-h] [--namespace NAMESPACE] [--seed-limit SEED_LIMIT]
 | `--validated-only` | flag | optional | `False` | Include only human-validated semantic annotations. |
 | `--logical-hints` | text; `confirmed_only`, `confirmed_then_candidates`, `include_candidates` | optional | not set | Include bounded logical hints for selected objects; disabled by default. |
 | `--brief` | flag | optional | `False` | Print only compact orientation, coverage, gaps, and continuity identity. |
-| `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** Context packet, metadata expansion, packet diff, or impact result. Inspect identities, budgets, and omissions; expand can return partial output with status 1.
 
@@ -5274,6 +5283,7 @@ tarel annotation plan --focus report-01 --format json
  | [`tarel annotation next`](#tarel-annotation-next) | Return the next scoped annotation task as JSON for the coding agent. |
  | [`tarel annotation apply`](#tarel-annotation-apply) | Validate and apply one coding-agent proposal as a draft. |
  | [`tarel annotation list`](#tarel-annotation-list) | List object and field annotation proposals for review. |
+ | [`tarel annotation coverage`](#tarel-annotation-coverage) | Annotation, role and grain coverage of a graph or workspace; what to annotate next. |
  | [`tarel annotation show`](#tarel-annotation-show) | Show one object or field annotation and its review history. |
  | [`tarel annotation edit`](#tarel-annotation-edit) | Create or update one bounded object or field annotation. |
  | [`tarel annotation validate`](#tarel-annotation-validate) | Mark one annotation as validated by a human. |
@@ -5404,6 +5414,34 @@ tarel annotation list [-h] [--state {draft,validated,rejected,deferred,review_re
 | `name` | text | required | not set | Name of the resource operated on by this command; see the command purpose. |
 | `--state` | text; `draft`, `validated`, `rejected`, `deferred`, `review_required` | optional; repeatable | not set | Limit results to one or more review states. |
 | `--format` | text; `text`, `json` | optional | `text` | Output format (default: text). |
+
+**Result:** Task plan, next task, proposal application, review listing, or annotation record/change. An empty plan is successful and does not mean every field was human-approved.
+
+CLI entry point and delegated output renderers: [src/tarel/cli/annotation.py](../src/tarel/cli/annotation.py).
+
+### tarel annotation coverage
+
+Annotation, role and grain coverage of a graph or workspace; what to annotate next.
+
+Counts objects by annotation state with annotated, role and grain coverage for one --graph or a --workspace (narrowed by --system), and lists unannotated objects by stored row_count, then label. Prints compact JSON on one line; --format pretty draws bars and tables.
+
+**Syntax**
+
+```text
+tarel annotation coverage [-h] [--graph GRAPH_NAME] [--workspace WORKSPACE_NAME]
+                                 [--system SYSTEMS] [--limit LIMIT] [--format {text,json,pretty}]
+```
+
+**Arguments and options**
+
+| Parameter | Type / accepted values | Required / repetition | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `-h, --help` | flag | optional | — | show this help message and exit |
+| `--graph` | text | optional | not set | Local graph name. |
+| `--workspace` | text | optional | not set | Workspace name. |
+| `--system` | text | optional; repeatable | not set | System scope selection. |
+| `--limit` | int | optional | `50` | Unannotated objects listed. |
+| `--format` | text; `text`, `json`, `pretty` | optional | `text` | Output format (default: text). pretty: human layout; TAREL_FORMAT=pretty makes it the default. |
 
 **Result:** Task plan, next task, proposal application, review listing, or annotation record/change. An empty plan is successful and does not mean every field was human-approved.
 
@@ -5991,7 +6029,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `change_report_save_failed` | [graph/change_store.py](../src/tarel/graph/change_store.py#L36) |
 | `config_not_found` | [connectors/application.py](../src/tarel/connectors/application.py#L167), [connectors/application.py](../src/tarel/connectors/application.py#L176), [sources/application.py](../src/tarel/sources/application.py#L418) |
 | `conflicting_annotation_filter` | [annotations/states.py](../src/tarel/annotations/states.py#L19) |
-| `conflicting_annotation_samples` | [annotations/application.py](../src/tarel/annotations/application.py#L358) |
+| `conflicting_annotation_samples` | [annotations/application.py](../src/tarel/annotations/application.py#L360) |
 | `conflicting_workspace_scope` | [sdk/_scope.py](../src/tarel/sdk/_scope.py#L59), [sdk/_scope.py](../src/tarel/sdk/_scope.py#L79), [sdk/_scope.py](../src/tarel/sdk/_scope.py#L93) |
 | `connection_failed` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L48), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L249) |
 | `context_character_budget_too_small` | [context/compiler.py](../src/tarel/context/compiler.py#L489) |
@@ -6111,12 +6149,12 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `index_not_found` | [retrieval/index.py](../src/tarel/retrieval/index.py#L525) |
 | `index_policy_mismatch` | [retrieval/index.py](../src/tarel/retrieval/index.py#L549), [retrieval/index.py](../src/tarel/retrieval/index.py#L567) |
 | `invalid_action` | [mcp/tools.py](../src/tarel/mcp/tools.py#L1032), [mcp/tools.py](../src/tarel/mcp/tools.py#L1124) |
-| `invalid_annotation_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L118) |
+| `invalid_annotation_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L120) |
 | `invalid_annotation_mode` | [annotations/tasks.py](../src/tarel/annotations/tasks.py#L117) |
 | `invalid_annotation_patch` | [annotations/review.py](../src/tarel/annotations/review.py#L92), [annotations/review.py](../src/tarel/annotations/review.py#L97), [annotations/review.py](../src/tarel/annotations/review.py#L99), [annotations/review.py](../src/tarel/annotations/review.py#L104), [annotations/review.py](../src/tarel/annotations/review.py#L109), [annotations/review.py](../src/tarel/annotations/review.py#L375), [annotations/review.py](../src/tarel/annotations/review.py#L386), [annotations/review.py](../src/tarel/annotations/review.py#L395) |
 | `invalid_annotation_review` | [annotations/review.py](../src/tarel/annotations/review.py#L305), [annotations/review.py](../src/tarel/annotations/review.py#L309), [annotations/review.py](../src/tarel/annotations/review.py#L315), [annotations/review.py](../src/tarel/annotations/review.py#L322), [annotations/review.py](../src/tarel/annotations/review.py#L328), [annotations/review.py](../src/tarel/annotations/review.py#L340) |
 | `invalid_annotation_samples` | [annotations/tasks.py](../src/tarel/annotations/tasks.py#L197), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L211), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L217), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L232), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L243), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L262), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L267), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L284), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L289), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L302) |
-| `invalid_annotation_scope` | [annotations/review.py](../src/tarel/annotations/review.py#L211), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L142), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L151), [cli/annotation.py](../src/tarel/cli/annotation.py#L154) |
+| `invalid_annotation_scope` | [annotations/review.py](../src/tarel/annotations/review.py#L211), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L142), [annotations/tasks.py](../src/tarel/annotations/tasks.py#L151), [cli/annotation.py](../src/tarel/cli/annotation.py#L166) |
 | `invalid_annotation_state` | [annotations/review.py](../src/tarel/annotations/review.py#L185), [annotations/review.py](../src/tarel/annotations/review.py#L410), [annotations/states.py](../src/tarel/annotations/states.py#L29) |
 | `invalid_annotation_target` | [annotations/review.py](../src/tarel/annotations/review.py#L69) |
 | `invalid_argument` | [mcp/contracts.py](../src/tarel/mcp/contracts.py#L105), [mcp/contracts.py](../src/tarel/mcp/contracts.py#L111), [mcp/tools.py](../src/tarel/mcp/tools.py#L604), [mcp/tools.py](../src/tarel/mcp/tools.py#L618), [mcp/tools.py](../src/tarel/mcp/tools.py#L1222), [mcp/tools.py](../src/tarel/mcp/tools.py#L1244), [mcp/tools.py](../src/tarel/mcp/tools.py#L1251) |
@@ -6139,6 +6177,8 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_context_kind` | [ui/query_tools.py](../src/tarel/ui/query_tools.py#L214) |
 | `invalid_context_packet` | [context/guidance.py](../src/tarel/context/guidance.py#L564), [context/guidance.py](../src/tarel/context/guidance.py#L616), [context/guidance.py](../src/tarel/context/guidance.py#L632), [context/guidance.py](../src/tarel/context/guidance.py#L665), [context/guidance.py](../src/tarel/context/guidance.py#L707), [context/guidance.py](../src/tarel/context/guidance.py#L715), [context/guidance.py](../src/tarel/context/guidance.py#L723), [context/guidance.py](../src/tarel/context/guidance.py#L731), [context/packets.py](../src/tarel/context/packets.py#L127), [context/packets.py](../src/tarel/context/packets.py#L132), [context/packets.py](../src/tarel/context/packets.py#L294), [context/packets.py](../src/tarel/context/packets.py#L304), [context/packets.py](../src/tarel/context/packets.py#L311), [context/packets.py](../src/tarel/context/packets.py#L317), [context/packets.py](../src/tarel/context/packets.py#L322), [context/packets.py](../src/tarel/context/packets.py#L351), [context/packets.py](../src/tarel/context/packets.py#L355), [context/packets.py](../src/tarel/context/packets.py#L369), [context/packets.py](../src/tarel/context/packets.py#L375) |
 | `invalid_context_selection` | [ui/query_tools.py](../src/tarel/ui/query_tools.py#L223), [ui/query_tools.py](../src/tarel/ui/query_tools.py#L225) |
+| `invalid_coverage_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L452) |
+| `invalid_coverage_scope` | [annotations/application.py](../src/tarel/annotations/application.py#L438), [annotations/application.py](../src/tarel/annotations/application.py#L445) |
 | `invalid_cube` | [semantics/cube.py](../src/tarel/semantics/cube.py#L68), [semantics/cube.py](../src/tarel/semantics/cube.py#L324), [semantics/cube.py](../src/tarel/semantics/cube.py#L332), [semantics/cube.py](../src/tarel/semantics/cube.py#L338) |
 | `invalid_dbt_manifest` | [lineage/dbt.py](../src/tarel/lineage/dbt.py#L38), [lineage/dbt.py](../src/tarel/lineage/dbt.py#L358) |
 | `invalid_dbt_mapping` | [cli/lineage.py](../src/tarel/cli/lineage.py#L421) |
@@ -6202,7 +6242,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_lineage_batch` | [lineage/directions.py](../src/tarel/lineage/directions.py#L125) |
 | `invalid_lineage_change` | [lineage/refresh.py](../src/tarel/lineage/refresh.py#L105), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L107), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L181), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L185), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L943), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L949), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L956), [lineage/refresh.py](../src/tarel/lineage/refresh.py#L962) |
 | `invalid_lineage_change_report` | [lineage/change_store.py](../src/tarel/lineage/change_store.py#L57), [lineage/change_store.py](../src/tarel/lineage/change_store.py#L62) |
-| `invalid_lineage_direction` | [lineage/directions.py](../src/tarel/lineage/directions.py#L264) |
+| `invalid_lineage_direction` | [lineage/directions.py](../src/tarel/lineage/directions.py#L266) |
 | `invalid_lineage_input` | [lineage/source.py](../src/tarel/lineage/source.py#L148), [lineage/source.py](../src/tarel/lineage/source.py#L153), [lineage/source.py](../src/tarel/lineage/source.py#L173), [lineage/source.py](../src/tarel/lineage/source.py#L176), [lineage/source.py](../src/tarel/lineage/source.py#L188), [lineage/source.py](../src/tarel/lineage/source.py#L207), [lineage/source.py](../src/tarel/lineage/source.py#L210), [lineage/source.py](../src/tarel/lineage/source.py#L235), [lineage/source.py](../src/tarel/lineage/source.py#L251), [lineage/source.py](../src/tarel/lineage/source.py#L258), [lineage/source.py](../src/tarel/lineage/source.py#L274), [lineage/source.py](../src/tarel/lineage/source.py#L280), [lineage/source.py](../src/tarel/lineage/source.py#L299), [lineage/source.py](../src/tarel/lineage/source.py#L305), [lineage/source.py](../src/tarel/lineage/source.py#L312), [lineage/source.py](../src/tarel/lineage/source.py#L329), [lineage/source.py](../src/tarel/lineage/source.py#L337), [lineage/source.py](../src/tarel/lineage/source.py#L348), [lineage/source.py](../src/tarel/lineage/source.py#L354), [lineage/source.py](../src/tarel/lineage/source.py#L363), [lineage/source.py](../src/tarel/lineage/source.py#L368), [lineage/source.py](../src/tarel/lineage/source.py#L375), [lineage/source.py](../src/tarel/lineage/source.py#L381), [lineage/source.py](../src/tarel/lineage/source.py#L392), [lineage/source.py](../src/tarel/lineage/source.py#L397) |
 | `invalid_lineage_limit` | [context/grounding_application.py](../src/tarel/context/grounding_application.py#L240) |
 | `invalid_lineage_name` | [lineage/change_store.py](../src/tarel/lineage/change_store.py#L75), [lineage/store.py](../src/tarel/lineage/store.py#L79) |
@@ -6248,7 +6288,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_object_family_page` | [object_families/application.py](../src/tarel/object_families/application.py#L348) |
 | `invalid_object_family_path` | [object_families/store.py](../src/tarel/object_families/store.py#L98), [object_families/store.py](../src/tarel/object_families/store.py#L102), [object_families/store.py](../src/tarel/object_families/store.py#L109) |
 | `invalid_object_family_scope` | [object_families/application.py](../src/tarel/object_families/application.py#L339), [object_families/application.py](../src/tarel/object_families/application.py#L344) |
-| `invalid_object_reference` | [cli/_args.py](../src/tarel/cli/_args.py#L174), [context/application.py](../src/tarel/context/application.py#L377), [graph/reads.py](../src/tarel/graph/reads.py#L85), [workspaces/core.py](../src/tarel/workspaces/core.py#L495), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L179) |
+| `invalid_object_reference` | [cli/_args.py](../src/tarel/cli/_args.py#L189), [context/application.py](../src/tarel/context/application.py#L377), [graph/reads.py](../src/tarel/graph/reads.py#L85), [workspaces/core.py](../src/tarel/workspaces/core.py#L495), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L179) |
 | `invalid_observation` | [graph/store.py](../src/tarel/graph/store.py#L132) |
 | `invalid_optional_edge` | [ui/optional_metadata.py](../src/tarel/ui/optional_metadata.py#L97) |
 | `invalid_optional_endpoint` | [ui/optional_metadata.py](../src/tarel/ui/optional_metadata.py#L192) |
@@ -6265,8 +6305,8 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_port` | [mcp/contracts.py](../src/tarel/mcp/contracts.py#L95), [ui/server.py](../src/tarel/ui/server.py#L205) |
 | `invalid_previous_context` | [ui/query_tools.py](../src/tarel/ui/query_tools.py#L238), [ui/query_tools.py](../src/tarel/ui/query_tools.py#L301) |
 | `invalid_profile` | [mcp/contracts.py](../src/tarel/mcp/contracts.py#L83) |
-| `invalid_profile_row_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L363), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L205), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L377), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L517), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L823), [sources/application.py](../src/tarel/sources/application.py#L248) |
-| `invalid_proposal` | [annotations/apply.py](../src/tarel/annotations/apply.py#L74), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L87), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L116), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L119), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L126), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L132), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L137), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L143), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L170), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L187), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L191), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L206), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L214), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L220), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L229), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L232), [cli/annotation.py](../src/tarel/cli/annotation.py#L253), [cli/annotation.py](../src/tarel/cli/annotation.py#L255), [mcp/tools.py](../src/tarel/mcp/tools.py#L1168) |
+| `invalid_profile_row_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L365), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L205), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L377), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L517), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L823), [sources/application.py](../src/tarel/sources/application.py#L248) |
+| `invalid_proposal` | [annotations/apply.py](../src/tarel/annotations/apply.py#L74), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L87), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L116), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L119), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L126), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L132), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L137), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L143), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L170), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L187), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L191), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L206), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L214), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L220), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L229), [annotations/contracts.py](../src/tarel/annotations/contracts.py#L232), [cli/annotation.py](../src/tarel/cli/annotation.py#L265), [cli/annotation.py](../src/tarel/cli/annotation.py#L267), [mcp/tools.py](../src/tarel/mcp/tools.py#L1168) |
 | `invalid_provider_adapter` | [providers/application.py](../src/tarel/providers/application.py#L62), [providers/config.py](../src/tarel/providers/config.py#L106), [providers/config.py](../src/tarel/providers/config.py#L198), [providers/config.py](../src/tarel/providers/config.py#L352), [providers/host.py](../src/tarel/providers/host.py#L61), [providers/host.py](../src/tarel/providers/host.py#L66) |
 | `invalid_provider_config` | [providers/application.py](../src/tarel/providers/application.py#L90), [providers/config.py](../src/tarel/providers/config.py#L121), [providers/config.py](../src/tarel/providers/config.py#L161), [providers/config.py](../src/tarel/providers/config.py#L315), [providers/config.py](../src/tarel/providers/config.py#L361), [providers/config.py](../src/tarel/providers/config.py#L370), [providers/config.py](../src/tarel/providers/config.py#L379), [providers/config.py](../src/tarel/providers/config.py#L389), [providers/config.py](../src/tarel/providers/config.py#L419) |
 | `invalid_provider_name` | [providers/authoring.py](../src/tarel/providers/authoring.py#L22), [providers/config.py](../src/tarel/providers/config.py#L342) |
@@ -6301,13 +6341,13 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_runtime_lineage` | [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L75), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L91), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L99), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L105), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L111), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L117), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L126), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L135), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L144), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L150), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L160), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L169), [lineage/_runtime_parse.py](../src/tarel/lineage/_runtime_parse.py#L178), [lineage/runtime.py](../src/tarel/lineage/runtime.py#L31), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L62), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L131), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L136), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L145), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L153), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L161), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L228), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L242), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L250), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L258), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L399), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L415), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L502), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L507), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L520), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L528), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L540), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L616), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L621), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L633), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L644), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L672), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L678), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L704), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L710), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L719), [lineage/runtime_inputs.py](../src/tarel/lineage/runtime_inputs.py#L724), [lineage/runtime_logical.py](../src/tarel/lineage/runtime_logical.py#L137), [lineage/runtime_logical.py](../src/tarel/lineage/runtime_logical.py#L151), [lineage/runtime_logical.py](../src/tarel/lineage/runtime_logical.py#L163), [lineage/runtime_logical.py](../src/tarel/lineage/runtime_logical.py#L168), [lineage/runtime_logical.py](../src/tarel/lineage/runtime_logical.py#L175), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L74), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L78), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L365), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L446), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L452), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L469), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L474), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L481), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L507), [lineage/runtime_records.py](../src/tarel/lineage/runtime_records.py#L531), [lineage/runtime_store.py](../src/tarel/lineage/runtime_store.py#L81), [lineage/runtime_store.py](../src/tarel/lineage/runtime_store.py#L86), [lineage/runtime_store.py](../src/tarel/lineage/runtime_store.py#L92) |
 | `invalid_runtime_lineage_graph` | [lineage/runtime_application.py](../src/tarel/lineage/runtime_application.py#L242) |
 | `invalid_runtime_lineage_name` | [lineage/runtime_store.py](../src/tarel/lineage/runtime_store.py#L107) |
-| `invalid_sample_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L356), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L97), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L344), [sources/application.py](../src/tarel/sources/application.py#L253) |
+| `invalid_sample_limit` | [annotations/application.py](../src/tarel/annotations/application.py#L358), [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L97), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L344), [sources/application.py](../src/tarel/sources/application.py#L253) |
 | `invalid_schema_reference` | [workspaces/core.py](../src/tarel/workspaces/core.py#L267), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L303) |
 | `invalid_scope` | [sync/contracts.py](../src/tarel/sync/contracts.py#L459), [sync/publish_application.py](../src/tarel/sync/publish_application.py#L66), [sync/publish_application.py](../src/tarel/sync/publish_application.py#L100) |
-| `invalid_scope_target` | [cli/_args.py](../src/tarel/cli/_args.py#L188) |
+| `invalid_scope_target` | [cli/_args.py](../src/tarel/cli/_args.py#L203) |
 | `invalid_search_diversity` | [workspaces/retrieval.py](../src/tarel/workspaces/retrieval.py#L105), [workspaces/retrieval.py](../src/tarel/workspaces/retrieval.py#L112) |
 | `invalid_search_filter` | [tarel/search.py](../src/tarel/search.py#L57), [tarel/search.py](../src/tarel/search.py#L62) |
-| `invalid_search_option` | [cli/search.py](../src/tarel/cli/search.py#L83) |
+| `invalid_search_option` | [cli/search.py](../src/tarel/cli/search.py#L84) |
 | `invalid_semantic_concept_mode` | [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L188) |
 | `invalid_semantic_concept_query` | [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L142), [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L193), [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L214) |
 | `invalid_semantic_concepts` | [cli/concept.py](../src/tarel/cli/concept.py#L120), [cli/concept.py](../src/tarel/cli/concept.py#L122), [semantic_concepts/application.py](../src/tarel/semantic_concepts/application.py#L68), [semantic_concepts/contracts.py](../src/tarel/semantic_concepts/contracts.py#L239), [semantic_concepts/store.py](../src/tarel/semantic_concepts/store.py#L41), [semantic_concepts/store.py](../src/tarel/semantic_concepts/store.py#L46), [semantic_concepts/store.py](../src/tarel/semantic_concepts/store.py#L52) |
@@ -6335,10 +6375,10 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_url` | [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L606), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L617), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L636) |
 | `invalid_vector_backend` | [retrieval/index.py](../src/tarel/retrieval/index.py#L668) |
 | `invalid_workspace` | [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L99), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L276), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L299), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L309), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L332), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L342), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L358), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L363), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L375), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L381), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L390), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L401), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L416), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L426), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L443), [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L453), [workspaces/store.py](../src/tarel/workspaces/store.py#L59), [workspaces/store.py](../src/tarel/workspaces/store.py#L64) |
-| `invalid_workspace_depth` | [workspaces/overview.py](../src/tarel/workspaces/overview.py#L39) |
+| `invalid_workspace_depth` | [workspaces/overview.py](../src/tarel/workspaces/overview.py#L41) |
 | `invalid_workspace_identifier` | [workspaces/contracts.py](../src/tarel/workspaces/contracts.py#L435) |
 | `invalid_workspace_name` | [workspaces/store.py](../src/tarel/workspaces/store.py#L81) |
-| `invalid_workspace_scope` | [cli/_args.py](../src/tarel/cli/_args.py#L192) |
+| `invalid_workspace_scope` | [cli/_args.py](../src/tarel/cli/_args.py#L207) |
 | `invalid_write_coverage` | [lineage/core.py](../src/tarel/lineage/core.py#L674) |
 | `knowledge_document_too_large` | [knowledge/contracts.py](../src/tarel/knowledge/contracts.py#L271) |
 | `knowledge_exists` | [knowledge/application.py](../src/tarel/knowledge/application.py#L43) |
@@ -6453,7 +6493,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `partial_refresh_scope` | [graph/application.py](../src/tarel/graph/application.py#L293) |
 | `profile_read_only` | [mcp/tools.py](../src/tarel/mcp/tools.py#L104) |
 | `profiling_failed` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L180), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L465), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L484), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L909) |
-| `proposal_not_found` | [cli/annotation.py](../src/tarel/cli/annotation.py#L248) |
+| `proposal_not_found` | [cli/annotation.py](../src/tarel/cli/annotation.py#L260) |
 | `provider_http_error` | [providers/openai_compatible.py](../src/tarel/providers/openai_compatible.py#L92), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L71) |
 | `provider_not_configured` | [providers/config.py](../src/tarel/providers/config.py#L77), [providers/config.py](../src/tarel/providers/config.py#L153), [providers/config.py](../src/tarel/providers/config.py#L169), [providers/config.py](../src/tarel/providers/config.py#L257), [providers/host.py](../src/tarel/providers/host.py#L27) |
 | `provider_unavailable` | [providers/openai_compatible.py](../src/tarel/providers/openai_compatible.py#L97), [providers/openrouter.py](../src/tarel/providers/openrouter.py#L76) |
@@ -6535,7 +6575,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `signature_tool_missing` | [sync/signing.py](../src/tarel/sync/signing.py#L110) |
 | `signing_key_missing` | [sync/signing.py](../src/tarel/sync/signing.py#L57) |
 | `signing_key_required` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L135) |
-| `small_domain_values_without_profile` | [annotations/application.py](../src/tarel/annotations/application.py#L368) |
+| `small_domain_values_without_profile` | [annotations/application.py](../src/tarel/annotations/application.py#L370) |
 | `source_config_not_resolved` | [sources/application.py](../src/tarel/sources/application.py#L405) |
 | `source_exists` | [sources/application.py](../src/tarel/sources/application.py#L119) |
 | `source_graph_mismatch` | [context/grounding_application.py](../src/tarel/context/grounding_application.py#L382), [sources/application.py](../src/tarel/sources/application.py#L218), [sources/application.py](../src/tarel/sources/application.py#L347), [sources/application.py](../src/tarel/sources/application.py#L365) |
@@ -6692,6 +6732,9 @@ Signatures below are generated from the public client namespaces, including defa
 
 ```python
 tarel.annotation.apply(graph: 'str', proposal: 'dict[str, Any]', *, source: 'str' = 'agent') -> 'AnnotationApplyResult'
+```
+```python
+tarel.annotation.coverage(*, graph: 'str | None' = None, workspace: 'str | None' = None, systems: 'tuple[str, ...]' = (), limit: 'int' = 50) -> 'AnnotationCoverage'
 ```
 ```python
 tarel.annotation.decide(graph: 'str', reference: 'str', *, state: 'str', reason: 'str', include_fields: 'bool' = False) -> 'AnnotationReviewResult'
@@ -7312,7 +7355,7 @@ tarel.workspace.list() -> 'tuple[str, ...]'
 tarel.workspace.load(name: 'str') -> 'WorkspaceDocument'
 ```
 ```python
-tarel.workspace.overview(name: 'str', *, depth: 'str' = 'index', stats: 'bool' = False) -> 'dict[str, object]'
+tarel.workspace.overview(name: 'str', *, depth: 'str' = 'index', stats: 'bool' = False, systems: 'tuple[str, ...]' = ()) -> 'dict[str, object]'
 ```
 ```python
 tarel.workspace.relationships(name: 'str') -> 'tuple[WorkspaceRelationship, ...]'

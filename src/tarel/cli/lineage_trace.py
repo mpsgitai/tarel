@@ -14,6 +14,7 @@ from typing import Any
 
 from tarel.cli._args import Subcommands, add_format_argument, add_view_argument
 from tarel.cli._output import print_json, render_compact
+from tarel.cli._pretty_lineage import render_batch, render_lineage
 from tarel.graph.reads import graph_freshness_use_case
 from tarel.lineage.application import find_lineage_references_use_case, trace_upstream_use_case
 from tarel.lineage.directions import DIRECTIONS
@@ -53,7 +54,7 @@ def register(commands: Subcommands) -> None:
     upstream.add_argument("reference")
     _add_trace_arguments(upstream)
     add_view_argument(upstream)
-    add_format_argument(upstream)
+    add_format_argument(upstream, pretty=True)
 
     trace = commands.add_parser(
         "trace",
@@ -63,7 +64,7 @@ def register(commands: Subcommands) -> None:
     trace.add_argument("--direction", choices=DIRECTIONS, default="up")
     _add_trace_arguments(trace)
     _add_compact_view_argument(trace)
-    add_format_argument(trace)
+    add_format_argument(trace, pretty=True)
 
     downstream = commands.add_parser(
         "downstream",
@@ -72,7 +73,7 @@ def register(commands: Subcommands) -> None:
     downstream.add_argument("reference")
     _add_trace_arguments(downstream)
     _add_compact_view_argument(downstream)
-    add_format_argument(downstream)
+    add_format_argument(downstream, pretty=True)
 
     batch = commands.add_parser(
         "batch",
@@ -81,7 +82,7 @@ def register(commands: Subcommands) -> None:
     batch.add_argument("references", nargs="+", metavar="REFERENCE")
     batch.add_argument("--direction", choices=DIRECTIONS, default="up")
     _add_trace_arguments(batch)
-    add_format_argument(batch)
+    add_format_argument(batch, pretty=True)
 
 
 def dispatch(args: argparse.Namespace) -> int | None:
@@ -138,6 +139,13 @@ def _auto_resolution(sources: ResolvedLineageSources) -> dict[str, object] | Non
     return sources.to_dict() if sources.auto else None
 
 
+def _render_trace(payload: dict[str, object], *, output_format: str) -> None:
+    if output_format == "pretty":
+        render_lineage(payload)
+    else:
+        render_compact(payload, output_format=output_format)
+
+
 def _states(args: argparse.Namespace) -> frozenset[str] | None:
     return frozenset(args.state) if args.state else None
 
@@ -173,8 +181,8 @@ def _run_upstream(args: argparse.Namespace) -> int:
         max_hops=args.max_hops,
         states=_states(args),
     )
-    if args.view == "compact":
-        render_compact(
+    if args.view == "compact" or args.format == "pretty":
+        _render_trace(
             trace.to_compact_dict(
                 resolution=_auto_resolution(sources),
                 freshness=graph_freshness_use_case(
@@ -204,7 +212,7 @@ def _run_trace(args: argparse.Namespace, *, direction: str | None = None) -> int
     if args.view == "full" and args.format == "json":
         print_json({**trace.to_dict(), "resolution": sources.to_dict()})
         return 0
-    render_compact(
+    _render_trace(
         trace.to_compact_dict(
             resolution=_auto_resolution(sources),
             freshness=graph_freshness_use_case(
@@ -243,6 +251,9 @@ def _run_batch(args: argparse.Namespace) -> int:
     )
     if args.format == "json":
         render_compact(payload, output_format="json")
+        return 0
+    if args.format == "pretty":
+        render_batch(payload)
         return 0
     chains = payload.get("chains")
     for reference, chain in (chains.items() if isinstance(chains, dict) else ()):

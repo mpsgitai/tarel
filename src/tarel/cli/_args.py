@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import TypeAlias
 
+from tarel.cli._terminal import preferred_format
 from tarel.knowledge.contracts import DEFAULT_MAX_KNOWLEDGE_CHARACTERS
 from tarel.search import SearchFailure
 from tarel.workspaces.contracts import WorkspaceFailure
@@ -52,14 +53,28 @@ def add_annotation_state_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_format_argument(parser: argparse.ArgumentParser, *, default: str = "text") -> None:
-    """``--format text|json``. Workfile commands, whose output an agent reads, default to JSON."""
+_PRETTY_HELP = " pretty: human layout; TAREL_FORMAT=pretty makes it the default."
+
+
+def add_format_argument(
+    parser: argparse.ArgumentParser, *, default: str = "text", pretty: bool = False,
+) -> None:
+    """``--format text|json`` (``|pretty`` where a human layout exists).
+
+    Workfile commands, whose output an agent reads, default to JSON. ``TAREL_FORMAT=pretty``
+    makes ``pretty`` the default of commands that offer it and would otherwise print ``text``;
+    it never changes a JSON default, so agents reading workfiles are unaffected.
+    """
+    choices = ("text", "json", "pretty") if pretty else ("text", "json")
+    if pretty and default == "text" and preferred_format() == "pretty":
+        default = "pretty"
     parser.add_argument(
         "--format",
-        choices=("text", "json"),
+        choices=choices,
         default=default,
-        help=f"Output format (default: {default}).",
+        help=f"Output format (default: {default})." + (_PRETTY_HELP if pretty else ""),
     )
+
 
 
 def add_view_argument(parser: argparse.ArgumentParser) -> None:
