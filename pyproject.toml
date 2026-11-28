@@ -47,6 +47,9 @@ semantic = [
 vector = [
   "sqlite-vec==0.1.9",
 ]
+mcp = [
+  "mcp>=1.10,<3",
+]
 dev = [
   "build>=1.2,<2",
   "mypy>=1.15",
@@ -118,7 +121,7 @@ warn_unused_ignores = true
 
 # Optional drivers and runtimes ship without type information.
 [[tool.mypy.overrides]]
-module = ["pymssql", "sqlite_vec", "yaml"]
+module = ["mcp", "mcp.*", "pymssql", "sqlite_vec", "yaml"]
 ignore_missing_imports = true
 
 # Type debt: modules that do not pass yet. Every other module, including all of cli/ and sdk/,

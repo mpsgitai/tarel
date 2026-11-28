@@ -38,6 +38,7 @@ _COMMAND_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("index", ("index",)),
     ("graph", ("graph",)),
     ("ui", ("ui",)),
+    ("mcp", ("mcp",)),
     ("lineage", ("lineage",)),
     ("semantic", ("semantic",)),
     ("entity", ("entity",)),
