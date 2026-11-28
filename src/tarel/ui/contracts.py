@@ -36,3 +36,5 @@ class UIConfig:
     search_mode: str = "lexical"
     model_path: Path | None = None
     n_threads: int | None = None
+    anomaly: bool = False
+    anomaly_dir: Path | None = None

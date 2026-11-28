@@ -12,6 +12,9 @@ function objectSignals(item) {
 
 function matchesHealthFilter(item, filter = healthState.filter) {
   if (!filter || filter === "all") return true;
+  if (filter === "anomalous") {
+    return Boolean(state.data?.anomaly?.enabled && item?.anomaly?.state === "anomalous");
+  }
   const sig = objectSignals(item);
   if (!sig) return false;
   if (filter === "empty") return sig.population === "empty";
@@ -22,17 +25,21 @@ function matchesHealthFilter(item, filter = healthState.filter) {
 }
 
 function computeHealthCounts(objects) {
+  const anomalyEnabled = Boolean(state.data?.anomaly?.enabled);
   const counts = {
     total: 0,
     empty: 0,
     orphan: 0,
     isolated: 0,
     unannotated: 0,
+    anomalous: 0,
+    anomaly_enabled: anomalyEnabled,
     lineage_loaded: Boolean(state.data?.health_summary?.lineage_loaded || state.data?.lineages?.length),
   };
   for (const item of objects) {
     if (item.type !== "table" && item.type !== "view") continue;
     counts.total += 1;
+    if (anomalyEnabled && item?.anomaly?.state === "anomalous") counts.anomalous += 1;
     const sig = objectSignals(item);
     if (!sig) continue;
     if (sig.population === "empty") counts.empty += 1;
@@ -104,8 +111,20 @@ function renderHealthFilterBar() {
         : "Every object in view has an annotation",
     },
   ];
+  if (counts.anomaly_enabled) {
+    chips.push({
+      key: "anomalous",
+      label: `Anomalies (${counts.anomalous})`,
+      count: counts.anomalous,
+      disabled: counts.anomalous === 0,
+      extraClass: " is-anomaly",
+      title: counts.anomalous > 0
+        ? "Objects with active anomaly findings"
+        : "No active anomaly findings in current scope",
+    });
+  }
   bar.innerHTML = chips.map(chip =>
-    `<button type="button" class="health-chip${healthState.filter === chip.key ? " is-active" : ""}${chip.disabled ? " is-zero" : ""}" data-health-filter="${chip.key}" ${chip.disabled ? "disabled" : ""} title="${escapeAttr(chip.title)}">${escapeHtml(chip.label)}</button>`
+    `<button type="button" class="health-chip${chip.extraClass || ""}${healthState.filter === chip.key ? " is-active" : ""}${chip.disabled ? " is-zero" : ""}" data-health-filter="${chip.key}" ${chip.disabled ? "disabled" : ""} title="${escapeAttr(chip.title)}">${escapeHtml(chip.label)}</button>`
   ).join("");
   bar.querySelectorAll("[data-health-filter]").forEach(button => {
     button.addEventListener("click", () => setHealthFilter(button.dataset.healthFilter));
@@ -173,8 +192,12 @@ function healthInspectorSummary(item) {
 }
 
 function setHealthLens(lens) {
-  healthState.lens = lens === "health" ? "health" : "schema";
+  const pulseAllowed = Boolean(state.data?.anomaly?.enabled);
+  if (lens === "health") healthState.lens = "health";
+  else if (lens === "pulse" && pulseAllowed) healthState.lens = "pulse";
+  else healthState.lens = "schema";
   document.body.classList.toggle("health-lens", healthState.lens === "health");
+  document.body.classList.toggle("pulse-lens", healthState.lens === "pulse");
   $$("[data-canvas-lens]").forEach(btn => {
     const active = btn.dataset.canvasLens === healthState.lens;
     btn.classList.toggle("is-active", active);
@@ -182,6 +205,8 @@ function setHealthLens(lens) {
   });
   const legend = $("#health-legend");
   if (legend) legend.hidden = healthState.lens !== "health";
+  const pulseLegend = $("#pulse-legend");
+  if (pulseLegend) pulseLegend.hidden = healthState.lens !== "pulse";
   applyHealthCanvasDecorations();
 }
 
@@ -226,6 +251,7 @@ function applyHealthCanvasDecorations(cy = state.cy) {
       card.classList.add(matchesHealthFilter(item) ? "health-filter-match" : "health-filter-dim");
     }
   });
+  if (typeof applyAnomalyCanvasDecorations === "function") applyAnomalyCanvasDecorations(cy);
 }
 
 function initializeHealthSignals() {

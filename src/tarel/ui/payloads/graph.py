@@ -7,6 +7,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
+from tarel.anomaly_signals import LoadedAnomalySignals
 from tarel.discovery.coverage import QueryLinkedEntityCoverage
 from tarel.entity_resolution.candidates import EntityResolutionMatch
 from tarel.entity_resolution.projection import project_entity_resolution_edges
@@ -60,6 +61,7 @@ def browser_graph(
     object_families: Iterable[ObjectFamily] = (),
     object_family_stale_graphs: Iterable[str] = (),
     focus_documents: Iterable[FocusDocument] = (),
+    anomaly_signals: LoadedAnomalySignals | None = None,
 ) -> dict[str, Any]:
     return _browser_payload(
         (graph,),
@@ -77,6 +79,7 @@ def browser_graph(
         object_families=tuple(object_families),
         object_family_stale_graphs=tuple(object_family_stale_graphs),
         focus_documents=tuple(focus_documents),
+        anomaly_signals=anomaly_signals,
     )
 
 
@@ -97,6 +100,7 @@ def browser_workspace(
     object_families: Iterable[ObjectFamily] = (),
     object_family_stale_graphs: Iterable[str] = (),
     focus_documents: Iterable[FocusDocument] = (),
+    anomaly_signals: LoadedAnomalySignals | None = None,
 ) -> dict[str, Any]:
     payload = _browser_payload(
         tuple(graphs),
@@ -113,6 +117,7 @@ def browser_workspace(
         object_families=tuple(object_families),
         object_family_stale_graphs=tuple(object_family_stale_graphs),
         focus_documents=tuple(focus_documents),
+        anomaly_signals=anomaly_signals,
         scope=scope,
     )
     objects = payload["objects"]
@@ -142,6 +147,7 @@ def _browser_payload(
     object_families: tuple[ObjectFamily, ...],
     object_family_stale_graphs: tuple[str, ...],
     focus_documents: tuple[FocusDocument, ...],
+    anomaly_signals: LoadedAnomalySignals | None = None,
     lineage_names: tuple[str, ...] = (),
     scope: ResolvedScope | None = None,
 ) -> dict[str, Any]:
@@ -211,9 +217,13 @@ def _browser_payload(
                     fields_by_object[parent].append(node)
                     visible_fields.add((graph.name, node.id))
         for node in objects:
-            observed_rows_by_id[browser_id(graph.name, node.id)] = extract_observed_rows(
-                node.metadata
-            )
+            bid = browser_id(graph.name, node.id)
+            observed = extract_observed_rows(node.metadata)
+            if observed is None and anomaly_signals is not None:
+                signal_file = anomaly_signals.files.get(graph.name)
+                if signal_file is not None and node.id in signal_file.objects:
+                    observed = signal_file.objects[node.id].observed_rows
+            observed_rows_by_id[bid] = observed
         physical_payloads = [
             _object_payload(
                 node,
@@ -224,6 +234,16 @@ def _browser_payload(
             )
             for node in sorted(objects, key=lambda item: (item.label.casefold(), item.id))
         ]
+        if anomaly_signals is not None:
+            signal_file = anomaly_signals.files.get(graph.name)
+            if signal_file is not None:
+                for item in physical_payloads:
+                    signal = signal_file.objects.get(str(item["object_id"]))
+                    if signal is not None:
+                        item["anomaly"] = signal.to_ui_dict(
+                            observed_at=signal_file.observed_at,
+                            stale=signal_file.stale,
+                        )
         object_payloads.extend(physical_payloads)
         edge_payloads.extend(
             payload
@@ -414,6 +434,31 @@ def _browser_payload(
         lineage_loaded=bool(documents),
         lineage_edges=full_lineage_edges,
     )
+    if anomaly_signals is not None:
+        summary = {"active": 0, "anomalous": 0, "empty": 0, "static": 0}
+        for item in object_payloads:
+            anomaly = item.get("anomaly")
+            if isinstance(anomaly, dict):
+                state = anomaly.get("state")
+                if isinstance(state, str) and state in summary:
+                    summary[state] += 1
+        edge_shifts = [
+            {
+                **shift.to_dict(graph=graph_name),
+                "downstream_id": browser_id(graph_name, shift.downstream_object_id),
+                "upstream_id": browser_id(graph_name, shift.upstream_object_id),
+            }
+            for graph_name in sorted(anomaly_signals.files)
+            for shift in anomaly_signals.files[graph_name].edge_shifts
+        ]
+        payload["anomaly"] = {
+            "edge_shifts": edge_shifts,
+            "enabled": True,
+            "missing_graphs": list(anomaly_signals.missing_graphs),
+            "observed_at": anomaly_signals.latest_observed_at,
+            "stale_graphs": list(anomaly_signals.stale_graphs),
+            "summary": summary,
+        }
     return payload
 
 

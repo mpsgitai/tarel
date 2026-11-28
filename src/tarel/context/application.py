@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from tarel.annotations.states import selected_annotation_states
+from tarel.anomaly_signals import load_anomaly_signals_for_graphs, resolve_anomaly_dir
 from tarel.context.compiler import (
     DEFAULT_MAX_CONTEXT_CHARACTERS,
     ContextResult,
@@ -64,6 +65,8 @@ def compile_context_use_case(
     object_ids: tuple[str, ...] = (),
     scope_object_ids: tuple[str, ...] = (),
     focuses: tuple[str, ...] = (),
+    include_anomaly: bool = False,
+    anomaly_dir: Path | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     validate_bm25_weight(mode, bm25_weight)
@@ -146,6 +149,14 @@ def compile_context_use_case(
             result, graph_revision=graph_revision(source_graph),
             contract_version=SCOPED_CONTEXT_CONTRACT_VERSION,
         )
+    if include_anomaly or anomaly_dir is not None:
+        result = _attach_anomaly_signals(
+            result,
+            (source_graph,),
+            anomaly_dir=anomaly_dir,
+            workspace_scoped=False,
+            runtime=runtime,
+        )
     return result
 
 
@@ -174,6 +185,8 @@ def compile_workspace_context_use_case(
     validated_only: bool = False,
     logical_hints: str | None = None,
     object_ids: tuple[str, ...] = (),
+    include_anomaly: bool = False,
+    anomaly_dir: Path | None = None,
     runtime: TarelRuntime | None = None,
 ) -> ContextResult:
     validate_bm25_weight(mode, bm25_weight)
@@ -235,10 +248,17 @@ def compile_workspace_context_use_case(
         result, tuple(loaded.values()), mode=logical_hints,
         projection=projection, runtime=runtime,
     )
-    return (
-        replace(result, contract_version=SCOPED_CONTEXT_CONTRACT_VERSION)
-        if focuses or scope_objects else result
-    )
+    if focuses or scope_objects:
+        result = replace(result, contract_version=SCOPED_CONTEXT_CONTRACT_VERSION)
+    if include_anomaly or anomaly_dir is not None:
+        result = _attach_anomaly_signals(
+            result,
+            tuple(loaded[name] for name in scope.graph_names),
+            anomaly_dir=anomaly_dir,
+            workspace_scoped=True,
+            runtime=runtime,
+        )
+    return result
 
 
 def compile_context_prefix_use_case(
@@ -384,6 +404,60 @@ def _workspace_context_object_ids(
             )
         selected.append(scoped_node_id(graph_name, object_id))
     return tuple(selected)
+
+
+def _attach_anomaly_signals(
+    result: ContextResult,
+    graphs: tuple[object, ...],
+    *,
+    anomaly_dir: Path | None,
+    workspace_scoped: bool,
+    runtime: TarelRuntime | None,
+) -> ContextResult:
+    from tarel.graph.contracts import GraphDocument
+    from tarel.workspaces.projection import scoped_node_id
+
+    graph_docs = tuple(item for item in graphs if isinstance(item, GraphDocument))
+    loaded = load_anomaly_signals_for_graphs(
+        graph_docs,
+        anomaly_dir=resolve_anomaly_dir(runtime, anomaly_dir),
+    )
+    packet_ids = {item.id for item in result.objects}
+    objects: dict[str, object] = {}
+    edge_shifts: list[dict[str, object]] = []
+
+    def packet_id(graph_name: str, object_id: str) -> str:
+        return scoped_node_id(graph_name, object_id) if workspace_scoped else object_id
+
+    for graph_name in sorted(loaded.files):
+        signal_file = loaded.files[graph_name]
+        for raw_object_id in sorted(signal_file.objects):
+            pid = packet_id(graph_name, raw_object_id)
+            if pid not in packet_ids:
+                continue
+            objects[pid] = signal_file.objects[raw_object_id].to_context_dict(
+                stale=signal_file.stale
+            )
+        for shift in signal_file.edge_shifts:
+            up_id = packet_id(graph_name, shift.upstream_object_id)
+            down_id = packet_id(graph_name, shift.downstream_object_id)
+            if up_id in packet_ids and down_id in packet_ids:
+                edge_shifts.append(
+                    shift.to_dict(
+                        upstream_id=up_id,
+                        downstream_id=down_id,
+                        graph=graph_name if workspace_scoped else None,
+                    )
+                )
+
+    anomaly_payload: dict[str, object] = {
+        "edge_shifts": edge_shifts,
+        "missing_graphs": list(loaded.missing_graphs),
+        "objects": objects,
+        "observed_at": loaded.latest_observed_at,
+        "stale_graphs": list(loaded.stale_graphs),
+    }
+    return replace(result, anomaly_signals=anomaly_payload)
 
 
 def diff_context_packets_use_case(left: Path, right: Path) -> ContextPacketDiff:

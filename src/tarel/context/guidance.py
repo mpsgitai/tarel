@@ -93,6 +93,7 @@ class ContextBrief:
     packet_hash: str
     stable_hash: str
     object_ids: tuple[str, ...]
+    active_data_signals: tuple[str, ...] = ()
 
     @property
     def continuity(self) -> ContextContinuity:
@@ -103,7 +104,7 @@ class ContextBrief:
         )
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "view_version": CONTEXT_BRIEF_VERSION,
             "scope": {"label": self.scope, "graphs": list(self.graphs)},
             "loaded": {
@@ -124,6 +125,9 @@ class ContextBrief:
             "gaps": [gap.to_dict() for gap in self.gaps],
             "continuity": self.continuity.to_dict(),
         }
+        if self.active_data_signals:
+            payload["active_data_signals"] = list(self.active_data_signals)
+        return payload
 
     def text(self) -> str:
         focus = ", ".join(self.focus) or "query-independent"
@@ -133,19 +137,21 @@ class ContextBrief:
             f"{_noun(self.field_count, 'field')} described"
         )
         gap_summary = _gap_summary(self.gaps)
-        return "\n".join(
-            (
-                f"Area: {self.scope}",
-                f"Loaded: {self.object_count} {_noun(self.object_count, 'object')} · "
-                f"{self.field_count} {_noun(self.field_count, 'field')} · "
-                f"{self.join_count} {_noun(self.join_count, 'join')} · "
-                f"≈{self.estimated_tokens} tokens",
-                f"Focus: {focus}",
-                f"Coverage: {coverage}",
-                f"Gaps: {gap_summary}",
-                f"Context: {self.packet_hash[:12]} · stable {self.stable_hash[:12]}",
-            )
-        )
+        lines = [
+            f"Area: {self.scope}",
+            f"Loaded: {self.object_count} {_noun(self.object_count, 'object')} · "
+            f"{self.field_count} {_noun(self.field_count, 'field')} · "
+            f"{self.join_count} {_noun(self.join_count, 'join')} · "
+            f"≈{self.estimated_tokens} tokens",
+            f"Focus: {focus}",
+            f"Coverage: {coverage}",
+            f"Gaps: {gap_summary}",
+            f"Context: {self.packet_hash[:12]} · stable {self.stable_hash[:12]}",
+        ]
+        if self.active_data_signals:
+            lines.append("Active data signals:")
+            lines.extend(f"- {entry}" for entry in self.active_data_signals)
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +300,7 @@ def context_brief(
     graphs = _graphs(stable, scope)
     focus = _focus(dynamic, objects, scope)
     gaps = _context_gaps(stable, dynamic, objects, field_entities, joins)
+    active_signals = _active_data_signals(dynamic, object_entities)
     return ContextBrief(
         scope=_scope_label(stable, scope, graphs),
         graphs=graphs,
@@ -310,6 +317,7 @@ def context_brief(
         packet_hash=snapshot.packet_hash,
         stable_hash=snapshot.stable_hash,
         object_ids=tuple(object_entities),
+        active_data_signals=active_signals,
     )
 
 
@@ -780,3 +788,38 @@ def _delta_gap_summary(delta: ContextDelta) -> str:
         for gap in delta.gaps_changed
     )
     return " · ".join(parts) or "unchanged"
+
+
+def _active_data_signals(
+    dynamic: dict[str, object],
+    object_entities: dict[str, dict[str, object]],
+) -> tuple[str, ...]:
+    raw = dynamic.get("anomaly_signals")
+    if not isinstance(raw, dict):
+        return ()
+    raw_objects = raw.get("objects")
+    if not isinstance(raw_objects, dict):
+        return ()
+    entries: list[str] = []
+    for object_id in sorted(raw_objects):
+        signal = raw_objects[object_id]
+        if not isinstance(signal, dict):
+            continue
+        state = signal.get("state")
+        if state not in {"anomalous", "empty"}:
+            continue
+        entity = object_entities.get(object_id)
+        label = str(entity.get("label") or object_id) if isinstance(entity, dict) else object_id
+        stale_suffix = " (stale)" if signal.get("stale") else ""
+        if state == "empty":
+            entries.append(f"{label}: empty (0 rows){stale_suffix}")
+            continue
+        findings = signal.get("active_findings")
+        summary = ""
+        if isinstance(findings, list) and findings and isinstance(findings[0], dict):
+            summary = str(findings[0].get("summary") or "")
+        if summary:
+            entries.append(f"{label}: anomalous — {summary}{stale_suffix}")
+        else:
+            entries.append(f"{label}: anomalous{stale_suffix}")
+    return tuple(entries)

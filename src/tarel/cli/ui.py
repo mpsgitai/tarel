@@ -56,6 +56,16 @@ def register(subcommands: Subcommands) -> None:
         "--architecture-edit", action="store_true",
         help="Edit architecture only, not graph annotations.",
     )
+    ui.add_argument(
+        "--anomaly",
+        action="store_true",
+        help="Load opt-in anomaly signals from .tarel/anomaly/ into the browser.",
+    )
+    ui.add_argument(
+        "--anomaly-dir",
+        type=Path,
+        help="Explicit directory of <graph>.signals.json sidecars (implies --anomaly).",
+    )
 
 
 
@@ -85,6 +95,8 @@ def dispatch(args: argparse.Namespace) -> int | None:
             editable=args.edit,
             architecture_file=args.architecture_file,
             architecture_edit=args.architecture_edit,
+            anomaly=bool(args.anomaly or args.anomaly_dir is not None),
+            anomaly_dir=args.anomaly_dir,
             family_mode=args.families,
             search_mode=args.search_mode,
             model_path=args.model_path,
