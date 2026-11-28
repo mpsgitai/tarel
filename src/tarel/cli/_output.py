@@ -137,7 +137,11 @@ def render_compact(payload: dict[str, object], *, output_format: str) -> None:
             if key in edge
         ]
         detail = f"  ({'; '.join(extras)})" if extras else ""
-        print(f"d{edge.get('d')} {edge.get('to')} <-{edge.get('rel')}- {edge.get('from')}{detail}")
+        depth, relation = edge.get("d"), edge.get("rel")
+        if edge.get("dir") == "down" or payload.get("direction") == "down":
+            print(f"d{depth} {edge.get('from')} -{relation}-> {edge.get('to')}{detail}")
+        else:
+            print(f"d{depth} {edge.get('to')} <-{relation}- {edge.get('from')}{detail}")
     cycles = payload.get("cycles")
     for cycle in cycles if isinstance(cycles, list) else ():
         if isinstance(cycle, dict):
@@ -146,9 +150,27 @@ def render_compact(payload: dict[str, object], *, output_format: str) -> None:
             print(f"cycle: {rendered} ({cycle.get('internal_edges')} internal edges folded)")
     if payload.get("self_loops_omitted"):
         print(f"self-loops omitted: {payload['self_loops_omitted']}")
-    origins = payload.get("origins")
-    if isinstance(origins, list) and origins:
-        print(f"Origins: {', '.join(str(item) for item in origins)}")
+    for key in ("origins", "impacts"):
+        values = payload.get(key)
+        if isinstance(values, list) and values:
+            print(f"{key.capitalize()}: {', '.join(str(item) for item in values)}")
+    resolution = payload.get("resolution")
+    if isinstance(resolution, dict):
+        print(
+            f"Sources (auto): lineages={','.join(resolution['lineages'])} "
+            f"[{resolution['lineages_from']}]; graphs={','.join(resolution['graphs']) or '-'} "
+            f"[{resolution['graphs_from']}]"
+        )
+    freshness = payload.get("freshness")
+    if isinstance(freshness, dict):
+        observed = freshness.get("observed")
+        parts = [f"{key}@{value}" for key, value in observed.items()] if isinstance(
+            observed, dict
+        ) else []
+        missing = freshness.get("missing")
+        if isinstance(missing, list) and missing:
+            parts.append(f"no observation: {', '.join(missing)}")
+        print(f"Freshness: {'; '.join(parts)} (stale: {freshness.get('stale')})")
     for key in ("limits", "warnings"):
         values = payload.get(key)
         for value in values if isinstance(values, list) else ():

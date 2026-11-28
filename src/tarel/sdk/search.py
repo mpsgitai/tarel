@@ -72,6 +72,10 @@ class SearchAPI(RuntimeAPI):
         validated_only: bool = False,
         family_mode: str | None = "confirmed_only",
         filters: SearchFilters | None = None,
+        exclude_graphs: tuple[str, ...] = (),
+        diversity: str = "none",
+        max_per_graph: int | None = None,
+        collapse_duplicates: bool = False,
     ) -> SearchResults:
         focus_names = workspace_focuses(selection, focuses)
         systems, graphs, areas, schemas, zones = workspace_scope_arguments(
@@ -101,5 +105,9 @@ class SearchAPI(RuntimeAPI):
             validated_only=validated_only,
             family_mode=family_mode,
             filters=filters,
+            exclude_graphs=exclude_graphs,
+            diversity=diversity,
+            max_per_graph=max_per_graph,
+            collapse_duplicates=collapse_duplicates,
             runtime=self._runtime,
         )

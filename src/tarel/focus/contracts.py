@@ -119,9 +119,11 @@ class FocusDocument:
             payload["revision"] = self.revision
         return payload
 
-    def to_compact_dict(self) -> dict[str, object]:
+    def to_compact_dict(
+        self, *, freshness: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         """Readable keys, merged edges, no self-loops; see :mod:`tarel.focus.projection`."""
-        return compact_focus_dict(self)
+        return compact_focus_dict(self, freshness=freshness)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FocusDocument:

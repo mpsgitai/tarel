@@ -15,7 +15,7 @@ from tarel.cli._args import (
 )
 from tarel.cli._output import print_json
 from tarel.retrieval.search_application import search_graph_use_case, search_workspace_use_case
-from tarel.search import SearchFilters, SearchResults
+from tarel.search import SearchFailure, SearchFilters, SearchResults
 
 
 def register(subcommands: Subcommands) -> None:
@@ -42,6 +42,7 @@ def register(subcommands: Subcommands) -> None:
     search.add_argument("--bm25-weight", type=float, help="Hybrid BM25 weight; default 1.0.")
     add_workspace_retrieval_scope_arguments(search)
     _add_search_filter_arguments(search)
+    _add_workspace_result_arguments(search)
     add_annotation_state_arguments(search)
     add_format_argument(search)
 
@@ -69,6 +70,23 @@ def dispatch(args: argparse.Namespace) -> int | None:
         ),
     }
     require_graph_or_workspace(args)
+    workspace_options = {
+        "exclude_graphs": tuple(args.exclude_graphs or ()),
+        "diversity": args.diversity,
+        "max_per_graph": args.max_per_graph,
+        "collapse_duplicates": args.collapse_duplicates,
+    }
+    if not args.workspace and (
+        args.exclude_graphs or args.diversity != "none" or args.max_per_graph is not None
+        or args.collapse_duplicates
+    ):
+        raise SearchFailure(
+            "invalid_search_option",
+            "--exclude, --diversity, --max-per-graph and --collapse-duplicates "
+            "compare graphs and need --workspace.",
+            hint="Search with --workspace NAME, or drop these options.",
+            retryable=True,
+        )
     if args.workspace:
         results = search_workspace_use_case(
             args.workspace,
@@ -80,6 +98,7 @@ def dispatch(args: argparse.Namespace) -> int | None:
             zones=tuple(args.zones or ()),
             focuses=tuple(args.focuses or ()),
             scope_objects=tuple(args.scope_objects or ()),
+            **workspace_options,
             **search_arguments,
         )
     else:
@@ -101,6 +120,23 @@ def _add_search_filter_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--type", action="append", dest="object_types", choices=("table", "view"))
     parser.add_argument("--role", action="append", dest="roles")
     parser.add_argument("--has-field", action="append", dest="required_fields")
+
+
+def _add_workspace_result_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--exclude", action="append", dest="exclude_graphs", metavar="GLOB",
+        help="Leave out graphs whose name matches this glob (e.g. 'ddl-*'); repeatable.",
+    )
+    parser.add_argument(
+        "--diversity", choices=("none", "per_graph"), default="none",
+        help="per_graph: at most --max-per-graph hits per graph (default 3); counts the rest.",
+    )
+    parser.add_argument("--max-per-graph", type=int)
+    parser.add_argument(
+        "--collapse-duplicates", action="store_true",
+        help="Fold hits with the same object and column names (any case or punctuation) "
+        "into the best-ranked one, which lists them under duplicates.",
+    )
 
 
 def _render_search_results(results: SearchResults, *, output_format: str) -> None:
@@ -152,3 +188,10 @@ def _render_search_results(results: SearchResults, *, output_format: str) -> Non
         if hit.fields:
             fields = ", ".join(f"{field.label} ({field.score})" for field in hit.fields)
             print(f"  Fields: {fields}")
+        if hit.duplicates:
+            print(f"  Duplicates folded: {', '.join(hit.duplicates)}")
+    if results.excluded_graphs:
+        print(f"Excluded graphs: {', '.join(results.excluded_graphs)}")
+    if results.omitted_by_diversity:
+        omitted = ", ".join(f"{name}={count}" for name, count in results.omitted_by_diversity)
+        print(f"Omitted by diversity: {omitted}")

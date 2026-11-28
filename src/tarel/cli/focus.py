@@ -9,6 +9,7 @@ from tarel.cli._args import Subcommands, add_format_argument, add_view_argument
 from tarel.cli._output import print_json, render_compact
 from tarel.focus.application import build_focus_use_case, list_focuses_use_case, load_focus_use_case
 from tarel.focus.contracts import FocusDocument
+from tarel.graph.reads import graph_freshness_use_case
 
 
 def register(subcommands: Subcommands) -> None:
@@ -105,7 +106,11 @@ def _run_build(args: argparse.Namespace) -> int:
 def _run_show(args: argparse.Namespace) -> int:
     focus = load_focus_use_case(args.name)
     if args.view == "compact":
-        render_compact(focus.to_compact_dict(), output_format=args.format)
+        graphs = tuple(item.name for item in focus.sources if item.kind == "graph")
+        render_compact(
+            focus.to_compact_dict(freshness=graph_freshness_use_case(graphs)),
+            output_format=args.format,
+        )
         return 0
     _render_focus(focus, output_format=args.format)
     return 0

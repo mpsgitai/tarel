@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from tarel.graph.build import object_node_id
 from tarel.graph.contracts import GraphFailure
+from tarel.graph.freshness import freshness_block
 from tarel.graph.selective import GraphHeader, GraphObjectPage, GraphSlice
 from tarel.graph.store import FileGraphStore
 from tarel.runtime import TarelRuntime, resolve_runtime
+
+
+def graph_freshness_use_case(
+    names: tuple[str, ...], *, runtime: TarelRuntime | None = None,
+) -> dict[str, object]:
+    """The compact freshness block for the graphs behind one answer; reads no source."""
+    store = resolve_runtime(runtime).graph_store()
+    return freshness_block({name: store.observation(name) for name in names})
 
 
 def graph_header_use_case(name: str, *, runtime: TarelRuntime | None = None) -> GraphHeader:
@@ -40,6 +49,7 @@ def graph_slice_use_case(
     *,
     namespace: str | None = None,
     expected_revision: str | None = None,
+    include_containment: bool = True,
     runtime: TarelRuntime | None = None,
 ) -> GraphSlice:
     store = resolve_runtime(runtime).graph_store()
@@ -48,6 +58,7 @@ def graph_slice_use_case(
         _object_ids(store, name, object_ids),
         namespace=namespace,
         expected_revision=expected_revision,
+        include_containment=include_containment,
     )
 
 

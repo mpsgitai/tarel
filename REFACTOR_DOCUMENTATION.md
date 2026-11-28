@@ -349,7 +349,7 @@ The ``tarel`` command line.
     - `main`: Run one ``tarel`` invocation and return its process exit status.
 - **Output:** returns `argparse.ArgumentParser`, `int`; prints to the terminal
 - **Uses:** `tarel`, `tarel.errors`
-- **Used by:** `tarel.__main__`, `tarel.cli.context`, `tarel.cli.family`, `tarel.cli.graph`
+- **Used by:** `tarel.__main__`, `tarel.cli.context`, `tarel.cli.family`, `tarel.cli.graph`, `tarel.cli.lineage`
 
 ## `tarel.cli`
 
@@ -371,7 +371,7 @@ Argument groups shared by several command groups.
     - `require_graph_or_workspace`: Exactly one of the positional graph name and ``--workspace NAME``. Raises `WorkspaceFailure`.
 - **Output:** returns `tuple[str, ...]`
 - **Uses:** `tarel.knowledge.contracts`, `tarel.search`, `tarel.workspaces.contracts`
-- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.grounding`, `tarel.cli.hub`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.mcp`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.ui`, `tarel.cli.workspace`
+- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.grounding`, `tarel.cli.hub`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.lineage_trace`, `tarel.cli.logical_join`, `tarel.cli.mcp`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.ui`, `tarel.cli.workspace`
 
 ### `src/tarel/cli/_bundle_dialog.py`
 
@@ -415,7 +415,7 @@ Text and JSON renderers shared by several command groups.
     - `render_compact`: Render a compact lineage or focus projection.
 - **Output:** prints JSON to stdout; prints to the terminal
 - **Uses:** `tarel.annotations.contracts`, `tarel.connectors.contracts`, `tarel.graph.contracts`
-- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.hub`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.workspace`
+- **Used by:** `tarel.cli.annotation`, `tarel.cli.binding`, `tarel.cli.bundle`, `tarel.cli.concept`, `tarel.cli.connector`, `tarel.cli.context`, `tarel.cli.context_expand`, `tarel.cli.demo`, `tarel.cli.discovery`, `tarel.cli.entity`, `tarel.cli.family`, `tarel.cli.family_proposals`, `tarel.cli.focus`, `tarel.cli.graph`, `tarel.cli.graph_reads`, `tarel.cli.hub`, `tarel.cli.index`, `tarel.cli.knowledge`, `tarel.cli.lineage`, `tarel.cli.lineage_trace`, `tarel.cli.logical_join`, `tarel.cli.model`, `tarel.cli.package`, `tarel.cli.provider`, `tarel.cli.reference_mapping`, `tarel.cli.relationship`, `tarel.cli.retrieval`, `tarel.cli.search`, `tarel.cli.semantic`, `tarel.cli.source`, `tarel.cli.sync`, `tarel.cli.topology`, `tarel.cli.workspace`
 
 ### `src/tarel/cli/_terminal.py`
 
@@ -611,10 +611,10 @@ Small opt-in CLI adapters for the metadata-only family proposal runner.
     - `register`: Add the `focus` command group to the top-level parser. Calls `add_format_argument`, `add_view_argument`.
     - `dispatch`: Run a parsed `focus` command; return ``None`` for other commands.
     - `_run_build`: build; returns `int`. Calls `build_focus_use_case`.
-    - `_run_show`: show; returns `int`. Calls `load_focus_use_case`, `render_compact`.
+    - `_run_show`: show; returns `int`. Calls `load_focus_use_case`, `render_compact`, `graph_freshness_use_case`.
     - `_run_list`: list; returns `int`. Calls `list_focuses_use_case`, `print_json`.
 - **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
-- **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.focus.application`, `tarel.focus.contracts`
+- **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.focus.application`, `tarel.focus.contracts`, `tarel.graph.reads`
 
 ### `src/tarel/cli/graph.py`
 
@@ -639,8 +639,8 @@ CLI adapter for optional lazy graph reads; JSON output includes actual read stat
 
 - **Input:** parameters `args: argparse.Namespace`, `commands: Subcommands`
 - **Processing:**
-    - `register`: Add the selective read subcommands to `tarel graph`. Calls `add_format_argument`.
-    - `dispatch`: Run a selective graph read; return ``None`` for other commands. Calls `graph_header_use_case`, `print_json`, `rebuild_graph_index_use_case`, `graph_objects_use_case`, `graph_slice_use_case`.
+    - `register`: Add the selective read subcommands to `tarel graph`. Calls `add_format_argument`, `add_view_argument`.
+    - `dispatch`: Run a selective graph read; return ``None`` for other commands. Calls `graph_header_use_case`, `print_json`, `rebuild_graph_index_use_case`, `graph_objects_use_case`, `graph_slice_use_case`, `render_compact` ….
 - **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
 - **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.graph.reads`, `tarel.graph.selective`
 
@@ -700,7 +700,7 @@ Thin command-line adapter for write-centred static lineage.
 
 - **Input:** parameters `args: argparse.Namespace`, `subcommands: argparse._SubParsersAction[argparse.ArgumentParser]`; reads files; reads stdin
 - **Processing:**
-    - `register`: register; returns `None`. Calls `add_format_argument`, `add_view_argument`.
+    - `register`: register; returns `None`. Calls `add_format_argument`.
     - `dispatch`: dispatch; returns `int | None`.
     - `_run_import_dbt`: import dbt; returns `int`. Calls `import_dbt_lineage_use_case`; raises `LineageFailure`.
     - `_run_build`: build; returns `int`. Calls `build_lineage_use_case`.
@@ -713,12 +713,26 @@ Thin command-line adapter for write-centred static lineage.
     - `_run_apply`: apply; returns `int`. Calls `apply_lineage_proposal_use_case`.
     - `_run_analyze`: analyze; returns `int`. Calls `run_lineage_analysis_use_case`, `print_json`.
     - `_run_review`: review; returns `int`.
-    - `_run_find`: find; returns `int`. Calls `find_lineage_references_use_case`.
-    - `_run_upstream`: upstream; returns `int`. Calls `trace_upstream_use_case`, `render_compact`.
     - `_run_add_job`: add job; returns `int`. Calls `add_manual_job_use_case`, `lineage_revision`.
     - `_run_add_hop`: add hop; returns `int`. Calls `add_manual_hop_use_case`, `lineage_revision`.
 - **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
-- **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.lineage.analysis_application`, `tarel.lineage.application`, `tarel.lineage.contracts`, `tarel.lineage.revision`, `tarel.lineage.runtime`, `tarel.lineage.runtime_application`, `tarel.lineage.status`
+- **Uses:** `tarel.cli`, `tarel.cli._args`, `tarel.cli._output`, `tarel.lineage.analysis_application`, `tarel.lineage.application`, `tarel.lineage.contracts`, `tarel.lineage.revision`, `tarel.lineage.runtime`, `tarel.lineage.runtime_application`, `tarel.lineage.status`
+
+### `src/tarel/cli/lineage_trace.py`
+
+`tarel lineage find|upstream|trace|downstream|batch`: read lineage across documents.
+
+- **Input:** parameters `args: argparse.Namespace`, `commands: Subcommands`
+- **Processing:**
+    - `register`: Add the lineage read commands to `tarel lineage`. Calls `add_format_argument`, `add_view_argument`.
+    - `dispatch`: Run a parsed lineage read command; return ``None`` for other commands.
+    - `_run_find`: find; returns `int`. Calls `find_lineage_references_use_case`.
+    - `_run_upstream`: upstream; returns `int`. Calls `trace_upstream_use_case`, `render_compact`, `graph_freshness_use_case`, `graph_names`, `trace_references`.
+    - `_run_trace`: trace; returns `int`. Calls `trace_lineage_use_case`, `render_compact`, `print_json`, `graph_freshness_use_case`, `graph_names`, `trace_references`.
+    - `_run_downstream`: downstream; returns `int`.
+    - `_run_batch`: batch; returns `int`. Calls `trace_lineage_batch_use_case`, `compact_batch_dict`, `render_compact`, `graph_freshness_use_case`, `graph_names`, `trace_references`.
+- **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
+- **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.graph.reads`, `tarel.lineage.application`, `tarel.lineage.directions`, `tarel.lineage.projection`, `tarel.lineage.trace_application`
 
 ### `src/tarel/cli/logical_join.py`
 
@@ -833,7 +847,7 @@ Thin CLI over shared retrieval configuration and model discovery.
 - **Input:** parameters `args: argparse.Namespace`, `subcommands: Subcommands`
 - **Processing:**
     - `register`: Add the `search` command group to the top-level parser. Calls `add_workspace_retrieval_scope_arguments`, `add_annotation_state_arguments`, `add_format_argument`.
-    - `dispatch`: Run a parsed `search` command; return ``None`` for other commands. Calls `require_graph_or_workspace`, `SearchFilters`, `search_workspace_use_case`, `search_graph_use_case`, `graph_scope_object_ids`.
+    - `dispatch`: Run a parsed `search` command; return ``None`` for other commands. Calls `require_graph_or_workspace`, `SearchFilters`, `search_workspace_use_case`, `search_graph_use_case`, `graph_scope_object_ids`; raises `SearchFailure`.
 - **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
 - **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.retrieval.search_application`, `tarel.search`
 
@@ -918,7 +932,7 @@ Thin CLI adapter for graph-bound logical-topology overlays.
     - `dispatch`: Run a parsed `workspace` command; return ``None`` for other commands.
     - `_run_create`: create; returns `int`. Calls `create_workspace_use_case`.
     - `_run_list`: list; returns `int`. Calls `list_workspaces_use_case`, `print_json`.
-    - `_run_show`: show; returns `int`. Calls `load_workspace_use_case`.
+    - `_run_show`: show; returns `int`. Calls `load_workspace_use_case`, `workspace_overview_use_case`, `render_compact`.
     - `_run_scope`: scope; returns `int`. Calls `resolve_workspace_scope_use_case`.
     - `_run_system_define`: system define; returns `int`. Calls `define_workspace_system_use_case`.
     - `_run_area_define`: area define; returns `int`. Calls `define_workspace_area_use_case`.
@@ -928,9 +942,24 @@ Thin CLI adapter for graph-bound logical-topology overlays.
     - `_run_relationship_list`: relationship list; returns `int`. Calls `load_workspace_use_case`.
     - `_run_relationship_decide`: relationship decide; returns `int`. Calls `decide_workspace_relationship_use_case`.
 - **Output:** returns `int | None`; prints JSON to stdout; prints to the terminal
-- **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.workspaces.application`, `tarel.workspaces.contracts`, `tarel.workspaces.core`, `tarel.workspaces.scope`
+- **Uses:** `tarel.cli._args`, `tarel.cli._output`, `tarel.workspaces.application`, `tarel.workspaces.contracts`, `tarel.workspaces.core`, `tarel.workspaces.overview`, `tarel.workspaces.scope`
 
 ## `tarel`
+
+### `src/tarel/compact.py`
+
+Pure helpers shared by every compact projection (lineage, focus, graph slices).
+
+- **Input:** parameters `edges: Iterable[tuple[str, str]]`, `edges: list[dict[str, object]]`, `hops: Iterable[_Hop]`, `ids: Iterable[str]`, `mapping: Mapping[str, object]`, `nodes: Iterable[str]`, `payload: dict[str, object]`
+- **Processing:**
+    - `omit_empty`: Drop ``None``, empty strings and empty collections; keep ``False`` and ``0``.
+    - `finish_compact`: Sort a compact payload's keys and drop its empty optional sections.
+    - `claim_states`: Review states of lineage claims; ``field_of`` is graph structure, always "observed".
+    - `collapse_cycles`: Replace the edges inside each strongly connected component by one ``cycles`` entry.
+    - `unique_keys`: Map each id to the first candidate label that no other id shares, else to the id itself.
+    - `tarjan_sccs`: Strongly connected components with more than one member, each sorted, in sorted order.
+- **Output:** returns `dict[str, object]`, `dict[str, str]`, `list[tuple[str, ...]]`, `set[str]`, `tuple[list[dict[str, object]], list[dict[str, object]]]`
+- **Used by:** `tarel.focus.projection`, `tarel.graph.projection`, `tarel.lineage.projection`, `tarel.workspaces.overview`
 
 ### `src/tarel/connectors/__init__.py`
 
@@ -1872,7 +1901,7 @@ The exception hierarchy shared by every TAREL package.
     - `unknown_name_error`: A retryable "name not found" failure that previews the names that would be accepted.
     - `name_preview`: At most five accepted names: close spellings of ``value`` first, then sorted order.
 - **Output:** returns `ErrorT`, `dict[str, object]`, `list[str]`
-- **Used by:** `tarel.agents`, `tarel.annotations.contracts`, `tarel.bundle.contracts`, `tarel.cli`, `tarel.connectors.contracts`, `tarel.context.compiler`, `tarel.demo`, `tarel.discovery.contracts`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.entity_resolution.contracts`, `tarel.expansion.contracts`, `tarel.focus.contracts`, `tarel.focus.store`, `tarel.graph.application`, `tarel.graph.contracts`, `tarel.graph.selective`, `tarel.graph.store`, `tarel.hub.contracts`, `tarel.knowledge.contracts`, `tarel.lineage.application`, `tarel.lineage.contracts`, `tarel.lineage.store`, `tarel.logical_joins.contracts`, `tarel.mcp.contracts`, `tarel.object_bindings.contracts`, `tarel.object_families.contracts`, `tarel.packages.contracts`, `tarel.providers.contracts`, `tarel.reference_mapping.contracts`, `tarel.relationships.core`, `tarel.retrieval.contracts`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.semantics.contracts`, `tarel.sources.contracts`, `tarel.sync.application`, `tarel.sync.contracts`, `tarel.sync.inbox`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.ui.contracts`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.workspaces.contracts`, `tarel.workspaces.store`
+- **Used by:** `tarel.agents`, `tarel.annotations.contracts`, `tarel.bundle.contracts`, `tarel.cli`, `tarel.connectors.contracts`, `tarel.context.compiler`, `tarel.demo`, `tarel.discovery.contracts`, `tarel.discovery.coverage`, `tarel.discovery.identity`, `tarel.entity_resolution.contracts`, `tarel.expansion.contracts`, `tarel.focus.contracts`, `tarel.focus.store`, `tarel.graph.application`, `tarel.graph.contracts`, `tarel.graph.selective`, `tarel.graph.store`, `tarel.hub.contracts`, `tarel.knowledge.contracts`, `tarel.lineage.application`, `tarel.lineage.contracts`, `tarel.lineage.directions`, `tarel.lineage.store`, `tarel.lineage.trace_application`, `tarel.logical_joins.contracts`, `tarel.mcp.contracts`, `tarel.object_bindings.contracts`, `tarel.object_families.contracts`, `tarel.packages.contracts`, `tarel.providers.contracts`, `tarel.reference_mapping.contracts`, `tarel.relationships.core`, `tarel.retrieval.contracts`, `tarel.search`, `tarel.semantic_concepts.contracts`, `tarel.semantics.contracts`, `tarel.sources.contracts`, `tarel.sync.application`, `tarel.sync.contracts`, `tarel.sync.inbox`, `tarel.topology.contracts`, `tarel.topology.endpoint_contracts`, `tarel.ui.contracts`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.workspaces.contracts`, `tarel.workspaces.store`
 
 ### `src/tarel/expansion/__init__.py`
 
@@ -1974,7 +2003,7 @@ Focus use cases: build, load and list lineage-anchored working sets.
 
 Dependency-free contracts for reproducible demand-driven focus snapshots.
 
-- **Input:** parameters `data: dict[str, Any]`, `document: FocusDocument`, `include_revision: bool`, `item: FocusHop`, `item: FocusMember`
+- **Input:** parameters `data: dict[str, Any]`, `document: FocusDocument`, `freshness: dict[str, object] | None`, `include_revision: bool`, `item: FocusHop`, `item: FocusMember`
 - **Processing:**
     - `FocusFailure`: Raised when a focus operation is rejected.
     - `FocusSource`: record with fields kind, name, revision.
@@ -2014,11 +2043,11 @@ Build and validate demand-driven focus snapshots from upstream traces.
 
 The compact projection of a focus snapshot: readable node keys, one row per real edge.
 
-- **Input:** parameters `focus: FocusDocument`
+- **Input:** parameters `focus: FocusDocument`, `freshness: Mapping[str, object] | None`
 - **Processing:**
     - `compact_focus_dict`: The compact, deterministic projection of ``focus`` (see the module docstring). Calls `unique_keys`, `collapse_cycles`, `finish_compact`, `omit_empty`, `claim_states`.
 - **Output:** returns `dict[str, object]`
-- **Uses:** `tarel.focus.contracts`, `tarel.lineage.graph_utils`
+- **Uses:** `tarel.compact`, `tarel.focus.contracts`
 - **Used by:** `tarel.focus.contracts`
 
 ### `src/tarel/focus/store.py`
@@ -2140,7 +2169,18 @@ Dependency-free graph contracts and explicit JSON serialization.
     - `GraphDocument.from_dict`: from dict; returns `GraphDocument`.
 - **Output:** returns `AnnotationEvidence`, `AnnotationProvenance`, `GraphAnnotation`, `GraphDocument`, `GraphEdge`, `GraphNode`, `dict[str, Any] | None`, `dict[str, GraphNode]`, `dict[str, object]`
 - **Uses:** `tarel.errors`
-- **Used by:** `tarel.annotations.application`, `tarel.annotations.apply`, `tarel.annotations.contracts`, `tarel.annotations.review`, `tarel.annotations.runner`, `tarel.annotations.states`, `tarel.annotations.tasks`, `tarel.cli._output`, `tarel.context.compiler`, `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.context.hints_application`, `tarel.context.packets`, `tarel.discovery.advice`, `tarel.discovery.checks`, `tarel.discovery.promotion`, `tarel.discovery.tasks`, `tarel.enrichment`, `tarel.entity_resolution.application`, `tarel.entity_resolution.discovery`, `tarel.entity_resolution.projection`, `tarel.focus.application`, `tarel.focus.core`, `tarel.graph.application`, `tarel.graph.build`, `tarel.graph.change_store`, `tarel.graph.changes`, `tarel.graph.reads`, `tarel.graph.refresh`, `tarel.graph.revision`, `tarel.graph.selective`, `tarel.graph.store`, `tarel.knowledge.application`, `tarel.knowledge.core`, `tarel.lineage.application`, `tarel.lineage.runtime_application`, `tarel.lineage.traversal`, `tarel.logical_joins.application`, `tarel.mcp.tools`, `tarel.object_families.application`, `tarel.object_families.proposals`, `tarel.object_families.search`, `tarel.packages.application`, `tarel.reference_mapping.application`, `tarel.relationships.application`, `tarel.relationships.core`, `tarel.retrieval.checkpoint`, `tarel.retrieval.documents`, `tarel.retrieval.index`, `tarel.retrieval.ranking`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.sdk.graph`, `tarel.sdk.relationship`, `tarel.search`, `tarel.semantic_concepts.application`, `tarel.semantics.bindings`, `tarel.semantics.cube`, `tarel.semantics.ossie`, `tarel.semantics.readers`, `tarel.semantics.sml`, `tarel.sources.application`, `tarel.sync.application`, `tarel.sync.envelope`, `tarel.sync.export`, `tarel.sync.impacts`, `tarel.sync.merge`, `tarel.sync.publish_application`, `tarel.sync.store`, `tarel.topology.application`, `tarel.topology.endpoints`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.ui.payloads.families`, `tarel.ui.payloads.graph`, `tarel.ui.payloads.logical`, `tarel.ui.server`, `tarel.workspaces.application`, `tarel.workspaces.core`, `tarel.workspaces.projection`, `tarel.workspaces.scope`
+- **Used by:** `tarel.annotations.application`, `tarel.annotations.apply`, `tarel.annotations.contracts`, `tarel.annotations.review`, `tarel.annotations.runner`, `tarel.annotations.states`, `tarel.annotations.tasks`, `tarel.cli._output`, `tarel.context.compiler`, `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.context.hints_application`, `tarel.context.packets`, `tarel.discovery.advice`, `tarel.discovery.checks`, `tarel.discovery.promotion`, `tarel.discovery.tasks`, `tarel.enrichment`, `tarel.entity_resolution.application`, `tarel.entity_resolution.discovery`, `tarel.entity_resolution.projection`, `tarel.focus.application`, `tarel.focus.core`, `tarel.graph.application`, `tarel.graph.build`, `tarel.graph.change_store`, `tarel.graph.changes`, `tarel.graph.projection`, `tarel.graph.reads`, `tarel.graph.refresh`, `tarel.graph.revision`, `tarel.graph.selective`, `tarel.graph.store`, `tarel.knowledge.application`, `tarel.knowledge.core`, `tarel.lineage.application`, `tarel.lineage.directions`, `tarel.lineage.runtime_application`, `tarel.lineage.traversal`, `tarel.logical_joins.application`, `tarel.mcp.tools`, `tarel.object_families.application`, `tarel.object_families.proposals`, `tarel.object_families.search`, `tarel.packages.application`, `tarel.reference_mapping.application`, `tarel.relationships.application`, `tarel.relationships.core`, `tarel.retrieval.checkpoint`, `tarel.retrieval.documents`, `tarel.retrieval.index`, `tarel.retrieval.ranking`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.sdk.graph`, `tarel.sdk.relationship`, `tarel.search`, `tarel.semantic_concepts.application`, `tarel.semantics.bindings`, `tarel.semantics.cube`, `tarel.semantics.ossie`, `tarel.semantics.readers`, `tarel.semantics.sml`, `tarel.sources.application`, `tarel.sync.application`, `tarel.sync.envelope`, `tarel.sync.export`, `tarel.sync.impacts`, `tarel.sync.merge`, `tarel.sync.publish_application`, `tarel.sync.store`, `tarel.topology.application`, `tarel.topology.endpoints`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.ui.payloads.families`, `tarel.ui.payloads.graph`, `tarel.ui.payloads.logical`, `tarel.ui.server`, `tarel.workspaces.application`, `tarel.workspaces.core`, `tarel.workspaces.projection`, `tarel.workspaces.retrieval`, `tarel.workspaces.scope`
+
+### `src/tarel/graph/freshness.py`
+
+How old the metadata behind an answer is, reported without contacting any source.
+
+- **Input:** parameters `observations: Mapping[str, GraphObservation | None]`
+- **Processing:**
+    - `freshness_block`: ``{"observed": {graph: time}, "missing": [...], "failed": {graph: code}, "stale": ...}``.
+- **Output:** returns `dict[str, object]`
+- **Uses:** `tarel.graph.observation`
+- **Used by:** `tarel.graph.reads`
 
 ### `src/tarel/graph/observation.py`
 
@@ -2153,21 +2193,33 @@ When a graph was last read from its source, kept beside the graph and outside it
     - `GraphObservation.to_dict`: to dict; returns `dict[str, object]`.
     - `GraphObservation.from_dict`: from dict; returns `GraphObservation`.
 - **Output:** returns `GraphObservation`, `dict[str, object]`, `str`
-- **Used by:** `tarel.graph.store`, `tarel.sync.application`
+- **Used by:** `tarel.graph.freshness`, `tarel.graph.store`, `tarel.sync.application`
+
+### `src/tarel/graph/projection.py`
+
+The compact projection of a graph slice: objects with their fields nested, no containment forest.
+
+- **Input:** parameters `freshness: Mapping[str, object] | None`, `graph_slice: GraphSlice`
+- **Processing:**
+    - `compact_slice_dict`: compact slice dict; returns `dict[str, object]`. Calls `omit_empty`.
+- **Output:** returns `dict[str, object]`
+- **Uses:** `tarel.compact`, `tarel.graph.contracts`, `tarel.graph.selective`
+- **Used by:** `tarel.graph.selective`
 
 ### `src/tarel/graph/reads.py`
 
 Optional selective graph reads shared by CLI, SDK and bounded context expansion.
 
-- **Input:** parameters `expected_revision: str | None`, `limit: int`, `name: str`, `namespace: str | None`, `object_ids: tuple[str, ...] | None`, `object_ids: tuple[str, ...]`, `offset: int`, `runtime: TarelRuntime | None`
+- **Input:** parameters `expected_revision: str | None`, `include_containment: bool`, `limit: int`, `name: str`, `names: tuple[str, ...]`, `namespace: str | None`, `object_ids: tuple[str, ...] | None`, `object_ids: tuple[str, ...]`, `offset: int`, `runtime: TarelRuntime | None`
 - **Processing:**
+    - `graph_freshness_use_case`: The compact freshness block for the graphs behind one answer; reads no source. Calls `freshness_block`; uses the graph store.
     - `graph_header_use_case`: graph header (use case); returns `GraphHeader`. Uses the graph store.
     - `graph_objects_use_case`: graph objects (use case); returns `GraphObjectPage`. Uses the graph store.
     - `graph_slice_use_case`: graph slice (use case); returns `GraphSlice`. Uses the graph store.
     - `rebuild_graph_index_use_case`: rebuild graph index (use case); returns `GraphHeader`. Uses the rebuild index, graph store.
-- **Output:** returns `GraphHeader`, `GraphObjectPage`, `GraphSlice`
-- **Uses:** `tarel.graph.build`, `tarel.graph.contracts`, `tarel.graph.selective`, `tarel.graph.store`, `tarel.runtime`
-- **Used by:** `tarel.cli.graph_reads`, `tarel.sdk.graph`
+- **Output:** returns `GraphHeader`, `GraphObjectPage`, `GraphSlice`, `dict[str, object]`
+- **Uses:** `tarel.graph.build`, `tarel.graph.contracts`, `tarel.graph.freshness`, `tarel.graph.selective`, `tarel.graph.store`, `tarel.runtime`
+- **Used by:** `tarel.cli.focus`, `tarel.cli.graph_reads`, `tarel.cli.lineage_trace`, `tarel.sdk.graph`
 
 ### `src/tarel/graph/refresh.py`
 
@@ -2207,13 +2259,14 @@ Deterministic revision identifiers for complete graph documents.
 
 Experimental, rebuildable selective reads of authoritative JSON graphs.
 
-- **Input:** parameters `expected_revision: str | None`, `include_fields: bool`, `limit: int`, `name: str`, `namespace: str | None`, `object_ids: tuple[str, ...] | None`, `object_ids: tuple[str, ...]`, `offset: int`, `store: FileGraphStore`; loads stored documents; opens database connections; reads files
+- **Input:** parameters `expected_revision: str | None`, `freshness: dict[str, object] | None`, `include_containment: bool`, `include_fields: bool`, `limit: int`, `name: str`, `namespace: str | None`, `object_ids: tuple[str, ...] | None`, `object_ids: tuple[str, ...]`, `offset: int`, `store: FileGraphStore`; loads stored documents; opens database connections; reads files
 - **Processing:**
     - `GraphReadStats`: record with fields mode, full_document_read, loaded_node_count, loaded_edge_count.
     - `GraphReadStats.to_dict`: to dict; returns `dict[str, object]`.
     - `GraphHeader`: record with fields name, connector, source_type, catalog, dialect, contract_version, revision, physical_revision ….
     - `GraphHeader.to_dict`: to dict; returns `dict[str, object]`.
     - `GraphSlice`: record with fields header, graph, object_ids.
+    - `GraphSlice.to_compact_dict`: Objects with nested fields, no containment; see :mod:`tarel.graph.projection`. Calls `compact_slice_dict`.
     - `GraphSlice.to_dict`: to dict; returns `dict[str, object]`.
     - `GraphObjectPage`: record with fields header, objects, offset, limit, total_objects, next_offset.
     - `GraphObjectPage.to_dict`: to dict; returns `dict[str, object]`.
@@ -2224,14 +2277,14 @@ Experimental, rebuildable selective reads of authoritative JSON graphs.
     - `list_objects`: list objects; returns `GraphObjectPage`. Raises `GraphFailure`.
     - `rebuild_index`: rebuild index; returns `GraphHeader`.
 - **Output:** returns `GraphHeader`, `GraphObjectPage`, `GraphObjectSchemaHashes`, `GraphSlice`, `dict[str, object]`; deletes files; replaces state files atomically; runs database queries; writes temporary files
-- **Uses:** `tarel.atomic`, `tarel.errors`, `tarel.graph.contracts`, `tarel.graph.revision`, `tarel.graph.store`
-- **Used by:** `tarel.cli.graph_reads`, `tarel.graph.reads`, `tarel.graph.store`, `tarel.object_families.application`, `tarel.sdk`, `tarel.sdk.graph`
+- **Uses:** `tarel.atomic`, `tarel.errors`, `tarel.graph.contracts`, `tarel.graph.projection`, `tarel.graph.revision`, `tarel.graph.store`
+- **Used by:** `tarel.cli.graph_reads`, `tarel.graph.projection`, `tarel.graph.reads`, `tarel.graph.store`, `tarel.object_families.application`, `tarel.sdk`, `tarel.sdk.graph`
 
 ### `src/tarel/graph/store.py`
 
 Atomic local JSON graph store.
 
-- **Input:** parameters `change: Callable[[GraphDocument], GraphDocument]`, `code: str`, `durable: bool`, `expected_revision: str | None`, `graph: GraphDocument`, `include_fields: bool`, `limit: int`, `message: str`, `name: str`, `namespace: str | None`, `object_ids: tuple[str, ...] | None`, `object_ids: tuple[str, ...]` …; loads stored documents; reads files
+- **Input:** parameters `change: Callable[[GraphDocument], GraphDocument]`, `code: str`, `durable: bool`, `expected_revision: str | None`, `graph: GraphDocument`, `include_containment: bool`, `include_fields: bool`, `limit: int`, `message: str`, `name: str`, `namespace: str | None`, `object_ids: tuple[str, ...] | None` …; loads stored documents; reads files
 - **Processing:**
     - `GraphStore`: Whole-document persistence boundary for local or shared graph stores.
     - `GraphStore.save`: save; returns `Path | str | None`.
@@ -2254,7 +2307,7 @@ Atomic local JSON graph store.
     - `FileGraphStore.path`: path; returns `Path`. Raises `GraphFailure`.
 - **Output:** returns `GraphDocument`, `GraphHeader`, `GraphObjectPage`, `GraphObjectSchemaHashes`, `GraphObservation | None`, `GraphSlice`, `Path`, `Path | str | None`, `tuple[GraphDocument, Path]`, `tuple[str, ...]`; replaces state files atomically
 - **Uses:** `tarel.atomic`, `tarel.errors`, `tarel.file_lock`, `tarel.graph.contracts`, `tarel.graph.observation`, `tarel.graph.revision`, `tarel.graph.selective`
-- **Used by:** `tarel.annotations.application`, `tarel.graph.reads`, `tarel.graph.selective`, `tarel.runtime`, `tarel.sources.application`, `tarel.topology.application`
+- **Used by:** `tarel.annotations.application`, `tarel.graph.reads`, `tarel.graph.selective`, `tarel.runtime`, `tarel.sources.application`, `tarel.topology.application`, `tarel.workspaces.application`
 
 ## `tarel`
 
@@ -2533,10 +2586,11 @@ Lineage use cases: build, import, edit, review and trace static lineage document
     - `lineage_status_use_case`: lineage status (use case); returns `LineageStatus`. Calls `lineage_status`; uses the lineage store.
     - `find_lineage_references_use_case`: find lineage references (use case); returns `tuple[LineageReference, ...]`. Calls `find_lineage_references`, `resolve_model_path`, `load_local_embedding_plugin`.
     - `trace_upstream_use_case`: trace upstream (use case); returns `UpstreamTrace`. Calls `trace_upstream`.
+    - `load_trace_sources`: load trace sources; returns `tuple[tuple[LineageDocument, ...], tuple[GraphDocument, ...]]`. Uses the lineage store, graph store; raises `LineageFailure`.
     - `require_source_roles`: Reject a lineage name passed as a graph, or a graph name passed as a lineage. Calls `name_preview`; raises `LineageFailure`.
 - **Output:** returns `LineageChangeResult`, `LineageDocument`, `LineageReviewResult`, `LineageStatus`, `LineageTask | None`, `ManualHopResult`, `ManualJobResult`, `UpstreamTrace`, `tuple[LineageReference, ...]`, `tuple[LineageReviewItem, ...]`; saves documents to a store
 - **Uses:** `tarel.errors`, `tarel.graph.contracts`, `tarel.lineage.contracts`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.refresh`, `tarel.lineage.review`, `tarel.lineage.revision`, `tarel.lineage.source`, `tarel.lineage.status`, `tarel.lineage.tasks`, `tarel.lineage.traversal`, `tarel.retrieval.local`, `tarel.retrieval.plugins`, `tarel.runtime`
-- **Used by:** `tarel.cli.lineage`, `tarel.context.grounding_application`, `tarel.focus.application`, `tarel.sdk.grounding`, `tarel.sdk.lineage`, `tarel.sdk.view`, `tarel.ui.backend`
+- **Used by:** `tarel.cli.lineage`, `tarel.cli.lineage_trace`, `tarel.context.grounding_application`, `tarel.focus.application`, `tarel.lineage.trace_application`, `tarel.sdk.grounding`, `tarel.sdk.lineage`, `tarel.sdk.view`, `tarel.ui.backend`
 
 ### `src/tarel/lineage/change_store.py`
 
@@ -2589,7 +2643,7 @@ Dependency-free persisted contracts for reviewed static lineage.
     - `validate_lineage_document`: Raise ``LineageFailure`` unless every section of ``document`` is internally consistent.
 - **Output:** returns `LineageDocument`, `dict[str, LineageClaim]`, `dict[str, LineageDefinition]`, `dict[str, object]`, `dict[str, str]`
 - **Uses:** `tarel.errors`
-- **Used by:** `tarel.cli.lineage`, `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.focus.application`, `tarel.focus.core`, `tarel.lineage`, `tarel.lineage._runtime_parse`, `tarel.lineage.analysis_application`, `tarel.lineage.analysis_cache`, `tarel.lineage.analyzers`, `tarel.lineage.application`, `tarel.lineage.change_store`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.manual`, `tarel.lineage.projection`, `tarel.lineage.refresh`, `tarel.lineage.resolution`, `tarel.lineage.review`, `tarel.lineage.revision`, `tarel.lineage.runtime`, `tarel.lineage.runtime_application`, `tarel.lineage.runtime_inputs`, `tarel.lineage.runtime_logical`, `tarel.lineage.runtime_records`, `tarel.lineage.runtime_store`, `tarel.lineage.source`, `tarel.lineage.status`, `tarel.lineage.store`, `tarel.lineage.tasks`, `tarel.lineage.traversal`, `tarel.packages.application`, `tarel.sdk.lineage`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.payloads.graph`, `tarel.ui.payloads.lineage`, `tarel.ui.payloads.lineage_flows`, `tarel.ui.payloads.lineage_source`, `tarel.ui.server`
+- **Used by:** `tarel.cli.lineage`, `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.focus.application`, `tarel.focus.core`, `tarel.lineage`, `tarel.lineage._runtime_parse`, `tarel.lineage.analysis_application`, `tarel.lineage.analysis_cache`, `tarel.lineage.analyzers`, `tarel.lineage.application`, `tarel.lineage.change_store`, `tarel.lineage.core`, `tarel.lineage.dbt`, `tarel.lineage.directions`, `tarel.lineage.manual`, `tarel.lineage.projection`, `tarel.lineage.refresh`, `tarel.lineage.resolution`, `tarel.lineage.review`, `tarel.lineage.revision`, `tarel.lineage.runtime`, `tarel.lineage.runtime_application`, `tarel.lineage.runtime_inputs`, `tarel.lineage.runtime_logical`, `tarel.lineage.runtime_records`, `tarel.lineage.runtime_store`, `tarel.lineage.source`, `tarel.lineage.status`, `tarel.lineage.store`, `tarel.lineage.tasks`, `tarel.lineage.trace_application`, `tarel.lineage.traversal`, `tarel.packages.application`, `tarel.sdk.lineage`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.payloads.graph`, `tarel.ui.payloads.lineage`, `tarel.ui.payloads.lineage_flows`, `tarel.ui.payloads.lineage_source`, `tarel.ui.server`
 
 ### `src/tarel/lineage/core.py`
 
@@ -2635,20 +2689,22 @@ Manifest v12 declarations translated into the existing lineage input contract.
 - **Uses:** `tarel.lineage.contracts`, `tarel.lineage.source`
 - **Used by:** `tarel.lineage.application`
 
-### `src/tarel/lineage/graph_utils.py`
+### `src/tarel/lineage/directions.py`
 
-Small pure helpers shared by the compact lineage and focus projections.
+Directional lineage: upstream, downstream (impact) or both, for one reference or a batch.
 
-- **Input:** parameters `edges: Iterable[tuple[str, str]]`, `edges: list[dict[str, object]]`, `hops: Iterable[_Hop]`, `ids: Iterable[str]`, `mapping: Mapping[str, object]`, `nodes: Iterable[str]`, `payload: dict[str, object]`
+- **Input:** parameters `direction: str`, `documents: tuple[LineageDocument, ...]`, `freshness: dict[str, object] | None`, `graphs: tuple[GraphDocument, ...]`, `max_hops: int`, `network: Network`, `reference: str`, `references: tuple[str, ...]`, `resolution: dict[str, object] | None`, `states: frozenset[str]`
 - **Processing:**
-    - `omit_empty`: Drop ``None``, empty strings and empty collections; keep ``False`` and ``0``.
-    - `finish_compact`: Sort a compact payload's keys and drop its empty optional sections.
-    - `claim_states`: Review states of lineage claims; ``field_of`` is graph structure, always "observed".
-    - `collapse_cycles`: Replace the edges inside each strongly connected component by one ``cycles`` entry.
-    - `unique_keys`: Map each id to the first candidate label that no other id shares, else to the id itself.
-    - `tarjan_sccs`: Strongly connected components with more than one member, each sorted, in sorted order.
-- **Output:** returns `dict[str, object]`, `dict[str, str]`, `list[tuple[str, ...]]`, `set[str]`, `tuple[list[dict[str, object]], list[dict[str, object]]]`
-- **Used by:** `tarel.focus.projection`, `tarel.lineage.projection`
+    - `LineageTrace`: A trace in one or both directions; ``origins`` end upstream, ``impacts`` downstream.
+    - `LineageTrace.to_dict`: to dict; returns `dict[str, object]`.
+    - `LineageTrace.to_compact_dict`: to compact dict; returns `dict[str, object]`. Calls `compact_lineage_dict`.
+    - `LineageBatch`: One trace per reference that resolved, one failure per reference that did not.
+    - `trace_lineage`: trace lineage; returns `LineageTrace`. Calls `validate_trace_arguments`, `build_network`.
+    - `trace_lineage_batch`: Trace every reference over one network; a failing reference never hides the others. Calls `build_network`, `validate_trace_arguments`; raises `LineageFailure`.
+    - `trace_lineage_on`: trace lineage on; returns `LineageTrace`. Calls `trace_upstream_on`.
+- **Output:** returns `LineageBatch`, `LineageTrace`, `dict[str, object]`
+- **Uses:** `tarel.errors`, `tarel.graph.contracts`, `tarel.lineage.contracts`, `tarel.lineage.projection`, `tarel.lineage.traversal`
+- **Used by:** `tarel.cli.lineage_trace`, `tarel.lineage.projection`, `tarel.lineage.trace_application`
 
 ### `src/tarel/lineage/manual.py`
 
@@ -2667,12 +2723,16 @@ Human-authored lineage overlays without modifying imported source documents.
 
 The compact projection of an upstream trace: each node once, each edge as one short row.
 
-- **Input:** parameters `trace: UpstreamTrace`
+- **Input:** parameters `batch: LineageBatch`, `direction: str`, `downstream: Sequence[LineageHop]`, `freshness: Mapping[str, object] | None`, `hops: Iterable[LineageHop]`, `impacts: Sequence[LineageReference]`, `origins: Sequence[LineageReference]`, `query: str`, `references: Iterable[LineageReference]`, `resolution: Mapping[str, object] | None`, `start: LineageReference`, `trace: UpstreamTrace` …
 - **Processing:**
-    - `compact_trace_dict`: The compact, deterministic projection of ``trace`` (see the module docstring). Calls `unique_keys`, `collapse_cycles`, `finish_compact`, `omit_empty`, `claim_states`.
-- **Output:** returns `dict[str, object]`
-- **Uses:** `tarel.lineage.contracts`, `tarel.lineage.graph_utils`, `tarel.lineage.traversal`
-- **Used by:** `tarel.lineage.traversal`
+    - `compact_trace_dict`: The compact, deterministic projection of an upstream ``trace``.
+    - `compact_lineage_dict`: The compact projection of a trace in one or both directions (see the module docstring). Calls `unique_keys`, `collapse_cycles`, `finish_compact`, `omit_empty`, `claim_states`.
+    - `graph_names`: The graphs whose nodes appear in a trace, e.g. to report only their freshness.
+    - `trace_references`: trace references; returns `tuple[LineageReference, ...]`.
+    - `compact_batch_dict`: One chain string per reference, plus a failure object for each one that did not trace.
+- **Output:** returns `dict[str, object]`, `tuple[LineageReference, ...]`, `tuple[str, ...]`
+- **Uses:** `tarel.compact`, `tarel.lineage.contracts`, `tarel.lineage.directions`, `tarel.lineage.traversal`
+- **Used by:** `tarel.cli.lineage_trace`, `tarel.lineage.directions`, `tarel.lineage.traversal`
 
 ### `src/tarel/lineage/refresh.py`
 
@@ -2717,7 +2777,7 @@ Which object a lineage reference means; shared by traversal and the browser's fl
     - `normalize_reference`: normalize reference; returns `str`.
 - **Output:** returns `LocalScope | None`, `ReferenceResolution`, `bool`, `dict[str, str]`, `frozenset[str]`, `str`, `str | None`
 - **Uses:** `tarel.lineage.contracts`
-- **Used by:** `tarel.lineage.traversal`, `tarel.mcp.tools`, `tarel.ui.payloads.lineage_flows`
+- **Used by:** `tarel.lineage.trace_application`, `tarel.lineage.traversal`, `tarel.mcp.tools`, `tarel.ui.payloads.lineage_flows`
 
 ### `src/tarel/lineage/review.py`
 
@@ -2968,11 +3028,28 @@ Provider-neutral coding-agent tasks for write-centred lineage extraction.
 - **Uses:** `tarel.lineage.contracts`, `tarel.lineage.coverage`, `tarel.lineage.source`, `tarel.providers.contracts`
 - **Used by:** `tarel.lineage.analysis_application`, `tarel.lineage.application`, `tarel.lineage.core`, `tarel.sdk.lineage`
 
+### `src/tarel/lineage/trace_application.py`
+
+Lineage trace use cases that choose their own sources: resolution, direction and batches.
+
+- **Input:** parameters `auto_catalog: bool`, `direction: str`, `graph_names: tuple[str, ...]`, `lineage_names: tuple[str, ...]`, `max_hops: int`, `reference: str`, `references: tuple[str, ...]`, `runtime: TarelRuntime | None`, `sources: tuple[str, ...]`, `states: frozenset[str] | None`, `workspace: str | None`; loads stored documents
+- **Processing:**
+    - `ResolvedLineageSources`: record with fields lineage_names, graph_names, lineages_from, graphs_from.
+    - `ResolvedLineageSources.auto`: auto; returns `bool`.
+    - `ResolvedLineageSources.to_dict`: to dict; returns `dict[str, object]`.
+    - `resolve_lineage_sources_use_case`: resolve lineage sources (use case); returns `ResolvedLineageSources`. Calls `require_source_roles`; uses the lineage store, graph store; raises `LineageFailure`.
+    - `catalog_graphs`: Local graphs whose catalog the named lineage documents reference by qualified name. Calls `declared_catalogs`; uses the graph store, lineage store.
+    - `trace_lineage_use_case`: trace lineage (use case); returns `LineageTrace`. Calls `load_trace_sources`, `trace_lineage`.
+    - `trace_lineage_batch_use_case`: trace lineage batch (use case); returns `LineageBatch`. Calls `load_trace_sources`, `trace_lineage_batch`.
+- **Output:** returns `LineageBatch`, `LineageTrace`, `ResolvedLineageSources`, `bool`, `dict[str, object]`, `tuple[str, ...]`
+- **Uses:** `tarel.errors`, `tarel.lineage.application`, `tarel.lineage.contracts`, `tarel.lineage.directions`, `tarel.lineage.resolution`, `tarel.lineage.traversal`, `tarel.runtime`, `tarel.workspaces.application`
+- **Used by:** `tarel.cli.lineage_trace`
+
 ### `src/tarel/lineage/traversal.py`
 
 Deterministic upstream traversal across stored lineage and technical graphs.
 
-- **Input:** parameters `documents: tuple[LineageDocument, ...]`, `embedder: EmbeddingBackend | None`, `graphs: tuple[GraphDocument, ...]`, `limit: int`, `max_hops: int`, `mode: str`, `query: str`, `reference: str`, `states: frozenset[str]`
+- **Input:** parameters `depth: int`, `documents: tuple[LineageDocument, ...]`, `edge: NetworkEdge`, `embedder: EmbeddingBackend | None`, `freshness: dict[str, object] | None`, `graphs: tuple[GraphDocument, ...]`, `limit: int`, `max_hops: int`, `mode: str`, `network: Network`, `query: str`, `reference: str` …
 - **Processing:**
     - `LineageReference`: record with fields id, reference, name, kind, source, description, description_kind, annotation_state.
     - `LineageReference.to_dict`: to dict; returns `dict[str, object]`.
@@ -2981,11 +3058,19 @@ Deterministic upstream traversal across stored lineage and technical graphs.
     - `UpstreamTrace`: record with fields query, start, hops, origins, warnings, truncated.
     - `UpstreamTrace.to_dict`: to dict; returns `dict[str, object]`.
     - `UpstreamTrace.to_compact_dict`: Each node once and each edge as one short row; see :mod:`tarel.lineage.projection`. Calls `compact_trace_dict`.
+    - `NetworkEdge`: record with fields id, source_id, target_id, relation, state, lineage, role, via_definition ….
+    - `Network`: record with fields nodes, edges, ambiguities.
+    - `Network.aliases`: aliases; returns `dict[str, tuple[str, ...]]`.
     - `find_lineage_references`: find lineage references; returns `tuple[LineageReference, ...]`. Calls `rank_bm25`; raises `LineageFailure`.
-    - `trace_upstream`: trace upstream; returns `UpstreamTrace`. Raises `LineageFailure`.
-- **Output:** returns `UpstreamTrace`, `dict[str, object]`, `tuple[LineageReference, ...]`
+    - `trace_upstream`: trace upstream; returns `UpstreamTrace`.
+    - `hop_from_edge`: hop from edge; returns `LineageHop`.
+    - `validate_trace_arguments`: validate trace arguments; returns `None`. Raises `LineageFailure`.
+    - `trace_upstream_on`: Trace one reference over a network built once, so a batch pays for it only once.
+    - `build_network`: build network; returns `Network`. Calls `declared_catalogs`, `session_roots`.
+    - `resolve_start`: resolve start; returns `str`. Raises `LineageFailure`.
+- **Output:** returns `LineageHop`, `Network`, `UpstreamTrace`, `dict[str, object]`, `dict[str, tuple[str, ...]]`, `str`, `tuple[LineageReference, ...]`
 - **Uses:** `tarel.annotations.states`, `tarel.graph.contracts`, `tarel.lineage.contracts`, `tarel.lineage.projection`, `tarel.lineage.resolution`, `tarel.retrieval.bm25`, `tarel.retrieval.contracts`
-- **Used by:** `tarel.context.grounding`, `tarel.focus.application`, `tarel.focus.core`, `tarel.lineage.application`, `tarel.lineage.projection`, `tarel.sdk.grounding`, `tarel.sdk.lineage`
+- **Used by:** `tarel.context.grounding`, `tarel.focus.application`, `tarel.focus.core`, `tarel.lineage.application`, `tarel.lineage.directions`, `tarel.lineage.projection`, `tarel.lineage.trace_application`, `tarel.sdk.grounding`, `tarel.sdk.lineage`
 
 ## `tarel`
 
@@ -3893,10 +3978,10 @@ Optional relevance ordering of already scoped metadata objects.
 
 Search use cases: rank the objects of one graph or a workspace scope for a query.
 
-- **Input:** parameters `annotation_states: frozenset[str] | None`, `areas: tuple[str, ...]`, `bm25_weight: float | None`, `family_mode: str | None`, `filters: SearchFilters | None`, `focuses: tuple[str, ...]`, `graph: GraphDocument`, `graphs: tuple[str, ...]`, `limit: int`, `mode: str`, `model_path: Path | None`, `n_threads: int | None` …; loads stored documents
+- **Input:** parameters `annotation_states: frozenset[str] | None`, `areas: tuple[str, ...]`, `bm25_weight: float | None`, `collapse_duplicates: bool`, `diversity: str`, `exclude_graphs: tuple[str, ...]`, `family_mode: str | None`, `filters: SearchFilters | None`, `focuses: tuple[str, ...]`, `graph: GraphDocument`, `graphs: tuple[str, ...]`, `limit: int` …; loads stored documents
 - **Processing:**
     - `search_graph_use_case`: search graph (use case); returns `SearchResults`. Calls `snapshot_runtime`, `validate_bm25_weight`, `candidate_limit`, `selected_annotation_states`, `filter_search_objects`, `describe_search_results` …; uses the graph store; raises `SearchFailure`.
-    - `search_workspace_use_case`: search workspace (use case); returns `SearchResults`. Calls `snapshot_runtime`, `validate_bm25_weight`, `candidate_limit`, `load_workspace_scope`, `selected_annotation_states`, `combine_workspace_search` …; uses the retrieval index; raises `SearchFailure`.
+    - `search_workspace_use_case`: search workspace (use case); returns `SearchResults`. Calls `snapshot_runtime`, `validate_bm25_weight`, `validate_diversity`, `candidate_limit`, `load_workspace_scope`, `selected_annotation_states` …; uses the retrieval index; raises `SearchFailure`.
     - `project_graph_scope`: project graph scope; returns `GraphDocument`. Calls `GraphDocument`; raises `SearchFailure`.
     - `resolve_graph_object_scope`: Resolve explicit graph boundaries while preserving an intentionally empty scope. Calls `focus_object_allowlist`; raises `SearchFailure`.
     - `resolve_graph_object_scope_use_case`: Return every physical object allowed by one graph working scope. Uses the graph store.
@@ -3979,7 +4064,7 @@ Explicit local state boundary shared by the CLI and SDK.
     - `resolve_runtime`: The runtime a use case reads and writes with.
 - **Output:** returns `Any`, `FileDiscoveryStore`, `FileEntityResolutionStore`, `FileFocusStore`, `FileGraphChangeStore`, `FileGraphStore`, `FileKnowledgeStore`, `FileLineageAnalysisCache`, `FileLineageChangeStore`, `FileLineageStore`
 - **Uses:** `tarel.discovery.store`, `tarel.entity_resolution.store`, `tarel.focus.store`, `tarel.graph.change_store`, `tarel.graph.store`, `tarel.knowledge.store`, `tarel.lineage.analysis_cache`, `tarel.lineage.change_store`, `tarel.lineage.runtime_store`, `tarel.lineage.store`, `tarel.logical_joins.store`, `tarel.object_families.store`, `tarel.reference_mapping.store`, `tarel.retrieval.contracts`, `tarel.retrieval.index`, `tarel.retrieval.local`, `tarel.retrieval.settings`, `tarel.semantic_concepts.store`, `tarel.semantics.store`, `tarel.sources.store`, `tarel.sync.store`, `tarel.topology.store`, `tarel.workspaces.store`
-- **Used by:** `tarel.annotations.application`, `tarel.cli.sync`, `tarel.cli.ui`, `tarel.context.application`, `tarel.context.grounding_application`, `tarel.context.hints_application`, `tarel.discovery.advice`, `tarel.discovery.application`, `tarel.discovery.checks`, `tarel.discovery.coverage_application`, `tarel.discovery.promotion`, `tarel.discovery.tasks`, `tarel.entity_resolution.application`, `tarel.expansion.application`, `tarel.expansion.projections`, `tarel.focus.application`, `tarel.graph.application`, `tarel.graph.reads`, `tarel.knowledge.application`, `tarel.lineage.analysis_application`, `tarel.lineage.application`, `tarel.lineage.runtime_application`, `tarel.logical_joins.application`, `tarel.object_bindings.application`, `tarel.object_families.application`, `tarel.object_families.proposals`, `tarel.object_families.search`, `tarel.reference_mapping.application`, `tarel.relationships.application`, `tarel.retrieval.application`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.retrieval.settings`, `tarel.sdk`, `tarel.sdk._base`, `tarel.sdk._scope`, `tarel.sdk.client`, `tarel.sdk.retrieval`, `tarel.semantic_concepts.application`, `tarel.semantics.application`, `tarel.sources.application`, `tarel.sync.admin_application`, `tarel.sync.application`, `tarel.sync.impacts`, `tarel.sync.inbox`, `tarel.sync.publish_application`, `tarel.topology.application`, `tarel.topology.endpoints`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.ui.query_tools`, `tarel.ui.server`, `tarel.workspaces.application`
+- **Used by:** `tarel.annotations.application`, `tarel.cli.sync`, `tarel.cli.ui`, `tarel.context.application`, `tarel.context.grounding_application`, `tarel.context.hints_application`, `tarel.discovery.advice`, `tarel.discovery.application`, `tarel.discovery.checks`, `tarel.discovery.coverage_application`, `tarel.discovery.promotion`, `tarel.discovery.tasks`, `tarel.entity_resolution.application`, `tarel.expansion.application`, `tarel.expansion.projections`, `tarel.focus.application`, `tarel.graph.application`, `tarel.graph.reads`, `tarel.knowledge.application`, `tarel.lineage.analysis_application`, `tarel.lineage.application`, `tarel.lineage.runtime_application`, `tarel.lineage.trace_application`, `tarel.logical_joins.application`, `tarel.object_bindings.application`, `tarel.object_families.application`, `tarel.object_families.proposals`, `tarel.object_families.search`, `tarel.reference_mapping.application`, `tarel.relationships.application`, `tarel.retrieval.application`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.retrieval.settings`, `tarel.sdk`, `tarel.sdk._base`, `tarel.sdk._scope`, `tarel.sdk.client`, `tarel.sdk.retrieval`, `tarel.semantic_concepts.application`, `tarel.semantics.application`, `tarel.sources.application`, `tarel.sync.admin_application`, `tarel.sync.application`, `tarel.sync.impacts`, `tarel.sync.inbox`, `tarel.sync.publish_application`, `tarel.topology.application`, `tarel.topology.endpoints`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.logical_metadata`, `tarel.ui.optional_metadata`, `tarel.ui.query_tools`, `tarel.ui.server`, `tarel.workspaces.application`
 
 ### `src/tarel/sdk/__init__.py`
 
@@ -4166,19 +4251,20 @@ Low-level read-only connector operations for embedded harnesses.
 
 ``tarel.graph``: build, refresh, read and page through graphs.
 
-- **Input:** parameters `annotate_new_provider: str | None`, `annotation_model: str | None`, `annotation_timeout: float`, `annotation_workers: int`, `catalog: CatalogResult`, `config: str | Path | None`, `connector: str`, `database: str | None`, `expected_revision: str | None`, `limit: int`, `name: str`, `namespace: str | None` …
+- **Input:** parameters `annotate_new_provider: str | None`, `annotation_model: str | None`, `annotation_timeout: float`, `annotation_workers: int`, `catalog: CatalogResult`, `config: str | Path | None`, `connector: str`, `database: str | None`, `expected_revision: str | None`, `include_containment: bool`, `limit: int`, `name: str` …
 - **Processing:**
     - `GraphAPI`: Build, refresh and read graphs; paged reads avoid loading a whole graph.
     - `GraphAPI.header`: header; returns `GraphHeader`. Calls `graph_header_use_case`.
     - `GraphAPI.objects`: objects; returns `GraphObjectPage`. Calls `graph_objects_use_case`.
-    - `GraphAPI.slice`: slice; returns `GraphSlice`. Calls `graph_slice_use_case`.
+    - `GraphAPI.slice`: Use ``.to_compact_dict()`` on the result for the compact view. Calls `graph_slice_use_case`.
+    - `GraphAPI.freshness`: When each graph was last read; staleness against the source stays unverified. Calls `graph_freshness_use_case`.
     - `GraphAPI.rebuild_index`: rebuild index; returns `GraphHeader`. Calls `rebuild_graph_index_use_case`.
     - `GraphAPI.list`: list; returns `tuple[str, ...]`. Calls `list_graphs_use_case`.
     - `GraphAPI.load`: load; returns `GraphDocument`. Calls `load_graph_use_case`.
     - `GraphAPI.import_catalog`: Persist one already observed catalog without running discovery again. Calls `import_catalog_use_case`.
     - `GraphAPI.build`: build; returns `GraphBuildResult`. Calls `build_graph_use_case`, `optional_path`.
     - `GraphAPI.refresh`: refresh; returns `GraphRefreshResult`. Calls `refresh_graph_use_case`, `optional_path`.
-- **Output:** returns `GraphBuildResult`, `GraphDocument`, `GraphHeader`, `GraphObjectPage`, `GraphRefreshResult`, `GraphSlice`, `tuple[str, ...]`
+- **Output:** returns `GraphBuildResult`, `GraphDocument`, `GraphHeader`, `GraphObjectPage`, `GraphRefreshResult`, `GraphSlice`, `dict[str, object]`, `tuple[str, ...]`
 - **Uses:** `tarel.connectors.contracts`, `tarel.graph.application`, `tarel.graph.contracts`, `tarel.graph.reads`, `tarel.graph.selective`, `tarel.sdk._base`
 - **Used by:** `tarel.sdk.client`
 
@@ -4354,7 +4440,7 @@ The same retrieval selection used by CLI and GUI.
 
 ``tarel.search``: rank graph or workspace objects for a query.
 
-- **Input:** parameters `annotation_states: frozenset[str] | None`, `areas: tuple[str, ...]`, `bm25_weight: float | None`, `family_mode: str | None`, `filters: SearchFilters | None`, `focuses: tuple[str, ...]`, `graphs: tuple[str, ...]`, `limit: int`, `mode: str`, `model_path: str | Path | None`, `n_threads: int | None`, `name: str` …
+- **Input:** parameters `annotation_states: frozenset[str] | None`, `areas: tuple[str, ...]`, `bm25_weight: float | None`, `collapse_duplicates: bool`, `diversity: str`, `exclude_graphs: tuple[str, ...]`, `family_mode: str | None`, `filters: SearchFilters | None`, `focuses: tuple[str, ...]`, `graphs: tuple[str, ...]`, `limit: int`, `max_per_graph: int | None` …
 - **Processing:**
     - `SearchAPI`: Rank the objects of one graph or a workspace scope for a query.
     - `SearchAPI.graph`: graph; returns `SearchResults`. Calls `search_graph_use_case`, `optional_path`.
@@ -4457,12 +4543,13 @@ Explicit filesystem-writing setup helpers for embedded integrations.
 
 ``tarel.workspace``: systems, areas, zones and cross-graph relationships.
 
-- **Input:** parameters `area: str`, `areas: tuple[str, ...]`, `description: str | None`, `focuses: tuple[str, ...]`, `graphs: tuple[str, ...]`, `name: str`, `objects: tuple[str, ...]`, `reason: str`, `relationship_id: str`, `schemas: tuple[str, ...]`, `selection: ScopeSelection | None`, `source: str` …; loads stored documents
+- **Input:** parameters `area: str`, `areas: tuple[str, ...]`, `depth: str`, `description: str | None`, `focuses: tuple[str, ...]`, `graphs: tuple[str, ...]`, `name: str`, `objects: tuple[str, ...]`, `reason: str`, `relationship_id: str`, `schemas: tuple[str, ...]`, `selection: ScopeSelection | None` …; loads stored documents
 - **Processing:**
     - `WorkspaceAPI`: Organize graphs into systems, areas and zones and resolve scopes over them.
     - `WorkspaceAPI.create`: create; returns `WorkspaceChangeResult`. Calls `create_workspace_use_case`.
     - `WorkspaceAPI.list`: list; returns `tuple[str, ...]`. Calls `list_workspaces_use_case`.
     - `WorkspaceAPI.load`: load; returns `WorkspaceDocument`. Calls `load_workspace_use_case`.
+    - `WorkspaceAPI.overview`: ``index``: systems and counts; ``zones``: adds areas and zones; ``full``: document. Calls `workspace_overview_use_case`.
     - `WorkspaceAPI.define_system`: define system; returns `WorkspaceChangeResult`. Calls `define_workspace_system_use_case`.
     - `WorkspaceAPI.define_area`: define area; returns `WorkspaceChangeResult`. Calls `define_workspace_area_use_case`.
     - `WorkspaceAPI.define_zone`: define zone; returns `WorkspaceChangeResult`. Calls `define_workspace_zone_use_case`.
@@ -4471,7 +4558,7 @@ Explicit filesystem-writing setup helpers for embedded integrations.
     - `WorkspaceAPI.add_relationship`: add relationship; returns `WorkspaceRelationshipChangeResult`. Calls `add_workspace_relationship_use_case`.
     - `WorkspaceAPI.decide_relationship`: decide relationship; returns `WorkspaceRelationshipChangeResult`. Calls `decide_workspace_relationship_use_case`.
     - `WorkspaceAPI.scope`: scope; returns `ResolvedScope`. Calls `workspace_scope_arguments`, `resolve_workspace_scope_use_case`, `workspace_focuses`, `workspace_objects`.
-- **Output:** returns `ResolvedScope`, `ResolvedZone`, `WorkspaceChangeResult`, `WorkspaceDocument`, `WorkspaceRelationshipChangeResult`, `tuple[WorkspaceRelationship, ...]`, `tuple[str, ...]`
+- **Output:** returns `ResolvedScope`, `ResolvedZone`, `WorkspaceChangeResult`, `WorkspaceDocument`, `WorkspaceRelationshipChangeResult`, `dict[str, object]`, `tuple[WorkspaceRelationship, ...]`, `tuple[str, ...]`
 - **Uses:** `tarel.sdk._base`, `tarel.sdk._scope`, `tarel.workspaces.application`, `tarel.workspaces.contracts`, `tarel.workspaces.core`, `tarel.workspaces.scope`
 - **Used by:** `tarel.sdk.client`
 
@@ -4498,9 +4585,10 @@ Deterministic lexical search over graph objects and their fields.
     - `SearchResults.to_dict`: to dict; returns `dict[str, object]`.
     - `search_graph`: Rank tables and views using only persisted graph metadata.
     - `filter_search_objects`: Resolve physical candidates once so every retrieval mode sees the same inputs. Calls `annotation_is_visible`.
+    - `role_coverage_warning`: A role filter is always applied; with few annotated roles the caller must know that.
     - `describe_search_results`: Attach decision metadata without changing ranking or inventing explanations. Calls `annotation_is_visible`.
     - `score_object`: score object; returns `SearchHit | None`.
-- **Output:** returns `SearchHit | None`, `SearchResults`, `dict[str, list[str]]`, `dict[str, object]`, `tuple[frozenset[str] | None, SearchInventory]`
+- **Output:** returns `SearchHit | None`, `SearchResults`, `dict[str, list[str]]`, `dict[str, object]`, `str | None`, `tuple[frozenset[str] | None, SearchInventory]`
 - **Uses:** `tarel.annotations.states`, `tarel.errors`, `tarel.graph.contracts`
 - **Used by:** `tarel.cli._args`, `tarel.cli.search`, `tarel.context.application`, `tarel.context.compiler`, `tarel.object_families.search`, `tarel.retrieval.ranking`, `tarel.retrieval.rerank`, `tarel.retrieval.search_application`, `tarel.sdk`, `tarel.sdk.search`, `tarel.ui.query_tools`, `tarel.ui.server`, `tarel.workspaces.retrieval`
 
@@ -5548,13 +5636,14 @@ Organizational views across one or more TAREL graphs.
 
 Workspace use cases: systems, areas, zones, cross-graph relationships and scopes.
 
-- **Input:** parameters `area_name: str`, `areas: tuple[str, ...]`, `description: str | None`, `focuses: tuple[str, ...]`, `graph_names: tuple[str, ...]`, `graphs: tuple[str, ...]`, `name: str`, `object_references: tuple[str, ...]`, `objects: tuple[str, ...]`, `reason: str`, `relationship_id: str`, `runtime: TarelRuntime | None` …; loads stored documents
+- **Input:** parameters `area_name: str`, `areas: tuple[str, ...]`, `depth: str`, `description: str | None`, `focuses: tuple[str, ...]`, `graph_names: tuple[str, ...]`, `graphs: tuple[str, ...]`, `include_stats: bool`, `name: str`, `object_references: tuple[str, ...]`, `objects: tuple[str, ...]`, `reason: str` …; loads stored documents
 - **Processing:**
     - `WorkspaceChangeResult`: record with fields workspace, path.
     - `WorkspaceRelationshipChangeResult`: record with fields workspace, path, relationship, previous_state.
     - `create_workspace_use_case`: create workspace (use case); returns `WorkspaceChangeResult`. Calls `create_workspace`; uses the workspace store; raises `WorkspaceFailure`.
     - `list_workspaces_use_case`: list workspaces (use case); returns `tuple[str, ...]`. Uses the workspace store.
     - `load_workspace_use_case`: load workspace (use case); returns `WorkspaceDocument`. Uses the workspace store.
+    - `workspace_overview_use_case`: A tiered overview (index, zones or full); ``include_stats`` reads object counts. Calls `build_workspace_overview`; uses the graph store, workspace store.
     - `resolve_workspace_scope_use_case`: resolve workspace scope (use case); returns `ResolvedScope`.
     - `load_workspace_scope`: load workspace scope; returns `tuple[WorkspaceDocument, dict[str, GraphDocument], ResolvedScope]`. Calls `resolve_scope`, `ScopeSelection`, `focus_object_allowlist`, `intersect_scope_objects`; uses the graph store, workspace store.
     - `load_workspace_scope_use_case`: Reuse the validated documents within one UI request, without a shared cache.
@@ -5564,9 +5653,9 @@ Workspace use cases: systems, areas, zones, cross-graph relationships and scopes
     - `add_workspace_relationship_use_case`: add workspace relationship (use case); returns `WorkspaceRelationshipChangeResult`. Calls `add_workspace_relationship`; uses the workspace store, graph store.
     - `decide_workspace_relationship_use_case`: decide workspace relationship (use case); returns `WorkspaceRelationshipChangeResult`. Calls `decide_workspace_relationship`; uses the workspace store.
     - `show_workspace_zone_use_case`: show workspace zone (use case); returns `ResolvedZone`. Calls `require_system`, `resolve_zone`; uses the graph store, workspace store.
-- **Output:** returns `ResolvedScope`, `ResolvedZone`, `WorkspaceChangeResult`, `WorkspaceDocument`, `WorkspaceRelationshipChangeResult`, `tuple[WorkspaceDocument, dict[str, GraphDocument], ResolvedScope]`, `tuple[str, ...]`; saves documents to a store
-- **Uses:** `tarel.focus.application`, `tarel.graph.contracts`, `tarel.runtime`, `tarel.workspaces.contracts`, `tarel.workspaces.core`, `tarel.workspaces.scope`
-- **Used by:** `tarel.cli.workspace`, `tarel.context.application`, `tarel.context.grounding_application`, `tarel.expansion.application`, `tarel.retrieval.application`, `tarel.retrieval.search_application`, `tarel.sdk._scope`, `tarel.sdk.view`, `tarel.sdk.workspace`, `tarel.ui.backend`, `tarel.ui.query_tools`
+- **Output:** returns `ResolvedScope`, `ResolvedZone`, `WorkspaceChangeResult`, `WorkspaceDocument`, `WorkspaceRelationshipChangeResult`, `dict[str, object]`, `tuple[WorkspaceDocument, dict[str, GraphDocument], ResolvedScope]`, `tuple[str, ...]`; saves documents to a store
+- **Uses:** `tarel.focus.application`, `tarel.graph.contracts`, `tarel.graph.store`, `tarel.runtime`, `tarel.workspaces.contracts`, `tarel.workspaces.core`, `tarel.workspaces.overview`, `tarel.workspaces.scope`
+- **Used by:** `tarel.cli.workspace`, `tarel.context.application`, `tarel.context.grounding_application`, `tarel.expansion.application`, `tarel.lineage.trace_application`, `tarel.retrieval.application`, `tarel.retrieval.search_application`, `tarel.sdk._scope`, `tarel.sdk.view`, `tarel.sdk.workspace`, `tarel.ui.backend`, `tarel.ui.query_tools`
 
 ### `src/tarel/workspaces/contracts.py`
 
@@ -5602,7 +5691,7 @@ Versioned, dependency-free workspace contracts.
     - `validate_workspace`: validate workspace; returns `None`.
 - **Output:** returns `Area`, `SchemaReference`, `WorkspaceDocument`, `WorkspaceRelationship`, `WorkspaceRelationshipEndpoint`, `WorkspaceSystem`, `Zone`, `ZoneMember`, `dict[str, object]`, `dict[str, str]`
 - **Uses:** `tarel.errors`
-- **Used by:** `tarel.cli._args`, `tarel.cli.workspace`, `tarel.knowledge.application`, `tarel.knowledge.core`, `tarel.packages.application`, `tarel.sdk._scope`, `tarel.sdk.grounding`, `tarel.sdk.workspace`, `tarel.sync.admin_application`, `tarel.sync.application`, `tarel.sync.impacts`, `tarel.sync.publish_application`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.payloads.graph`, `tarel.ui.server`, `tarel.workspaces`, `tarel.workspaces.application`, `tarel.workspaces.core`, `tarel.workspaces.impact`, `tarel.workspaces.projection`, `tarel.workspaces.scope`, `tarel.workspaces.store`
+- **Used by:** `tarel.cli._args`, `tarel.cli.workspace`, `tarel.knowledge.application`, `tarel.knowledge.core`, `tarel.packages.application`, `tarel.sdk._scope`, `tarel.sdk.grounding`, `tarel.sdk.workspace`, `tarel.sync.admin_application`, `tarel.sync.application`, `tarel.sync.impacts`, `tarel.sync.publish_application`, `tarel.ui.backend`, `tarel.ui.lazy_family_view`, `tarel.ui.payloads.graph`, `tarel.ui.server`, `tarel.workspaces`, `tarel.workspaces.application`, `tarel.workspaces.core`, `tarel.workspaces.impact`, `tarel.workspaces.overview`, `tarel.workspaces.projection`, `tarel.workspaces.scope`, `tarel.workspaces.store`
 
 ### `src/tarel/workspaces/core.py`
 
@@ -5647,6 +5736,18 @@ Project graph changes onto existing workspace organization.
 - **Uses:** `tarel.graph.refresh`, `tarel.workspaces.contracts`
 - **Used by:** `tarel.graph.application`
 
+### `src/tarel/workspaces/overview.py`
+
+Tiered workspace overviews: ``index`` to orient, ``zones`` to choose, ``full`` to edit.
+
+- **Input:** parameters `depth: str`, `stats: Mapping[str, GraphStats] | None`, `workspace: WorkspaceDocument`
+- **Processing:**
+    - `GraphStats`: record with fields objects, annotated.
+    - `build_workspace_overview`: build workspace overview; returns `dict[str, object]`. Calls `omit_empty`; raises `WorkspaceFailure`.
+- **Output:** returns `dict[str, object]`
+- **Uses:** `tarel.compact`, `tarel.workspaces.contracts`
+- **Used by:** `tarel.cli.workspace`, `tarel.workspaces.application`
+
 ### `src/tarel/workspaces/projection.py`
 
 Deterministic in-memory graph projection for one resolved workspace scope.
@@ -5664,11 +5765,13 @@ Deterministic in-memory graph projection for one resolved workspace scope.
 
 Pure aggregation of per-graph retrieval results for one workspace scope.
 
-- **Input:** parameters `limit: int`, `mode: str`, `query: str`, `results: tuple[SearchResults, ...]`, `scope: ResolvedScope`
+- **Input:** parameters `diversity: str`, `graph: GraphDocument`, `limit: int`, `max_per_graph: int | None`, `mode: str`, `object_ids: frozenset[str]`, `query: str`, `results: tuple[SearchResults, ...]`, `scope: ResolvedScope`, `signatures: Mapping[tuple[str, str], str] | None`
 - **Processing:**
     - `combine_workspace_search`: combine workspace search; returns `SearchResults`. Calls `SearchResults`, `workspace_graph_name`, `SearchHit`, `scoped_node_id`, `FieldSearchHit`.
-- **Output:** returns `SearchResults`
-- **Uses:** `tarel.search`, `tarel.workspaces.projection`, `tarel.workspaces.scope`
+    - `validate_diversity`: validate diversity; returns `None`. Raises `SearchFailure`.
+    - `structural_signatures`: Object name plus sorted column names, lowercased and stripped of non-alphanumerics.
+- **Output:** returns `SearchResults`, `dict[str, str]`
+- **Uses:** `tarel.graph.contracts`, `tarel.search`, `tarel.workspaces.projection`, `tarel.workspaces.scope`
 - **Used by:** `tarel.retrieval.search_application`
 
 ### `src/tarel/workspaces/scope.py`

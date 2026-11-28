@@ -1,4 +1,4 @@
-"""Small pure helpers shared by the compact lineage and focus projections."""
+"""Pure helpers shared by every compact projection (lineage, focus, graph slices)."""
 
 from __future__ import annotations
 

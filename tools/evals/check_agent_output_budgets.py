@@ -80,6 +80,61 @@ def _checks(tarel: Callable[..., Run]) -> list[Check]:
     ]
     checks.extend(_focus_checks(tarel))
     checks.append(_error_check(tarel))
+    checks.extend(_phase_two_checks(tarel))
+    return checks
+
+
+_GOLD = (
+    "bi_lab.gold.customer_sales", "bi_lab.gold.delivery_performance", "bi_lab.gold.sales_daily",
+    "bi_lab.gold.spark_sales_daily", "bi_lab.gold.supplier_comparison",
+)
+_GOLD_SLICE = tuple(
+    argument for name in _GOLD for argument in ("--object", name.removeprefix("bi_lab."))
+)
+
+
+def _phase_two_checks(tarel: Callable[..., Run]) -> list[Check]:
+    checks = []
+    auto = tarel("lineage", "upstream", _GOLD[0], "--view", "compact", "--format", "json")
+    unresolved = json.loads(auto.stdout)["summary"]["unresolved"] if auto.code == 0 else -1
+    checks.append(Check("auto-resolved upstream unresolved", unresolved == 0, str(unresolved), "0"))
+
+    down = tarel("lineage", "downstream", "bi_lab.bronze.lineitem", "--format", "json")
+    reached = set(json.loads(down.stdout)["nodes"]) if down.code == 0 else set()
+    found = sum(name in reached for name in _GOLD)
+    checks.append(Check("downstream lineitem reaches gold", found == 5, f"{found}/5", "5/5"))
+
+    objects = tarel("graph", "objects", "lakehouse-iceberg", "--format", "json")
+    tables = [f"bi_lab.{item['label']}" for item in json.loads(objects.stdout)["objects"]]
+    batch = tarel("lineage", "batch", *tables, "--format", "json")
+    size = len(batch.stdout.encode("utf-8"))
+    passed = batch.code == 0 and size <= 4000
+    checks.append(Check(f"batch of {len(tables)} tables", passed, f"{size} B", "<= 4000 B"))
+
+    base = ("graph", "slice", "lakehouse-iceberg", *_GOLD_SLICE, "--format", "json")
+    full_slice, compact_slice = tarel(*base), tarel(*base, "--view", "compact")
+    share = len(compact_slice.stdout) / max(len(full_slice.stdout), 1)
+    checks.append(Check(
+        "5-object slice compact share", share <= 0.25,
+        f"{share:.1%} ({len(compact_slice.stdout)} B)", "<= 25%",
+    ))
+
+    index = tarel("workspace", "show", "gesamtsystem", "--depth", "index", "--format", "json")
+    size = len(index.stdout.encode("utf-8"))
+    passed = index.code == 0 and size <= 8192
+    checks.append(Check("workspace index", passed, f"{size} B", "<= 8 KB"))
+
+    search = tarel(
+        "search", "--workspace", "gesamtsystem", "revenue by customer nation margin",
+        "--diversity", "per_graph", "--collapse-duplicates", "--format", "json",
+    )
+    hits = json.loads(search.stdout)["hits"] if search.code == 0 else []
+    chinook = sum("chinook" in hit["label"] for hit in hits)
+    marts = sum(hit["label"].startswith(("lakehouse-", "duckdb-wwi-dbt")) for hit in hits)
+    checks.append(Check(
+        "search chinook variants in top 20", chinook <= 1 and marts > 0,
+        f"{chinook} chinook, {marts} mart hits", "<= 1 chinook",
+    ))
     return checks
 
 

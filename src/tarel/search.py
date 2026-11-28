@@ -138,6 +138,8 @@ class SearchHit:
     grain: str | None = None
     annotation_state: str | None = None
     reference: str | None = None
+    # References of lower-ranked hits folded into this one as structural duplicates.
+    duplicates: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -153,6 +155,8 @@ class SearchHit:
             payload["source_graph"] = self.source_graph
         if self.family is not None:
             payload["family"] = self.family.to_dict()
+        if self.duplicates:
+            payload["duplicates"] = list(self.duplicates)
         payload["metadata"] = {
             "annotation_state": self.annotation_state,
             "description": self.description,
@@ -178,6 +182,11 @@ class SearchResults:
     inventory: SearchInventory | None = None
     annotation_states: frozenset[str] = DEFAULT_CONTEXT_ANNOTATION_STATES
     warnings: tuple[str, ...] = ()
+    # Set only by the workspace options that change which hits are shown; omitted otherwise.
+    excluded_graphs: tuple[str, ...] = ()
+    diversity: str | None = None
+    omitted_by_diversity: tuple[tuple[str, int], ...] = ()
+    duplicates_collapsed: int = 0
 
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -193,6 +202,15 @@ class SearchResults:
             payload["inventory"] = self.inventory.to_dict()
         if self.warnings:
             payload["warnings"] = list(self.warnings)
+        if self.excluded_graphs:
+            payload["excluded_graphs"] = list(self.excluded_graphs)
+        if self.diversity is not None:
+            payload["diversity"] = {
+                "mode": self.diversity,
+                "omitted_by_graph": dict(self.omitted_by_diversity),
+            }
+        if self.duplicates_collapsed:
+            payload["duplicates_collapsed"] = self.duplicates_collapsed
         if self.workspace is not None:
             payload.update(
                 {
@@ -308,6 +326,30 @@ def filter_search_objects(
     if object_ids is None and not any(selected.to_dict().values()):
         return None, inventory
     return frozenset(node.id for node in filtered), inventory
+
+
+def role_coverage_warning(
+    filters: SearchFilters | None, inventory: SearchInventory | None,
+) -> str | None:
+    """A role filter is always applied; with few annotated roles the caller must know that.
+
+    Objects without a role annotation can never match a role filter, so on a sparsely annotated
+    scope the filter excludes mostly "unknown" rather than "not this role".
+    """
+    if filters is None or not filters.roles or inventory is None or not inventory.objects_in_scope:
+        return None
+    unknown = dict(inventory.roles).get("unknown", 0)
+    coverage = 100 * (inventory.objects_in_scope - unknown) / inventory.objects_in_scope
+    if coverage >= _MIN_ROLE_COVERAGE_PCT:
+        return None
+    return (
+        f"Role filter applied with low role coverage: {coverage:.1f}% of "
+        f"{inventory.objects_in_scope} objects in scope have a role annotation "
+        f"(role_coverage_pct={coverage:.1f}); objects without one are excluded."
+    )
+
+
+_MIN_ROLE_COVERAGE_PCT = 20.0
 
 
 def describe_search_results(

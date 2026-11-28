@@ -138,7 +138,7 @@ class CliErrorOutputTests(TestCase):
         self.assertTrue(payload["error"]["retryable"])
         self.assertEqual(
             payload["error"]["details"]["suggestion"],
-            {"graphs": [], "lineages": ["dbt-sales"]},
+            {"graphs": ["demo"], "graphs_from": "declared_catalogs", "lineages": ["dbt-sales"]},
         )
 
     def test_text_format_prints_the_hint_line(self) -> None:

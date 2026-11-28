@@ -8,8 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tarel.cli._args import add_format_argument, add_view_argument
-from tarel.cli._output import print_json, render_compact
+from tarel.cli import lineage_trace
+from tarel.cli._args import add_format_argument
+from tarel.cli._output import print_json
 from tarel.lineage.analysis_application import (
     run_lineage_analysis_use_case,
 )
@@ -20,7 +21,6 @@ from tarel.lineage.application import (
     apply_lineage_proposal_use_case,
     build_lineage_use_case,
     decide_lineage_item_use_case,
-    find_lineage_references_use_case,
     import_dbt_lineage_use_case,
     lineage_status_use_case,
     list_lineage_items_use_case,
@@ -28,7 +28,6 @@ from tarel.lineage.application import (
     next_lineage_task_use_case,
     process_lineage_view_use_case,
     table_lineage_view_use_case,
-    trace_upstream_use_case,
 )
 from tarel.lineage.contracts import LineageFailure
 from tarel.lineage.revision import lineage_revision
@@ -175,38 +174,7 @@ def register(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     add_format_argument(review)
 
-    find = commands.add_parser(
-        "find",
-        help="Find report, semantic, procedure, table, or field references.",
-    )
-    find.add_argument("query")
-    find.add_argument("--lineage", action="append", dest="lineages", required=True)
-    find.add_argument("--graph", action="append", dest="graphs")
-    find.add_argument("--limit", type=int, default=20)
-    find.add_argument(
-        "--mode",
-        choices=("lexical", "bm25", "vector", "hybrid"),
-        default="lexical",
-    )
-    find.add_argument("--model", type=Path, dest="model_path")
-    find.add_argument("--threads", type=int, dest="n_threads")
-    add_format_argument(find)
-
-    upstream = commands.add_parser(
-        "upstream",
-        help="Trace one reference backwards through all selected lineage documents.",
-    )
-    upstream.add_argument("reference")
-    upstream.add_argument("--lineage", action="append", dest="lineages", required=True)
-    upstream.add_argument("--graph", action="append", dest="graphs")
-    upstream.add_argument("--max-hops", type=int, default=12)
-    upstream.add_argument(
-        "--state",
-        action="append",
-        choices=("draft", "review_required", "validated"),
-    )
-    add_view_argument(upstream)
-    add_format_argument(upstream)
+    lineage_trace.register(commands)
 
     add_job = commands.add_parser(
         "add-job",
@@ -261,7 +229,8 @@ def dispatch(args: argparse.Namespace) -> int | None:
     handler = _HANDLERS.get(command)
     if handler is not None:
         return handler(args)
-    return 0
+    result = lineage_trace.dispatch(args)
+    return 0 if result is None else result
 
 
 def _review(args: argparse.Namespace) -> int:
@@ -444,134 +413,6 @@ def _render_status(payload: dict[str, Any]) -> None:
         )
 
 
-def _render_lineage_find(payload: dict[str, Any], *, output_format: str) -> None:
-    if output_format == "json":
-        print_json(payload)
-        return
-    references = payload.get("references")
-    if not isinstance(references, list):
-        return
-    print(f"Mode: {payload.get('mode', 'lexical')}")
-    for item in references:
-        if isinstance(item, dict):
-            print(f"- {_reference_label(item)} [{item['kind']}; {item['source']}]")
-
-
-def _reference_label(item: dict[str, Any]) -> str:
-    """An unresolved name's ``name`` says which scope it belongs to; its reference cannot."""
-    return str(item["name"] if item.get("kind") == "unresolved" else item["reference"])
-
-
-def _render_upstream_trace(payload: dict[str, Any], *, output_format: str) -> None:
-    if output_format == "json":
-        print_json(payload)
-        return
-    start = payload.get("start")
-    if isinstance(start, dict):
-        print(f"Start: {_reference_label(start)} [{start['kind']}]")
-    hops = payload.get("hops")
-    if isinstance(hops, list):
-        for hop in hops:
-            if not isinstance(hop, dict):
-                continue
-            target = hop.get("target")
-            if not isinstance(target, dict):
-                continue
-            indent = "  " * max(int(hop.get("depth", 1)) - 1, 0)
-            detail = f" via {hop['via_definition']}" if hop.get("via_definition") else ""
-            role = f"; role={hop['role']}" if hop.get("role") else ""
-            granularity = (
-                f"; granularity={hop['granularity_change']}"
-                if hop.get("granularity_change")
-                else ""
-            )
-            source = hop.get("source")
-            if not isinstance(source, dict):
-                continue
-            print(
-                f"{indent}<- {_reference_label(source)} "
-                f"({hop['relation']}{detail}; {hop['state']}{role}{granularity})"
-            )
-            evidence = hop.get("evidence")
-            if isinstance(evidence, dict) and evidence.get("reason"):
-                print(f"{indent}   evidence: {evidence['reason']}")
-            write_evidence = hop.get("write_evidence")
-            if isinstance(write_evidence, dict) and write_evidence.get("reason"):
-                print(f"{indent}   write evidence: {write_evidence['reason']}")
-            description = source.get("description")
-            description_kind = source.get("description_kind")
-            annotation_state = source.get("annotation_state")
-            if description:
-                state = f" [{annotation_state}]" if annotation_state else ""
-                label = {
-                    "analysis_summary": "analysis",
-                    "semantic_annotation": "semantic",
-                    "technical_metadata": "technical",
-                }.get(str(description_kind), "description")
-                print(f"{indent}   {label}: {description}{state}")
-            reviews = hop.get("reviews")
-            if isinstance(reviews, list) and reviews:
-                review = reviews[-1]
-                if isinstance(review, dict):
-                    print(
-                        f"{indent}   review: {review['decision']} by "
-                        f"{review['source']} - {review['reason']}"
-                    )
-    origins = payload.get("origins")
-    if isinstance(origins, list) and origins:
-        print(f"Origin view: {len(origins)} unique origins")
-        for origin in origins:
-            if isinstance(origin, dict):
-                print(f"- {_reference_label(origin)} [{origin['kind']}]")
-                roles, procedures = _origin_lineage_details(origin, hops)
-                if roles:
-                    print(f"  roles: {', '.join(roles)}")
-                if procedures:
-                    print(f"  procedures: {', '.join(procedures)}")
-    warnings = payload.get("warnings")
-    if isinstance(warnings, list):
-        for warning in warnings:
-            print(f"warning: {warning}")
-
-
-def _origin_lineage_details(
-    origin: dict[str, object],
-    hops: object,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    if not isinstance(hops, list) or not isinstance(origin.get("id"), str):
-        return (), ()
-    downstream: dict[str, list[dict[str, object]]] = {}
-    for hop in hops:
-        if not isinstance(hop, dict):
-            continue
-        source = hop.get("source")
-        if not isinstance(source, dict) or not isinstance(source.get("id"), str):
-            continue
-        downstream.setdefault(source["id"], []).append(hop)
-
-    queue = [str(origin["id"])]
-    seen = set(queue)
-    roles: set[str] = set()
-    procedures: set[str] = set()
-    while queue:
-        source_id = queue.pop(0)
-        for hop in downstream.get(source_id, []):
-            role = hop.get("role")
-            if source_id == origin["id"] and isinstance(role, str) and role:
-                roles.add(role)
-            procedure = hop.get("via_definition")
-            if isinstance(procedure, str) and procedure:
-                procedures.add(procedure)
-            target = hop.get("target")
-            if not isinstance(target, dict):
-                continue
-            target_id = target.get("id")
-            if isinstance(target_id, str) and target_id not in seen:
-                seen.add(target_id)
-                queue.append(target_id)
-    return tuple(sorted(roles)), tuple(sorted(procedures))
-
-
 def _run_import_dbt(args: argparse.Namespace) -> int:
     mappings = {}
     for value in args.catalog_map:
@@ -737,40 +578,6 @@ def _run_review(args: argparse.Namespace) -> int:
     return _review(args)
 
 
-def _run_find(args: argparse.Namespace) -> int:
-    references = find_lineage_references_use_case(
-        args.query,
-        lineage_names=tuple(args.lineages),
-        graph_names=tuple(args.graphs or ()),
-        limit=args.limit,
-        mode=args.mode,
-        model_path=args.model_path,
-        n_threads=args.n_threads,
-    )
-    payload = {
-        "mode": args.mode,
-        "query": args.query,
-        "references": [item.to_dict() for item in references],
-    }
-    _render_lineage_find(payload, output_format=args.format)
-    return 0
-
-
-def _run_upstream(args: argparse.Namespace) -> int:
-    trace = trace_upstream_use_case(
-        args.reference,
-        lineage_names=tuple(args.lineages),
-        graph_names=tuple(args.graphs or ()),
-        max_hops=args.max_hops,
-        states=frozenset(args.state) if args.state else None,
-    )
-    if args.view == "compact":
-        render_compact(trace.to_compact_dict(), output_format=args.format)
-        return 0
-    _render_upstream_trace(trace.to_dict(), output_format=args.format)
-    return 0
-
-
 def _run_add_job(args: argparse.Namespace) -> int:
     result = add_manual_job_use_case(
         args.name,
@@ -832,8 +639,6 @@ _HANDLERS = {
     "apply": _run_apply,
     "analyze": _run_analyze,
     "review": _run_review,
-    "find": _run_find,
-    "upstream": _run_upstream,
     "add-job": _run_add_job,
     "add-hop": _run_add_hop,
 }

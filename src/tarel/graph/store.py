@@ -173,6 +173,7 @@ class FileGraphStore:
         expected_revision: str | None = None,
         namespace: str | None = None,
         include_fields: bool = True,
+        include_containment: bool = True,
     ) -> GraphSlice:
         from tarel.graph.selective import read_slice
 
@@ -183,6 +184,7 @@ class FileGraphStore:
             expected_revision=expected_revision,
             namespace=namespace,
             include_fields=include_fields,
+            include_containment=include_containment,
         )
 
     def list_objects(

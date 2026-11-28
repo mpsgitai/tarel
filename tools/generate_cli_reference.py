@@ -470,6 +470,34 @@ NOTES = {
         "raph (or a graph as --lineage) fails with invalid_graph_role / inv"
         "alid_lineage_role and the corrected source lists."
     ),
+    "search": (
+        "With --workspace: --exclude GLOB leaves out matching graphs, --dive"
+        "rsity per_graph keeps at most --max-per-graph hits per graph (defau"
+        "lt 3) and counts the rest under diversity.omitted_by_graph, and --c"
+        "ollapse-duplicates folds copies of the same object and columns fro"
+        "m other graphs into the best hit's duplicates list. --role always f"
+        "ilters; on sparsely annotated scopes a warning gives role_coverage_pct."
+    ),
+    "lineage trace": (
+        "Defaults to the compact view. Without --lineage it reads every loc"
+        "al lineage document and, without --graph, the graphs their qualif"
+        "ied references name; the resolution block says what was chosen. -"
+        "-direction down lists impacts (what the reference feeds); both mar"
+        "ks downstream rows with dir=down. Freshness reports when each grap"
+        "h in the answer was last read; staleness stays unverified."
+    ),
+    "lineage batch": (
+        "Builds the lineage network once for all references and prints one "
+        "chain per reference (stored objects by distance, jobs counted in s"
+        "ummary.jobs). A reference that cannot be traced is reported under "
+        "errors and does not stop the others."
+    ),
+    "workspace show": (
+        "--depth index lists systems with graphs and counts, zones adds are"
+        "as and zones with member counts; both print JSON on one line. --st"
+        "ats adds object counts and annotated_pct read from the graphs. ful"
+        "l (default) is the stored document."
+    ),
     "focus show": (
         "--view compact keys members by reference, merges repeated hops, dr"
         "ops self-loops and folds cycles; the stored snapshot is unchanged."
@@ -555,7 +583,11 @@ NOTES = {
     "graph slice": (
         "Use exact object IDs from graph objects. The returned slice is a"
         " subset: preserve the complete source revision from its header r"
-        "ather than persisting the slice as the original graph."
+        "ather than persisting the slice as the original graph. --view com"
+        "pact nests fields under their objects, drops containment and annot"
+        "ation audit fields (evidence, provenance, confidence_reason) and k"
+        "eeps all field metadata; --no-containment drops catalog/namespace "
+        "nodes and contains edges from the full view as well."
     ),
 }
 MEANINGS = {
@@ -633,6 +665,9 @@ MEANINGS = {
     "max_fields_per_object": "Maximum fields per object.",
     "max_joins": "Maximum selected joins.",
     "max_hops": "Maximum traversal/expansion depth.",
+    "direction": "up (sources), down (impact) or both.",
+    "references": "Exact references to trace, one network for all.",
+    "max_per_graph": "Hits kept per graph with --diversity per_graph (default 3).",
     "max_trace_hops": "Maximum lineage-trace depth.",
     "max_characters": "Character budget; not a tokenizer-based token limit.",
     "max_input_chars": "Input character budget.",

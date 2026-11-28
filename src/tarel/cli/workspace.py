@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable
 
 from tarel.cli._args import Subcommands, add_format_argument, add_scope_arguments
-from tarel.cli._output import print_json
+from tarel.cli._output import print_json, render_compact
 from tarel.workspaces.application import (
     add_workspace_relationship_use_case,
     create_workspace_use_case,
@@ -19,9 +19,11 @@ from tarel.workspaces.application import (
     load_workspace_use_case,
     resolve_workspace_scope_use_case,
     show_workspace_zone_use_case,
+    workspace_overview_use_case,
 )
 from tarel.workspaces.contracts import WorkspaceDocument
 from tarel.workspaces.core import ResolvedZone
+from tarel.workspaces.overview import DEPTHS
 from tarel.workspaces.scope import ResolvedScope
 
 
@@ -46,6 +48,15 @@ def register(subcommands: Subcommands) -> None:
 
     workspace_show = workspace_commands.add_parser("show", help="Show one workspace hierarchy.")
     workspace_show.add_argument("name")
+    workspace_show.add_argument(
+        "--depth", choices=DEPTHS, default="full",
+        help="index: systems and counts; zones: plus areas and zones; full: the document "
+        "(default). index and zones print JSON on one line.",
+    )
+    workspace_show.add_argument(
+        "--stats", action="store_true",
+        help="With index or zones: add object counts and annotated_pct per system.",
+    )
     add_format_argument(workspace_show)
 
     workspace_scope = workspace_commands.add_parser(
@@ -281,9 +292,42 @@ def _run_list(args: argparse.Namespace) -> int:
 
 
 def _run_show(args: argparse.Namespace) -> int:
+    if args.depth != "full":
+        overview = workspace_overview_use_case(
+            args.name, depth=args.depth, include_stats=args.stats,
+        )
+        if args.format == "json":
+            render_compact(overview, output_format="json")
+        else:
+            _render_overview(overview)
+        return 0
     result = load_workspace_use_case(args.name)
     _render_workspace(result, output_format=args.format)
     return 0
+
+
+def _render_overview(overview: dict[str, object]) -> None:
+    print(
+        f"Workspace: {overview['name']} ({overview['system_count']} systems, "
+        f"{overview['graph_count']} graphs)"
+    )
+    systems = overview.get("systems")
+    for system in systems if isinstance(systems, list) else ():
+        stats = (
+            f"; {system['objects']} objects, {system.get('annotated_pct', 'n/a')}% annotated"
+            if "objects" in system
+            else ""
+        )
+        print(
+            f"- {system['name']}: {system['graph_count']} graphs, {system['area_count']} areas, "
+            f"{system['zone_count']} zones ({system['zone_member_count']} members){stats}"
+        )
+        if system.get("description"):
+            print(f"  {system['description']}")
+        for area in system.get("areas", ()):
+            print(f"  area {area['name']}: {', '.join(area.get('schemas', ()))}")
+        for zone in system.get("zones", ()):
+            print(f"  zone {zone['name']}: {zone['member_count']} members")
 
 
 def _run_scope(args: argparse.Namespace) -> int:

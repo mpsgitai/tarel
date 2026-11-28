@@ -279,7 +279,7 @@ def find_lineage_references_use_case(
     n_threads: int | None = None,
     runtime: TarelRuntime | None = None,
 ) -> tuple[LineageReference, ...]:
-    documents, graphs = _load_trace_sources(lineage_names, graph_names, runtime=runtime)
+    documents, graphs = load_trace_sources(lineage_names, graph_names, runtime=runtime)
     embedder = None
     if mode in {"vector", "hybrid"}:
         embedder = load_local_embedding_plugin().create_embedder(
@@ -304,7 +304,7 @@ def trace_upstream_use_case(
     states: frozenset[str] | None = None,
     runtime: TarelRuntime | None = None,
 ) -> UpstreamTrace:
-    documents, graphs = _load_trace_sources(lineage_names, graph_names, runtime=runtime)
+    documents, graphs = load_trace_sources(lineage_names, graph_names, runtime=runtime)
     selected = states if states is not None else None
     if selected is None:
         return trace_upstream(documents, graphs, reference, max_hops=max_hops)
@@ -322,7 +322,7 @@ def _require_expected_revision(
         )
 
 
-def _load_trace_sources(
+def load_trace_sources(
     lineage_names: tuple[str, ...],
     graph_names: tuple[str, ...],
     *,

@@ -7,9 +7,9 @@ from unittest import TestCase
 
 from test_focus import _fixture, _run_cli
 
+from tarel.compact import omit_empty, tarjan_sccs, unique_keys
 from tarel.graph.store import FileGraphStore
 from tarel.lineage.contracts import LineageEvidence, LineageReview
-from tarel.lineage.graph_utils import omit_empty, tarjan_sccs, unique_keys
 from tarel.lineage.store import FileLineageStore
 from tarel.lineage.traversal import LineageHop, LineageReference, UpstreamTrace
 

@@ -16,6 +16,7 @@ from tarel.graph.application import (
 )
 from tarel.graph.contracts import GraphDocument
 from tarel.graph.reads import (
+    graph_freshness_use_case,
     graph_header_use_case,
     graph_objects_use_case,
     graph_slice_use_case,
@@ -43,12 +44,17 @@ class GraphAPI(RuntimeAPI):
 
     def slice(
         self, name: str, object_ids: tuple[str, ...], *, namespace: str | None = None,
-        expected_revision: str | None = None,
+        expected_revision: str | None = None, include_containment: bool = True,
     ) -> GraphSlice:
+        """Use ``.to_compact_dict()`` on the result for the compact view."""
         return graph_slice_use_case(
             name, object_ids, namespace=namespace, expected_revision=expected_revision,
-            runtime=self._runtime,
+            include_containment=include_containment, runtime=self._runtime,
         )
+
+    def freshness(self, names: tuple[str, ...]) -> dict[str, object]:
+        """When each graph was last read; staleness against the source stays unverified."""
+        return graph_freshness_use_case(names, runtime=self._runtime)
 
     def rebuild_index(self, name: str) -> GraphHeader:
         return rebuild_graph_index_use_case(name, runtime=self._runtime)

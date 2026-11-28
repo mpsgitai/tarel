@@ -16,7 +16,7 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from tarel.lineage.graph_utils import (
+from tarel.compact import (
     claim_states,
     collapse_cycles,
     finish_compact,
@@ -28,7 +28,9 @@ if TYPE_CHECKING:
     from tarel.focus.contracts import FocusDocument, FocusHop, FocusMember
 
 
-def compact_focus_dict(focus: FocusDocument) -> dict[str, object]:
+def compact_focus_dict(
+    focus: FocusDocument, *, freshness: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     """The compact, deterministic projection of ``focus`` (see the module docstring)."""
     members = {item.id: item for item in focus.members}
     keys = unique_keys(
@@ -51,6 +53,7 @@ def compact_focus_dict(focus: FocusDocument) -> dict[str, object]:
     payload: dict[str, object] = {
         "cycles": cycles,
         "edges": edges,
+        "freshness": dict(freshness) if freshness else None,
         "name": focus.name,
         "next": {"full": "view=full"},
         "nodes": {keys[item.id]: _node(item) for item in focus.members},

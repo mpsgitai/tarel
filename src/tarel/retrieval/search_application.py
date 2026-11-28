@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from tarel.annotations.states import selected_annotation_states
@@ -28,10 +29,15 @@ from tarel.search import (
     SearchResults,
     describe_search_results,
     filter_search_objects,
+    role_coverage_warning,
     search_graph,
 )
 from tarel.workspaces.application import load_workspace_scope
-from tarel.workspaces.retrieval import combine_workspace_search
+from tarel.workspaces.retrieval import (
+    combine_workspace_search,
+    structural_signatures,
+    validate_diversity,
+)
 
 
 def search_graph_use_case(
@@ -93,7 +99,11 @@ def search_graph_use_case(
         graph, results, annotation_states=selected_states,
         filters=filters, inventory=inventory,
     )
-    results = replace(results, warnings=(*scope_warnings, *index_warnings))
+    role_warning = role_coverage_warning(filters, inventory)
+    results = replace(
+        results,
+        warnings=(*scope_warnings, *index_warnings, *((role_warning,) if role_warning else ())),
+    )
     results = with_family_hits(results, family_name_hits(
         graph, results, mode=family_mode, namespace=namespace,
         object_ids=object_ids, runtime=runtime,
@@ -123,10 +133,15 @@ def search_workspace_use_case(
     validated_only: bool = False,
     family_mode: str | None = "confirmed_only",
     filters: SearchFilters | None = None,
+    exclude_graphs: tuple[str, ...] = (),
+    diversity: str = "none",
+    max_per_graph: int | None = None,
+    collapse_duplicates: bool = False,
     runtime: TarelRuntime | None = None,
 ) -> SearchResults:
     runtime = snapshot_runtime(runtime, model_path=model_path)
     validate_bm25_weight(mode, bm25_weight)
+    validate_diversity(diversity, max_per_graph)
     if not 1 <= limit <= 100:
         raise SearchFailure("invalid_limit", "Search limit must be between 1 and 100.")
     requested_limit = limit
@@ -142,6 +157,16 @@ def search_workspace_use_case(
         objects=scope_objects,
         runtime=runtime,
     )
+    excluded = tuple(
+        name for name in scope.graph_names
+        if any(fnmatchcase(name, pattern) for pattern in exclude_graphs)
+    )
+    if excluded:
+        scope = replace(
+            scope,
+            graph_names=tuple(name for name in scope.graph_names if name not in excluded),
+            objects=tuple(item for item in scope.objects if item.graph not in excluded),
+        )
     selected_states = selected_annotation_states(
         annotation_states,
         validated_only=validated_only,
@@ -200,28 +225,41 @@ def search_workspace_use_case(
 
     index_warnings = tuple(warning for result in search_warnings for warning in result)
 
+    signatures = (
+        {
+            (result.graph, object_id): signature
+            for result in results
+            for object_id, signature in structural_signatures(
+                loaded[result.graph], frozenset(hit.id for hit in result.hits),
+            ).items()
+        }
+        if collapse_duplicates
+        else None
+    )
     combined = combine_workspace_search(
-        scope, results, query=query, mode=mode, limit=limit,
+        scope, results, query=query, mode=mode, limit=limit, signatures=signatures,
+        diversity=diversity, max_per_graph=max_per_graph,
     )
     type_counts: dict[str, int] = {}
     role_counts: dict[str, int] = {}
-    for inventory in inventories:
-        for key, value in inventory.types:
+    for item in inventories:
+        for key, value in item.types:
             type_counts[key] = type_counts.get(key, 0) + value
-        for key, value in inventory.roles:
+        for key, value in item.roles:
             role_counts[key] = role_counts.get(key, 0) + value
-    combined = SearchResults(
-        graph=combined.graph, query=combined.query, terms=combined.terms,
-        hits=combined.hits, mode=combined.mode, workspace=combined.workspace,
-        graphs=combined.graphs, scope_hash=combined.scope_hash,
+    inventory = SearchInventory(
+        objects_in_scope=sum(item.objects_in_scope for item in inventories),
+        objects_after_filters=sum(item.objects_after_filters for item in inventories),
+        types=tuple(sorted(type_counts.items())), roles=tuple(sorted(role_counts.items())),
+    )
+    role_warning = role_coverage_warning(filters, inventory)
+    combined = replace(
+        combined,
         filters=filters or SearchFilters(),
-        inventory=SearchInventory(
-            objects_in_scope=sum(item.objects_in_scope for item in inventories),
-            objects_after_filters=sum(item.objects_after_filters for item in inventories),
-            types=tuple(sorted(type_counts.items())), roles=tuple(sorted(role_counts.items())),
-        ),
+        inventory=inventory,
         annotation_states=selected_states,
-        warnings=(*combined.warnings, *index_warnings),
+        warnings=(*combined.warnings, *index_warnings, *((role_warning,) if role_warning else ())),
+        excluded_graphs=excluded,
     )
     families = tuple(
         hit for graph_name in scope.graph_names
