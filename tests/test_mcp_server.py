@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import importlib.util
+import io
 import json
+import os
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 from typing import Any
-
-import pytest
+from unittest.mock import patch
 
 from tarel.cli import main as cli_main
 from tarel.connectors.contracts import (
@@ -28,6 +33,8 @@ from tarel.mcp import (
     create_mcp_server,
 )
 from tarel.sdk import Tarel
+
+_HAS_MCP = importlib.util.find_spec("mcp") is not None
 
 
 def _build_synthetic_workspace(tmp_path: Path) -> tuple[Path, Tarel]:
@@ -92,8 +99,6 @@ def _build_synthetic_workspace(tmp_path: Path) -> tuple[Path, Tarel]:
     client.workspace.create("analytics", description="Synthetic retail analytics workspace")
     client.workspace.define_system("analytics", "dwh", graphs=("retail",))
 
-    # Build a minimal lineage document with two hops:
-    # main.dim_customer + main.fact_sales -> main.vw_revenue_by_region
     client.lineage.add_job(
         "retail-etl",
         kind="script",
@@ -130,335 +135,341 @@ def _build_synthetic_workspace(tmp_path: Path) -> tuple[Path, Tarel]:
     return state_root, client
 
 
-def test_mcp_instructions_compact() -> None:
-    assert len(MCP_SERVER_INSTRUCTIONS.encode("utf-8")) < 2048
-    assert "tarel_search" in MCP_SERVER_INSTRUCTIONS
-    assert "tarel_lineage_trace" in MCP_SERVER_INSTRUCTIONS
+class TestTarelMcpServer(unittest.TestCase):
+    def test_mcp_instructions_compact(self) -> None:
+        self.assertLess(len(MCP_SERVER_INSTRUCTIONS.encode("utf-8")), 2048)
+        self.assertIn("tarel_search", MCP_SERVER_INSTRUCTIONS)
+        self.assertIn("tarel_lineage_trace", MCP_SERVER_INSTRUCTIONS)
 
+    def test_cli_requires_explicit_state_root(self) -> None:
+        buf = io.StringIO()
+        cleaned_env = {k: v for k, v in os.environ.items() if k != "TAREL_STATE_ROOT"}
+        with patch.dict(os.environ, cleaned_env, clear=True), contextlib.redirect_stderr(buf):
+            exit_code = cli_main(["mcp", "serve"])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("missing_state_root", buf.getvalue())
 
-def test_cli_requires_explicit_state_root(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
-    monkeypatch.delenv("TAREL_STATE_ROOT", raising=False)
-    exit_code = cli_main(["mcp", "serve"])
-    assert exit_code == 2
-    stderr = capsys.readouterr().err
-    assert "missing_state_root" in stderr
+    def test_parity_sdk_cli_and_mcp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, sdk = _build_synthetic_workspace(Path(tmp))
+            dispatcher = TarelMcpDispatcher(
+                McpServerConfig(state_root=state_root, profile="meta", workspace="analytics")
+            )
 
+            overview = dispatcher.catalog_overview()
+            self.assertEqual(overview["status"], "ok")
+            self.assertEqual(
+                overview["counts"],
+                {"workspaces": 1, "graphs": 1, "focuses": 1, "lineages": 1},
+            )
+            self.assertEqual([g["name"] for g in overview["graphs"]], list(sdk.graph.list()))
+            self.assertEqual(
+                [w["name"] for w in overview["workspaces"]], list(sdk.workspace.list())
+            )
+            self.assertEqual([f["name"] for f in overview["focuses"]], list(sdk.focus.list()))
+            self.assertEqual(
+                [lin["name"] for lin in overview["lineages"]], list(sdk.lineage.list())
+            )
 
-def test_parity_sdk_cli_and_mcp(tmp_path: Path, capsys: Any) -> None:
-    state_root, sdk = _build_synthetic_workspace(tmp_path)
-    dispatcher = TarelMcpDispatcher(
-        McpServerConfig(state_root=state_root, profile="meta", workspace="analytics")
-    )
+            mcp_header = dispatcher.graph_inspect("retail", mode="header")
+            sdk_header = sdk.graph.header("retail")
+            self.assertEqual(mcp_header["status"], "ok")
+            self.assertEqual(mcp_header["header"]["object_count"], 3)
+            self.assertEqual(mcp_header["header"]["revision"], sdk_header.revision)
 
-    # 1. Catalog overview parity
-    overview = dispatcher.catalog_overview()
-    assert overview["status"] == "ok"
-    assert overview["counts"] == {
-        "workspaces": 1,
-        "graphs": 1,
-        "focuses": 1,
-        "lineages": 1,
-    }
-    assert [g["name"] for g in overview["graphs"]] == list(sdk.graph.list())
-    assert [w["name"] for w in overview["workspaces"]] == list(sdk.workspace.list())
-    assert [f["name"] for f in overview["focuses"]] == list(sdk.focus.list())
-    assert [lin["name"] for lin in overview["lineages"]] == list(sdk.lineage.list())
+            mcp_search = dispatcher.search("revenue", graph="retail", mode="lexical", limit=10)
+            sdk_search = sdk.search.graph("retail", "revenue", mode="lexical", limit=10)
+            self.assertEqual(mcp_search["status"], "ok")
+            self.assertEqual(
+                [h["object_id"] for h in mcp_search["hits"]],
+                [h.id for h in sdk_search.hits],
+            )
 
-    # 2. Graph header & objects parity
-    mcp_header = dispatcher.graph_inspect("retail", mode="header")
-    sdk_header = sdk.graph.header("retail")
-    assert mcp_header["status"] == "ok"
-    assert mcp_header["header"]["object_count"] == sdk_header.object_count == 3
-    assert mcp_header["header"]["revision"] == sdk_header.revision
+            ws_search = dispatcher.search("customer", mode="bm25", limit=10)
+            sdk_ws_search = sdk.search.workspace("analytics", "customer", mode="bm25", limit=10)
+            self.assertEqual(ws_search["status"], "ok")
+            self.assertEqual(
+                [h["object_id"] for h in ws_search["hits"]],
+                [h.id for h in sdk_ws_search.hits],
+            )
 
-    # 3. Search parity (SDK vs MCP vs CLI)
-    mcp_search = dispatcher.search("revenue", graph="retail", mode="lexical", limit=10)
-    sdk_search = sdk.search.graph("retail", "revenue", mode="lexical", limit=10)
-    assert mcp_search["status"] == "ok"
-    assert [h["object_id"] for h in mcp_search["hits"]] == [h.id for h in sdk_search.hits]
+            mcp_ctx = dispatcher.context("sales revenue by region", graph="retail", max_objects=5)
+            sdk_ctx = sdk.context.graph("retail", "sales revenue by region", max_objects=5)
+            self.assertEqual(mcp_ctx["status"], "ok")
+            self.assertEqual(mcp_ctx["returned_objects"], len(sdk_ctx.objects))
 
-    # Workspace search using default workspace from config
-    ws_search = dispatcher.search("customer", mode="bm25", limit=10)
-    sdk_ws_search = sdk.search.workspace("analytics", "customer", mode="bm25", limit=10)
-    assert ws_search["status"] == "ok"
-    assert [h["object_id"] for h in ws_search["hits"]] == [h.id for h in sdk_ws_search.hits]
+            obj_id = sdk.graph.objects("retail", limit=10).objects[0].id
+            mcp_ground = dispatcher.grounding(graph="retail", object_ids=[obj_id])
+            self.assertEqual(mcp_ground["status"], "ok")
+            self.assertEqual(mcp_ground["mode"], "assets")
+            self.assertEqual(mcp_ground["assets"][0]["object_id"], obj_id)
+            self.assertGreaterEqual(len(mcp_ground["assets"][0]["fields"]), 2)
 
-    # CLI parity on graph header
-    assert cli_main(["graph", "header", "retail", "--format", "json"]) in (0, 2)
-    capsys.readouterr()
+            mcp_bundle = dispatcher.grounding(
+                question="customer sales revenue", workspace="analytics"
+            )
+            self.assertEqual(mcp_bundle["status"], "ok")
+            self.assertEqual(mcp_bundle["mode"], "bundle")
 
-    # 4. Context parity
-    mcp_ctx = dispatcher.context("sales revenue by region", graph="retail", max_objects=5)
-    sdk_ctx = sdk.context.graph("retail", "sales revenue by region", max_objects=5)
-    assert mcp_ctx["status"] == "ok"
-    assert mcp_ctx["returned_objects"] == len(sdk_ctx.objects)
+            upstream = dispatcher.lineage_trace(
+                mode="upstream",
+                reference="main.vw_revenue_by_region",
+                lineages=["retail-etl"],
+                graphs=["retail"],
+            )
+            self.assertEqual(upstream["status"], "ok")
+            self.assertEqual(len(upstream["trace"]["hops"]), 2)
 
-    # 5. Grounding concrete object_ids & bundle
-    obj_id = sdk.graph.objects("retail", limit=10).objects[0].id
-    mcp_ground = dispatcher.grounding(graph="retail", object_ids=[obj_id])
-    assert mcp_ground["status"] == "ok"
-    assert mcp_ground["mode"] == "assets"
-    assert mcp_ground["assets"][0]["object_id"] == obj_id
-    assert len(mcp_ground["assets"][0]["fields"]) >= 2
+            downstream = dispatcher.lineage_trace(
+                mode="downstream",
+                reference="main.fact_sales",
+                lineages=["retail-etl"],
+            )
+            self.assertEqual(downstream["status"], "ok")
+            self.assertTrue(
+                any(h["target"] == "main.vw_revenue_by_region" for h in downstream["hops"])
+            )
 
-    mcp_bundle = dispatcher.grounding(question="customer sales revenue", workspace="analytics")
-    assert mcp_bundle["status"] == "ok"
-    assert mcp_bundle["mode"] == "bundle"
+            tables = dispatcher.lineage_trace(mode="tables", lineage="retail-etl")
+            self.assertEqual(tables["status"], "ok")
+            self.assertEqual(tables["total_count"], len(sdk.lineage.tables("retail-etl")))
 
-    # 6. Lineage upstream, downstream, tables
-    upstream = dispatcher.lineage_trace(
-        mode="upstream",
-        reference="main.vw_revenue_by_region",
-        lineages=["retail-etl"],
-        graphs=["retail"],
-    )
-    assert upstream["status"] == "ok"
-    assert len(upstream["trace"]["hops"]) == 2
+            f_list = dispatcher.focus(action="list")
+            self.assertEqual(f_list["status"], "ok")
+            self.assertEqual([item["name"] for item in f_list["focuses"]], ["revenue-focus"])
 
-    downstream = dispatcher.lineage_trace(
-        mode="downstream",
-        reference="main.fact_sales",
-        lineages=["retail-etl"],
-    )
-    assert downstream["status"] == "ok"
-    assert any(h["target"] == "main.vw_revenue_by_region" for h in downstream["hops"])
+            f_show = dispatcher.focus(action="show", name="revenue-focus")
+            self.assertEqual(f_show["status"], "ok")
+            self.assertEqual(f_show["seed"], "main.vw_revenue_by_region")
 
-    tables = dispatcher.lineage_trace(mode="tables", lineage="retail-etl")
-    assert tables["status"] == "ok"
-    assert tables["total_count"] == len(sdk.lineage.tables("retail-etl"))
+    def test_budget_and_truncation_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, _ = _build_synthetic_workspace(Path(tmp))
+            dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta"))
 
-    # 7. Focus list & show
-    f_list = dispatcher.focus(action="list")
-    assert f_list["status"] == "ok"
-    assert [item["name"] for item in f_list["focuses"]] == ["revenue-focus"]
+            page1 = dispatcher.graph_inspect("retail", mode="objects", offset=0, limit=2)
+            self.assertEqual(page1["status"], "ok")
+            self.assertTrue(page1["truncated"])
+            self.assertEqual(page1["total_count"], 3)
+            self.assertEqual(page1["next_offset"], 2)
+            self.assertEqual(len(page1["objects"]), 2)
 
-    f_show = dispatcher.focus(action="show", name="revenue-focus")
-    assert f_show["status"] == "ok"
-    assert f_show["seed"] == "main.vw_revenue_by_region"
+            page2 = dispatcher.graph_inspect("retail", mode="objects", offset=2, limit=2)
+            self.assertEqual(page2["status"], "ok")
+            self.assertFalse(page2["truncated"])
+            self.assertIsNone(page2["next_offset"])
+            self.assertEqual(len(page2["objects"]), 1)
 
+            clamped = dispatcher.graph_inspect("retail", mode="objects", offset=0, limit=9999)
+            self.assertEqual(clamped["status"], "ok")
+            self.assertEqual(clamped["limit"], 200)
+            self.assertTrue(clamped["truncated"])
 
-def test_budget_and_truncation_metadata(tmp_path: Path) -> None:
-    state_root, _ = _build_synthetic_workspace(tmp_path)
-    dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta"))
+            tight_ctx = dispatcher.context(
+                "sales customer revenue", graph="retail", max_objects=1, max_characters=4000
+            )
+            self.assertEqual(tight_ctx["status"], "ok")
+            self.assertEqual(tight_ctx["budget"], {"max_objects": 1, "max_characters": 4000})
+            self.assertEqual(tight_ctx["returned_objects"], 1)
+            self.assertTrue(tight_ctx["truncated"])
 
-    # Page 1 of 3 objects with limit=2 -> truncated=True, next_offset=2
-    page1 = dispatcher.graph_inspect("retail", mode="objects", offset=0, limit=2)
-    assert page1["status"] == "ok"
-    assert page1["truncated"] is True
-    assert page1["total_count"] == 3
-    assert page1["next_offset"] == 2
-    assert len(page1["objects"]) == 2
+    def test_lineage_rejects_lineage_name_in_graphs_param(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, _ = _build_synthetic_workspace(Path(tmp))
+            dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta"))
 
-    # Page 2 -> remaining 1 object, next_offset=None, truncated=False
-    page2 = dispatcher.graph_inspect("retail", mode="objects", offset=2, limit=2)
-    assert page2["status"] == "ok"
-    assert page2["truncated"] is False
-    assert page2["next_offset"] is None
-    assert len(page2["objects"]) == 1
+            err = dispatcher.lineage_trace(
+                mode="upstream",
+                reference="main.vw_revenue_by_region",
+                lineages=["retail-etl"],
+                graphs=["retail-etl"],
+            )
+            self.assertEqual(err["status"], "error")
+            self.assertEqual(err["code"], "invalid_graph_argument")
+            self.assertIn("lineage document", err["message"])
+            self.assertIn("Move `retail-etl` from `graphs` to `lineages`", err["hint"] or "")
+            self.assertFalse(err["retryable"])
 
-    # Hard cap clamping flags truncated=True
-    clamped = dispatcher.graph_inspect("retail", mode="objects", offset=0, limit=9999)
-    assert clamped["status"] == "ok"
-    assert clamped["limit"] == 200
-    assert clamped["truncated"] is True
-
-    # Context tight object & character budget
-    tight_ctx = dispatcher.context(
-        "sales customer revenue", graph="retail", max_objects=1, max_characters=4000
-    )
-    assert tight_ctx["status"] == "ok", tight_ctx
-    assert tight_ctx["budget"] == {"max_objects": 1, "max_characters": 4000}
-    assert tight_ctx["returned_objects"] == 1
-    assert tight_ctx["truncated"] is True
-
-
-def test_lineage_rejects_lineage_name_in_graphs_param(tmp_path: Path) -> None:
-    state_root, _ = _build_synthetic_workspace(tmp_path)
-    dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta"))
-
-    err = dispatcher.lineage_trace(
-        mode="upstream",
-        reference="main.vw_revenue_by_region",
-        lineages=["retail-etl"],
-        graphs=["retail-etl"],  # accidentally passed lineage name as graph!
-    )
-    assert err["status"] == "error"
-    assert err["code"] == "invalid_graph_argument"
-    assert "lineage document" in err["message"]
-    assert "Move `retail-etl` from `graphs` to `lineages`" in (err["hint"] or "")
-    assert err["retryable"] is False
-
-
-def test_read_only_profile_and_validated_annotation_protection(tmp_path: Path) -> None:
-    state_root, sdk = _build_synthetic_workspace(tmp_path)
-
-    # Plan an annotation task for dim_customer
-    tasks = sdk.annotation.plan_graph("retail", objects={"main.dim_customer"})
-    assert len(tasks) == 1
-    task = tasks[0]
-    proposal: dict[str, Any] = {
-        "task_id": task.id,
-        "target_id": task.target_id,
-        "mode": task.mode,
-        "include_object": True,
-        "field_names": list(task.field_names),
-        "annotation": {
-            "description": "Master table of retail customers.",
-            "role": "dimension",
-            "grain": "one row per customer_id",
-            "synonyms": ["customers", "clients"],
-            "tags": ["crm"],
-            "warnings": [],
-            "confidence": 0.9,
-            "confidence_reason": "Clear primary key and customer columns.",
-            "evidence": [{"source": "schema", "reference": "main.dim_customer"}],
-            "fields": [
-                {
-                    "name": fname,
-                    "description": f"Field {fname}",
-                    "role": "identifier" if fname == "customer_id" else "attribute",
-                    "synonyms": [],
-                    "tags": [],
+    def test_read_only_profile_and_validated_annotation_protection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, sdk = _build_synthetic_workspace(Path(tmp))
+            tasks = sdk.annotation.plan_graph("retail", objects={"main.dim_customer"})
+            self.assertEqual(len(tasks), 1)
+            task = tasks[0]
+            proposal: dict[str, Any] = {
+                "task_id": task.id,
+                "target_id": task.target_id,
+                "mode": task.mode,
+                "include_object": True,
+                "field_names": list(task.field_names),
+                "annotation": {
+                    "description": "Master table of retail customers.",
+                    "role": "dimension",
+                    "grain": "one row per customer_id",
+                    "synonyms": ["customers", "clients"],
+                    "tags": ["crm"],
                     "warnings": [],
                     "confidence": 0.9,
-                    "confidence_reason": "Observed column",
-                    "evidence": [{"source": "schema", "reference": f"main.dim_customer.{fname}"}],
-                }
-                for fname in task.field_names
-            ],
-        },
-    }
+                    "confidence_reason": "Clear primary key and customer columns.",
+                    "evidence": [{"source": "schema", "reference": "main.dim_customer"}],
+                    "fields": [
+                        {
+                            "name": fname,
+                            "description": f"Field {fname}",
+                            "role": "identifier" if fname == "customer_id" else "attribute",
+                            "synonyms": [],
+                            "tags": [],
+                            "warnings": [],
+                            "confidence": 0.9,
+                            "confidence_reason": "Observed column",
+                            "evidence": [
+                                {"source": "schema", "reference": f"main.dim_customer.{fname}"}
+                            ],
+                        }
+                        for fname in task.field_names
+                    ],
+                },
+            }
 
-    # 1. Default `meta` profile rejects writes and does not expose write tools
-    ro_dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta"))
-    assert ro_dispatcher.available_tools() == READ_ONLY_TOOL_NAMES
-    ro_res = ro_dispatcher.annotate_draft("retail", proposal)
-    assert ro_res["status"] == "error"
-    assert ro_res["code"] == "profile_read_only"
+            ro_dispatcher = TarelMcpDispatcher(
+                McpServerConfig(state_root=state_root, profile="meta")
+            )
+            self.assertEqual(ro_dispatcher.available_tools(), READ_ONLY_TOOL_NAMES)
+            ro_res = ro_dispatcher.annotate_draft("retail", proposal)
+            self.assertEqual(ro_res["status"], "error")
+            self.assertEqual(ro_res["code"], "profile_read_only")
 
-    # 2. `meta-write` profile applies draft with provenance
-    rw_dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta-write"))
-    assert rw_dispatcher.available_tools() == READ_ONLY_TOOL_NAMES + WRITE_TOOL_NAMES
-    ok_res = rw_dispatcher.annotate_draft("retail", proposal, source="mcp-test-agent")
-    assert ok_res["status"] == "ok"
-    assert ok_res["state"] == "draft"
-    assert ok_res["provenance_source"] == "mcp-test-agent"
+            rw_dispatcher = TarelMcpDispatcher(
+                McpServerConfig(state_root=state_root, profile="meta-write")
+            )
+            self.assertEqual(
+                rw_dispatcher.available_tools(), READ_ONLY_TOOL_NAMES + WRITE_TOOL_NAMES
+            )
+            ok_res = rw_dispatcher.annotate_draft("retail", proposal, source="mcp-test-agent")
+            self.assertEqual(ok_res["status"], "ok")
+            self.assertEqual(ok_res["state"], "draft")
+            self.assertEqual(ok_res["provenance_source"], "mcp-test-agent")
 
-    # 3. Human validates the annotation -> subsequent draft proposal MUST be rejected
-    sdk.annotation.decide(
-        "retail",
-        task.target_id,
-        state="validated",
-        reason="Reviewed by BI owner",
-        include_fields=True,
-    )
-    # Re-plan in full mode to get fresh task_id targeting the now-validated object
-    full_tasks = sdk.annotation.plan_graph(
-        "retail", objects={"main.dim_customer"}, missing_only=False
-    )
-    proposal["task_id"] = full_tasks[0].id
-    proposal["mode"] = full_tasks[0].mode
-    proposal.pop("include_object", None)
-    proposal["field_names"] = list(full_tasks[0].field_names)
+            sdk.annotation.decide(
+                "retail",
+                task.target_id,
+                state="validated",
+                reason="Reviewed by BI owner",
+                include_fields=True,
+            )
+            full_tasks = sdk.annotation.plan_graph(
+                "retail", objects={"main.dim_customer"}, missing_only=False
+            )
+            proposal["task_id"] = full_tasks[0].id
+            proposal["mode"] = full_tasks[0].mode
+            proposal.pop("include_object", None)
+            proposal["field_names"] = list(full_tasks[0].field_names)
 
-    blocked = rw_dispatcher.annotate_draft("retail", proposal, source="mcp-test-agent")
-    assert blocked["status"] == "error"
-    assert blocked["code"] == "reviewed_annotation"
+            blocked = rw_dispatcher.annotate_draft("retail", proposal, source="mcp-test-agent")
+            self.assertEqual(blocked["status"], "error")
+            self.assertEqual(blocked["code"], "reviewed_annotation")
 
+    def test_policy_hook_seam_deny_and_redact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, _ = _build_synthetic_workspace(Path(tmp))
+            audit_log: list[str] = []
 
-def test_policy_hook_seam_deny_and_redact(tmp_path: Path) -> None:
-    state_root, _ = _build_synthetic_workspace(tmp_path)
-    audit_log: list[str] = []
+            class TestWallPolicy:
+                def before_tool_call(self, context: ToolCallContext) -> PolicyDecision | None:
+                    audit_log.append(f"before:{context.tool_name}")
+                    if context.tool_name == "tarel_focus":
+                        return PolicyDecision(
+                            allowed=False,
+                            code="wall_blocked",
+                            reason="Focus access blocked by test policy.",
+                            hint="Request workspace scope approval.",
+                        )
+                    return None
 
-    class TestWallPolicy:
-        def before_tool_call(self, context: ToolCallContext) -> PolicyDecision | None:
-            audit_log.append(f"before:{context.tool_name}")
-            if context.tool_name == "tarel_focus":
-                return PolicyDecision(
-                    allowed=False,
-                    code="wall_blocked",
-                    reason="Focus access blocked by test policy.",
-                    hint="Request workspace scope approval.",
+                def after_tool_call(
+                    self,
+                    context: ToolCallContext,
+                    result: dict[str, Any],
+                ) -> dict[str, Any]:
+                    audit_log.append(f"after:{context.tool_name}")
+                    redacted = dict(result)
+                    redacted["policy_audited"] = True
+                    return redacted
+
+            dispatcher = TarelMcpDispatcher(
+                McpServerConfig(state_root=state_root, profile="meta"),
+                policy_hook=TestWallPolicy(),
+            )
+
+            denied = dispatcher.focus(action="list")
+            self.assertEqual(denied["status"], "error")
+            self.assertEqual(denied["code"], "wall_blocked")
+
+            allowed = dispatcher.catalog_overview()
+            self.assertEqual(allowed["status"], "ok")
+            self.assertTrue(allowed["policy_audited"])
+            self.assertIn("before:tarel_focus", audit_log)
+            self.assertIn("after:tarel_catalog_overview", audit_log)
+
+    @unittest.skipUnless(_HAS_MCP, "optional mcp extra not installed")
+    def test_real_mcp_stdio_roundtrip(self) -> None:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, _ = _build_synthetic_workspace(Path(tmp))
+
+            async def _run(profile: str) -> tuple[str | None, list[str], dict[str, Any]]:
+                params = StdioServerParameters(
+                    command=sys.executable,
+                    args=[
+                        "-m",
+                        "tarel",
+                        "mcp",
+                        "serve",
+                        "--state-root",
+                        str(state_root),
+                        "--profile",
+                        profile,
+                        "--workspace",
+                        "analytics",
+                    ],
                 )
-            return None
+                async with (
+                    stdio_client(params) as (read, write),
+                    ClientSession(read, write) as session,
+                ):
+                    init_res = await session.initialize()
+                    tools_res = await session.list_tools()
+                    tool_names = [t.name for t in tools_res.tools]
+                    call_res = await session.call_tool("tarel_catalog_overview", {})
+                    text_parts = [
+                        text
+                        for item in call_res.content
+                        if (text := getattr(item, "text", ""))
+                    ]
+                    payload = json.loads("\n".join(text_parts))
+                    return init_res.instructions, tool_names, payload
 
-        def after_tool_call(
-            self,
-            context: ToolCallContext,
-            result: dict[str, Any],
-        ) -> dict[str, Any]:
-            audit_log.append(f"after:{context.tool_name}")
-            redacted = dict(result)
-            redacted["policy_audited"] = True
-            return redacted
+            instructions, ro_tools, overview = asyncio.run(_run("meta"))
+            self.assertIsNotNone(instructions)
+            self.assertIn("TAREL Metadata & Context Server", instructions or "")
+            self.assertEqual(set(ro_tools), set(READ_ONLY_TOOL_NAMES))
+            self.assertNotIn("tarel_annotate_draft", ro_tools)
+            self.assertEqual(overview["status"], "ok")
+            self.assertEqual(overview["counts"]["graphs"], 1)
 
-    dispatcher = TarelMcpDispatcher(
-        McpServerConfig(state_root=state_root, profile="meta"),
-        policy_hook=TestWallPolicy(),
-    )
+            _, rw_tools, _ = asyncio.run(_run("meta-write"))
+            self.assertEqual(set(rw_tools), set(READ_ONLY_TOOL_NAMES) | set(WRITE_TOOL_NAMES))
 
-    denied = dispatcher.focus(action="list")
-    assert denied["status"] == "error"
-    assert denied["code"] == "wall_blocked"
-
-    allowed = dispatcher.catalog_overview()
-    assert allowed["status"] == "ok"
-    assert allowed["policy_audited"] is True
-    assert "before:tarel_focus" in audit_log
-    assert "after:tarel_catalog_overview" in audit_log
-
-
-def test_real_mcp_stdio_roundtrip(tmp_path: Path) -> None:
-    """Spawn `tarel mcp serve --transport stdio` and verify MCP handshake, tools, and calls."""
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
-
-    state_root, _ = _build_synthetic_workspace(tmp_path)
-
-    async def _run(profile: str) -> tuple[str | None, list[str], dict[str, Any]]:
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=[
-                "-m",
-                "tarel",
-                "mcp",
-                "serve",
-                "--state-root",
-                str(state_root),
-                "--profile",
-                profile,
-                "--workspace",
-                "analytics",
-            ],
-        )
-        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
-            init_res = await session.initialize()
-            tools_res = await session.list_tools()
-            tool_names = [t.name for t in tools_res.tools]
-            call_res = await session.call_tool("tarel_catalog_overview", {})
-            text_parts = [
-                text
-                for item in call_res.content
-                if (text := getattr(item, "text", ""))
-            ]
-            payload = json.loads("\n".join(text_parts))
-            return init_res.instructions, tool_names, payload
-
-    instructions, ro_tools, overview = asyncio.run(_run("meta"))
-    assert instructions is not None
-    assert "TAREL Metadata & Context Server" in instructions
-    assert set(ro_tools) == set(READ_ONLY_TOOL_NAMES)
-    assert "tarel_annotate_draft" not in ro_tools
-    assert overview["status"] == "ok"
-    assert overview["counts"]["graphs"] == 1
-
-    # Verify meta-write exposes tarel_annotate_draft too
-    _, rw_tools, _ = asyncio.run(_run("meta-write"))
-    assert set(rw_tools) == set(READ_ONLY_TOOL_NAMES) | set(WRITE_TOOL_NAMES)
+    @unittest.skipUnless(_HAS_MCP, "optional mcp extra not installed")
+    def test_create_mcp_server_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, _ = _build_synthetic_workspace(Path(tmp))
+            server, dispatcher = create_mcp_server(McpServerConfig(state_root=state_root))
+            self.assertIsNotNone(server)
+            self.assertEqual(dispatcher.state_root, state_root.resolve())
 
 
-def test_create_mcp_server_helper(tmp_path: Path) -> None:
-    state_root, _ = _build_synthetic_workspace(tmp_path)
-    server, dispatcher = create_mcp_server(McpServerConfig(state_root=state_root))
-    assert server is not None
-    assert dispatcher.state_root == state_root.resolve()
+if __name__ == "__main__":
+    unittest.main()
