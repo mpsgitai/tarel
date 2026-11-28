@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
+import os
 import sys
 from collections.abc import Sequence
 from types import ModuleType
 
 from tarel import __version__
+from tarel.cli._terminal import FORMAT_ENVIRONMENT, preferred_format
 from tarel.errors import TarelError
 
 # Order defines `tarel --help`. Each entry is (module_name, (subcommand_names...)).
@@ -93,6 +96,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _report_error(exc: TarelError, *, output_format: str) -> None:
+    """Write a failure to stderr; stdout stays empty so a pipe never reads half a result."""
+    if output_format == "json":
+        print(json.dumps(exc.to_dict(), ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return
+    if output_format == "pretty":
+        from tarel.cli._pretty import render_error
+
+        render_error(exc, sys.stderr)
+        return
+    print(f"error [{exc.code}]: {exc}", file=sys.stderr)
+    if exc.hint:
+        print(f"hint: {exc.hint}", file=sys.stderr)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one ``tarel`` invocation and return its process exit status."""
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -107,6 +125,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"tarel {__version__}")
         return 0
 
+    configured = os.environ.get(FORMAT_ENVIRONMENT, "").strip()
+    if configured and preferred_format() is None:
+        print(
+            f"warning: ignoring {FORMAT_ENVIRONMENT}={configured!r}; use 'text' or 'pretty'.",
+            file=sys.stderr,
+        )
+
     first = arguments[0] if arguments else None
     module_name = _COMMAND_TO_MODULE.get(first) if first is not None else None
     if module_name is not None:
@@ -119,7 +144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if result is not None:
                 return result
         except TarelError as exc:
-            print(f"error [{exc.code}]: {exc}", file=sys.stderr)
+            _report_error(exc, output_format=getattr(args, "format", "text"))
             return 2
         parser.print_help()
         return 0

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 
-from tarel.cli._args import Subcommands, add_format_argument
-from tarel.cli._output import print_json
+from tarel.cli._args import Subcommands, add_format_argument, add_view_argument
+from tarel.cli._output import print_json, render_compact
+from tarel.cli._pretty_catalog import render_graph_header, render_graph_objects, render_slice
 from tarel.graph.reads import (
+    graph_freshness_use_case,
     graph_header_use_case,
     graph_objects_use_case,
     graph_slice_use_case,
@@ -22,7 +24,7 @@ def register(commands: Subcommands) -> None:
             name, help=f"Selective graph {name}; graph.json stays authoritative."
         )
         parser.add_argument("name")
-        add_format_argument(parser)
+        add_format_argument(parser, pretty=name != "rebuild-index")
         if name in {"objects", "slice"}:
             parser.add_argument(
                 "--object", action="append", dest="object_ids", required=name == "slice",
@@ -30,6 +32,12 @@ def register(commands: Subcommands) -> None:
             )
             parser.add_argument("--namespace")
             parser.add_argument("--revision")
+        if name == "slice":
+            parser.add_argument(
+                "--no-containment", action="store_false", dest="include_containment",
+                help="Leave out catalog/namespace nodes and contains edges.",
+            )
+            add_view_argument(parser)
         if name == "objects":
             parser.add_argument("--offset", type=int, default=0)
             parser.add_argument("--limit", type=int, default=100)
@@ -60,11 +68,25 @@ def dispatch(args: argparse.Namespace) -> int | None:
             tuple(args.object_ids),
             namespace=args.namespace,
             expected_revision=args.revision,
+            include_containment=args.include_containment,
         )
+        if args.view == "compact" or args.format == "pretty":
+            compact = result.to_compact_dict(freshness=graph_freshness_use_case((args.name,)))
+            if args.format == "pretty":
+                render_slice(compact)
+            elif args.format == "json":
+                render_compact(compact, output_format="json")
+            else:
+                _render_compact_slice(compact)
+            return 0
     else:
         return None
     if args.format == "json":
         print_json(result.to_dict(), ensure_ascii=False)
+    elif args.format == "pretty" and isinstance(result, GraphHeader):
+        render_graph_header(result, graph_freshness_use_case((args.name,)))
+    elif args.format == "pretty" and isinstance(result, GraphObjectPage):
+        render_graph_objects(result)
     else:
         _render_text(result)
     return 0
@@ -87,3 +109,22 @@ def _render_text(result: GraphHeader | GraphObjectPage | GraphSlice) -> None:
         print(f"Slice: {len(result.graph.nodes)} nodes, {len(result.graph.edges)} edges")
         for object_id in result.object_ids:
             print(f"- {nodes[object_id].label}")
+
+
+def _render_compact_slice(payload: dict[str, object]) -> None:
+    print(f"Graph: {payload['graph']} ({payload['catalog']}); revision {payload['revision']}")
+    objects = payload.get("objects")
+    for item in objects if isinstance(objects, list) else ():
+        annotation = item.get("annotation") or {}
+        role = f"; role={annotation['role']}" if "role" in annotation else ""
+        print(f"- {item['label']} [{item['type']}{role}]")
+        if "description" in annotation:
+            print(f"  {annotation['description']}")
+        for field in item.get("fields", ()):
+            meta = field.get("meta", {})
+            nullable = "" if meta.get("nullable", True) else " not null"
+            key = " pk" if meta.get("is_primary_key") else ""
+            print(f"  . {field['label']} {meta.get('data_type', '')}{nullable}{key}")
+    edges = payload.get("edges")
+    for edge in edges if isinstance(edges, list) else ():
+        print(f"  {edge['from']} -{edge['rel']}-> {edge['to']}")

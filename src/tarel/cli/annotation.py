@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from tarel.annotations.application import (
+    annotation_coverage_use_case,
     apply_annotation_use_case,
     decide_annotation_use_case,
     edit_annotation_use_case,
@@ -20,7 +21,8 @@ from tarel.annotations.application import (
 from tarel.annotations.contracts import AnnotationFailure
 from tarel.annotations.review import AnnotationReviewRecord
 from tarel.cli._args import Subcommands, add_annotation_knowledge_arguments, add_format_argument
-from tarel.cli._output import print_json, render_annotation_plan
+from tarel.cli._output import print_json, render_annotation_plan, render_compact
+from tarel.cli._pretty_catalog import render_coverage
 
 
 def register(subcommands: Subcommands) -> None:
@@ -95,6 +97,16 @@ def register(subcommands: Subcommands) -> None:
         help="Limit results to one or more review states.",
     )
     add_format_argument(annotation_list)
+
+    coverage = annotation_commands.add_parser(
+        "coverage",
+        help="Annotation, role and grain coverage of a graph or workspace; what to annotate next.",
+    )
+    coverage.add_argument("--graph", dest="graph_name")
+    coverage.add_argument("--workspace", dest="workspace_name")
+    coverage.add_argument("--system", action="append", dest="systems")
+    coverage.add_argument("--limit", type=int, default=50, help="Unannotated objects listed.")
+    add_format_argument(coverage, pretty=True)
 
     annotation_show = annotation_commands.add_parser(
         "show",
@@ -413,7 +425,32 @@ def _run_decide(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_coverage(args: argparse.Namespace) -> int:
+    coverage = annotation_coverage_use_case(
+        graph_name=args.graph_name,
+        workspace_name=args.workspace_name,
+        systems=tuple(args.systems or ()),
+        limit=args.limit,
+    )
+    payload = coverage.to_dict()
+    if args.format == "json":
+        render_compact(payload, output_format="json")
+    elif args.format == "pretty":
+        render_coverage(payload)
+    else:
+        print(f"Coverage: {payload['scope']} ({payload['objects']} objects)")
+        for key in ("annotated_pct", "role_coverage_pct", "grain_coverage_pct"):
+            print(f"{key}: {payload.get(key, 'n/a')}")
+        print("States: " + ", ".join(f"{k}={v}" for k, v in coverage.states))
+        print(f"Unannotated: {coverage.unannotated_total}")
+        for item in coverage.unannotated:
+            rows = f"; rows={item.row_count}" if item.row_count is not None else ""
+            print(f"- {item.graph}:{item.label} [{item.type}; fields={item.fields}{rows}]")
+    return 0
+
+
 _HANDLERS = {
+    "coverage": _run_coverage,
     "plan": _run_plan,
     "next": _run_next,
     "apply": _run_apply,

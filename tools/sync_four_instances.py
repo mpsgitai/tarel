@@ -216,8 +216,13 @@ def _network_is_gone(prefix: list[str]) -> bool:
 
 
 def code_of(result: Result) -> str:
+    """The error code of a JSON (`{"error": {...}}`) or text (`error [code]`) failure."""
     text = result.error
-    return text[text.find("[") + 1 : text.find("]")] if "[" in text else text
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text[text.find("[") + 1 : text.find("]")] if "[" in text else text
+    return str(payload["error"]["code"])
 
 
 def run(root: Path) -> Report:

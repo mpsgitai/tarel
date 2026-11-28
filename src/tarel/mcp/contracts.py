@@ -66,18 +66,6 @@ _RETRYABLE_CODES: frozenset[str] = frozenset(
 class McpFailure(TarelError):
     """Structured failure raised by the TAREL MCP layer."""
 
-    def __init__(
-        self,
-        code: str,
-        message: str,
-        *,
-        hint: str | None = None,
-        retryable: bool = False,
-        details: dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(code, message, hint=hint, details=details)
-        self.retryable = retryable
-
 
 @dataclass(frozen=True, slots=True)
 class McpServerConfig:
@@ -149,7 +137,7 @@ def format_mcp_error(exc: Exception) -> dict[str, Any]:
             "code": exc.code,
             "message": str(exc),
             "hint": exc.hint or _default_hint_for_code(exc.code),
-            "retryable": exc.code in _RETRYABLE_CODES,
+            "retryable": exc.retryable or exc.code in _RETRYABLE_CODES,
             **({"details": exc.details} if exc.details else {}),
         }
     return {

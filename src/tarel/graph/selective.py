@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tarel.atomic import write_atomic
+from tarel.errors import unknown_name_error
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphFailure, GraphNode
+from tarel.graph.projection import compact_slice_dict
 from tarel.graph.revision import graph_revision, physical_graph_revision, physical_schema_revision
 
 if TYPE_CHECKING:
@@ -81,6 +83,10 @@ class GraphSlice:
     header: GraphHeader
     graph: GraphDocument
     object_ids: tuple[str, ...]
+
+    def to_compact_dict(self, *, freshness: dict[str, object] | None = None) -> dict[str, object]:
+        """Objects with nested fields, no containment; see :mod:`tarel.graph.projection`."""
+        return compact_slice_dict(self, freshness=freshness)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -159,14 +165,17 @@ def read_slice(
     expected_revision: str | None = None,
     namespace: str | None = None,
     include_fields: bool = True,
+    include_containment: bool = True,
 ) -> GraphSlice:
     if object_ids is None:
         raise GraphFailure(
             "invalid_graph_selection", "An explicit tuple of object IDs is required."
         )
     _validate_selection(object_ids, namespace)
-    if type(include_fields) is not bool:
-        raise GraphFailure("invalid_graph_selection", "include_fields must be a boolean.")
+    if type(include_fields) is not bool or type(include_containment) is not bool:
+        raise GraphFailure(
+            "invalid_graph_selection", "include_fields and include_containment must be booleans.",
+        )
     with _open_index(store, name) as (connection, stats):
         header = _header(connection, name, stats)
         _check_revision(header, expected_revision)
@@ -189,10 +198,10 @@ def read_slice(
             "SELECT n.id FROM nodes n JOIN requested r ON r.id=n.object_id "
             "WHERE n.type='field' AND ? UNION "
             "SELECT e.source_id FROM edges e JOIN closure c ON e.target_id=c.id "
-            "JOIN nodes p ON p.id=e.source_id WHERE e.type='contains' AND "
+            "JOIN nodes p ON p.id=e.source_id WHERE e.type='contains' AND ? AND "
             "(p.type IN ('catalog','namespace') OR p.id IN (SELECT id FROM requested))) "
             "SELECT id FROM closure",
-            (include_fields,),
+            (include_fields, include_containment),
         )
         nodes = tuple(
             GraphNode.from_dict(json.loads(row[0]))
@@ -205,7 +214,8 @@ def read_slice(
             for row in connection.execute(
                 "SELECT e.payload FROM edges e "
                 "JOIN selected s ON s.id=e.source_id JOIN selected t ON t.id=e.target_id "
-                "ORDER BY e.ordinal"
+                "WHERE ? OR e.type<>'contains' ORDER BY e.ordinal",
+                (include_containment,),
             )
         )
         graph = GraphDocument(
@@ -522,7 +532,11 @@ def _source_fingerprint(path: Path, name: str) -> list[int]:
     try:
         return _fingerprint(path)
     except FileNotFoundError as exc:
-        raise GraphFailure("graph_not_found", f"Graph not found: {name}") from exc
+        known = sorted(item.parent.name for item in path.parent.parent.glob("*/graph.json"))
+        raise unknown_name_error(
+            GraphFailure, "graph_not_found", f"Graph not found: {name}",
+            param="graph", value=name, accepted=known, noun="graph",
+        ) from exc
     except OSError as exc:
         raise GraphFailure("invalid_graph", f"Could not inspect graph: {name}") from exc
 

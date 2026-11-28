@@ -17,6 +17,7 @@ from tarel.workspaces.application import (
     load_workspace_use_case,
     resolve_workspace_scope_use_case,
     show_workspace_zone_use_case,
+    workspace_overview_use_case,
 )
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceRelationship
 from tarel.workspaces.core import ResolvedZone
@@ -43,6 +44,15 @@ class WorkspaceAPI(RuntimeAPI):
 
     def load(self, name: str) -> WorkspaceDocument:
         return load_workspace_use_case(name, runtime=self._runtime)
+
+    def overview(
+        self, name: str, *, depth: str = "index", stats: bool = False,
+        systems: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        """``index``: systems and counts; ``zones``: adds areas and zones; ``full``: document."""
+        return workspace_overview_use_case(
+            name, depth=depth, include_stats=stats, systems=systems, runtime=self._runtime,
+        )
 
     def define_system(
         self,

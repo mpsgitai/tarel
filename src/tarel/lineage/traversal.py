@@ -16,6 +16,7 @@ from tarel.lineage.contracts import (
     LineageReview,
     LineageWriteSource,
 )
+from tarel.lineage.projection import compact_trace_dict
 from tarel.lineage.resolution import (
     ReferenceIndex,
     ReferenceResolution,
@@ -34,6 +35,7 @@ from tarel.retrieval.contracts import EmbeddingBackend, RankedDocument, Retrieva
 DEFAULT_LINEAGE_STATES = frozenset({"draft", "review_required", "validated"})
 _LINEAGE_STATES = frozenset({"draft", "rejected", "review_required", "validated"})
 _MAX_VECTOR_DOCUMENTS = 32
+_CANDIDATE_LIMIT = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +119,15 @@ class UpstreamTrace:
             "warnings": list(self.warnings),
         }
 
+    def to_compact_dict(
+        self,
+        *,
+        resolution: dict[str, object] | None = None,
+        freshness: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Each node once and each edge as one short row; see :mod:`tarel.lineage.projection`."""
+        return compact_trace_dict(self, resolution=resolution, freshness=freshness)
+
 
 @dataclass(frozen=True, slots=True)
 class _Node:
@@ -130,7 +141,7 @@ class _Node:
 
 
 @dataclass(frozen=True, slots=True)
-class _Edge:
+class NetworkEdge:
     id: str
     source_id: str
     target_id: str
@@ -159,11 +170,13 @@ class _Ambiguity:
 
 
 @dataclass(frozen=True, slots=True)
-class _Network:
+class Network:
     nodes: dict[str, _Node]
-    edges: tuple[_Edge, ...]
+    edges: tuple[NetworkEdge, ...]
     # Node id -> ambiguous references that could be part of that node's upstream.
     ambiguities: dict[str, tuple[_Ambiguity, ...]] = field(default_factory=dict)
+    # Node id -> ambiguous write targets of that node: its downstream may be missing an edge.
+    hidden_downstream: dict[str, tuple[_Ambiguity, ...]] = field(default_factory=dict)
 
     def aliases(self) -> dict[str, tuple[str, ...]]:
         result: dict[str, list[str]] = {}
@@ -194,7 +207,7 @@ def find_lineage_references(
             "missing_embedding_backend",
             "Vector lineage search requires a local embedding backend.",
         )
-    network = _build_network(documents, graphs, DEFAULT_LINEAGE_STATES)
+    network = build_network(documents, graphs, DEFAULT_LINEAGE_STATES)
     if mode == "lexical":
         return _lexical_lineage_references(network, query, limit=limit)
 
@@ -227,7 +240,7 @@ def find_lineage_references(
 
 
 def _lexical_lineage_references(
-    network: _Network,
+    network: Network,
     query: str,
     *,
     limit: int,
@@ -280,7 +293,7 @@ def _lexical_lineage_references(
     return tuple(item[7] for item in sorted(ranked)[:limit])
 
 
-def _lineage_retrieval_documents(network: _Network) -> tuple[RetrievalDocument, ...]:
+def _lineage_retrieval_documents(network: Network) -> tuple[RetrievalDocument, ...]:
     return tuple(
         RetrievalDocument(
             id=node.value.id,
@@ -330,7 +343,7 @@ def _rank_lineage_vectors(
 
 
 def _lineage_vector_candidates(
-    network: _Network,
+    network: Network,
     documents: tuple[RetrievalDocument, ...],
     bm25: tuple[RankedDocument, ...],
     query: str,
@@ -384,6 +397,32 @@ def trace_upstream(
     max_hops: int = 12,
     states: frozenset[str] = DEFAULT_LINEAGE_STATES,
 ) -> UpstreamTrace:
+    validate_trace_arguments(reference, max_hops, states)
+    network = build_network(documents, graphs, states)
+    return trace_upstream_on(network, reference, max_hops=max_hops)
+
+
+def hop_from_edge(network: Network, edge: NetworkEdge, depth: int) -> LineageHop:
+    return LineageHop(
+        id=edge.id,
+        depth=depth,
+        source=network.nodes[edge.source_id].value,
+        target=network.nodes[edge.target_id].value,
+        relation=edge.relation,
+        state=edge.state,
+        lineage=edge.lineage,
+        role=edge.role,
+        via_definition=edge.via_definition,
+        process_steps=edge.process_steps,
+        via=edge.via,
+        evidence=edge.evidence,
+        write_evidence=edge.write_evidence,
+        reviews=edge.reviews,
+        granularity_change=edge.granularity_change,
+    )
+
+
+def validate_trace_arguments(reference: str, max_hops: int, states: frozenset[str]) -> None:
     if not reference.strip() or max_hops < 1 or max_hops > 100:
         raise LineageFailure(
             "invalid_lineage_trace",
@@ -393,9 +432,11 @@ def trace_upstream(
     if unknown_states or not states:
         raise LineageFailure("invalid_lineage_trace", "Invalid lineage state filter.")
 
-    network = _build_network(documents, graphs, states)
-    start_id = _resolve_start(network, reference)
-    adjacency: dict[str, list[_Edge]] = {}
+
+def trace_upstream_on(network: Network, reference: str, *, max_hops: int) -> UpstreamTrace:
+    """Trace one reference over a network built once, so a batch pays for it only once."""
+    start_id = resolve_start(network, reference)
+    adjacency: dict[str, list[NetworkEdge]] = {}
     for edge in network.edges:
         adjacency.setdefault(edge.target_id, []).append(edge)
     for values in adjacency.values():
@@ -420,26 +461,7 @@ def trace_upstream(
         for edge in incoming:
             source_depth = depth + 1
             source = network.nodes[edge.source_id].value
-            target = network.nodes[edge.target_id].value
-            hops.append(
-                LineageHop(
-                    id=edge.id,
-                    depth=source_depth,
-                    source=source,
-                    target=target,
-                    relation=edge.relation,
-                    state=edge.state,
-                    lineage=edge.lineage,
-                    role=edge.role,
-                    via_definition=edge.via_definition,
-                    process_steps=edge.process_steps,
-                    via=edge.via,
-                    evidence=edge.evidence,
-                    write_evidence=edge.write_evidence,
-                    reviews=edge.reviews,
-                    granularity_change=edge.granularity_change,
-                )
-            )
+            hops.append(hop_from_edge(network, edge, source_depth))
             reached.add(edge.source_id)
             if edge.relation == "field_of":
                 warnings.add(
@@ -483,15 +505,16 @@ def trace_upstream(
     )
 
 
-def _build_network(
+def build_network(
     documents: tuple[LineageDocument, ...],
     graphs: tuple[GraphDocument, ...],
     states: frozenset[str],
-) -> _Network:
+) -> Network:
     nodes: dict[str, _Node] = {}
-    edges: list[_Edge] = []
+    edges: list[NetworkEdge] = []
     definitions: dict[tuple[str, str], str] = {}
     ambiguities: dict[str, list[_Ambiguity]] = {}
+    hidden: dict[str, list[_Ambiguity]] = {}
 
     for document in sorted(documents, key=lambda item: item.name):
         summaries = {item.definition_id: item.summary for item in document.analyses}
@@ -549,6 +572,11 @@ def _build_network(
         for node_id in (key,) if isinstance(key, str) else key:
             ambiguities.setdefault(node_id, []).append(ambiguity)
 
+    def hide(writers: tuple[str, ...], item: ReferenceResolution, lineage: str) -> None:
+        ambiguity = _Ambiguity(item.reference, item.candidates, lineage)
+        for node_id in writers:
+            hidden.setdefault(node_id, []).append(ambiguity)
+
     for document in sorted(documents, key=lambda item: item.name):
         steps = _steps_by_definition(document)
         definitions_by_id = document.definition_by_id()
@@ -561,7 +589,7 @@ def _build_network(
                 defer(target_id, source, document.name)
                 continue
             edges.append(
-                _Edge(
+                NetworkEdge(
                     id=f"lineage:{document.name}:claim:{claim.id}",
                     source_id=source.node_id,
                     target_id=target_id,
@@ -581,11 +609,13 @@ def _build_network(
             definition = definitions_by_id[materialization.definition_id]
             target = resolve(materialization.target, document, definition)
             if target.node_id is None:
-                # The write may land in any candidate, so each one has an unknown upstream.
+                # The write may land in any candidate, so each one has an unknown upstream,
+                # and the writing definition has an unknown downstream.
                 defer(target.candidates, target, document.name)
+                hide((source_id,), target, document.name)
                 continue
             edges.append(
-                _Edge(
+                NetworkEdge(
                     id=f"lineage:{document.name}:materialization:{materialization.id}",
                     source_id=source_id,
                     target_id=target.node_id,
@@ -606,6 +636,19 @@ def _build_network(
             target = resolve(unit.target, document, definition)
             if target.node_id is None:
                 defer(target.candidates, target, document.name)
+                # Look the sources up without adding unresolved nodes: only the warning needs them.
+                writers = tuple(
+                    found.node_id
+                    for found in (
+                        resolve_reference(
+                            item.target, document, definition, index, declared[document.name],
+                        )
+                        for item in unit.sources
+                    )
+                    if found.node_id is not None
+                )
+                hide((definitions[(document.name, unit.definition_id)], *writers), target,
+                     document.name)
                 continue
             for upstream in unit.sources:
                 source = resolve(upstream.target, document, definition)
@@ -613,7 +656,7 @@ def _build_network(
                     defer(target.node_id, source, document.name)
                     continue
                 edges.append(
-                    _Edge(
+                    NetworkEdge(
                         id=_write_source_edge_id(document.name, unit.id, upstream),
                         source_id=source.node_id,
                         target_id=target.node_id,
@@ -630,20 +673,21 @@ def _build_network(
                         resolution_note=source.resolution_note or target.resolution_note,
                     )
                 )
-    return _Network(
+    return Network(
         nodes,
         tuple(sorted(edges, key=_edge_key)),
         {
             key: tuple(sorted(set(values), key=_ambiguity_key))
             for key, values in ambiguities.items()
         },
+        {key: tuple(sorted(set(values), key=_ambiguity_key)) for key, values in hidden.items()},
     )
 
 
 def _add_graph_nodes(
     graph: GraphDocument,
     nodes: dict[str, _Node],
-    edges: list[_Edge],
+    edges: list[NetworkEdge],
 ) -> None:
     by_id = graph.node_by_id()
     graph_ids: dict[str, str] = {}
@@ -690,7 +734,7 @@ def _add_graph_nodes(
         if not isinstance(parent, str) or parent not in graph_ids:
             continue
         edges.append(
-            _Edge(
+            NetworkEdge(
                 id=f"graph:{graph.name}:field-scope:{node.id}",
                 source_id=graph_ids[parent],
                 target_id=graph_ids[node.id],
@@ -784,7 +828,7 @@ def _resolve_or_add(
     return ReferenceResolution(reference, node_id)
 
 
-def _resolve_start(network: _Network, reference: str) -> str:
+def resolve_start(network: Network, reference: str) -> str:
     if reference in network.nodes:
         return reference
     normalized = _normalize(reference)
@@ -796,16 +840,38 @@ def _resolve_start(network: _Network, reference: str) -> str:
     raise LineageFailure(
         "lineage_reference_not_found",
         f"Exact lineage reference not found: {reference}. Use lineage find first.",
+        hint="Run `tarel lineage find` (SDK: lineage.find) and retry with an exact reference.",
+        retryable=True,
+        details={"param": "reference", "value": reference},
     )
 
 
-def _ambiguous(reference: str, matches: tuple[str, ...], network: _Network) -> LineageFailure:
+def _ambiguous(reference: str, matches: tuple[str, ...], network: Network) -> LineageFailure:
     labels = sorted(_candidate_label(network.nodes[item].value) for item in matches)
     preview = ", ".join(labels[:5])
     return LineageFailure(
         "ambiguous_lineage_reference",
         f"Lineage reference is ambiguous: {reference}. Candidates: {preview}",
+        hint="Retry with one candidate id as the reference.",
+        retryable=True,
+        details={
+            "candidate_count": len(matches),
+            "candidates": _candidate_details(matches, network),
+            "param": "reference",
+            "value": reference,
+        },
     )
+
+
+def _candidate_details(matches: tuple[str, ...], network: Network) -> list[dict[str, str]]:
+    values = sorted(
+        (network.nodes[item].value for item in matches),
+        key=lambda item: (item.reference.casefold(), item.id),
+    )
+    return [
+        {"id": item.id, "reference": item.reference, "source": item.source}
+        for item in values[:_CANDIDATE_LIMIT]
+    ]
 
 
 def _candidate_label(value: LineageReference) -> str:
@@ -816,7 +882,7 @@ def _candidate_label(value: LineageReference) -> str:
 
 
 def _ambiguous_on_path(
-    ambiguity: _Ambiguity, network: _Network, target_id: str,
+    ambiguity: _Ambiguity, network: Network, target_id: str,
 ) -> LineageFailure:
     labels = sorted(network.nodes[item].value.reference for item in ambiguity.candidates)
     preview = ", ".join(labels[:5])
@@ -825,6 +891,19 @@ def _ambiguous_on_path(
         f"Lineage reference is ambiguous: {ambiguity.reference}. Candidates: {preview}. "
         f"The trace depends on it at {network.nodes[target_id].value.reference} "
         f"(lineage {ambiguity.lineage}).",
+        hint=(
+            "Select only the graph that lineage reads from, or declare its catalog in the "
+            "lineage document, then retry."
+        ),
+        retryable=True,
+        details={
+            "at": network.nodes[target_id].value.reference,
+            "candidate_count": len(ambiguity.candidates),
+            "candidates": _candidate_details(ambiguity.candidates, network),
+            "lineage": ambiguity.lineage,
+            "param": "graphs",
+            "value": ambiguity.reference,
+        },
     )
 
 
@@ -835,7 +914,7 @@ def _ambiguity_key(ambiguity: _Ambiguity) -> tuple[str, str]:
 _normalize = normalize_reference
 
 
-def _edge_key(edge: _Edge) -> tuple[object, ...]:
+def _edge_key(edge: NetworkEdge) -> tuple[object, ...]:
     return (
         edge.target_id,
         edge.source_id,

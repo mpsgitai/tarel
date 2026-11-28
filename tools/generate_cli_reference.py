@@ -464,7 +464,49 @@ NOTES = {
         "Same-named objects only stop a trace that depends on them. They ar"
         "e settled only by identity the referring document declares, and th"
         "e trace warns when that happened; otherwise the error lists the ca"
-        "ndidates."
+        "ndidates. --view compact lists each node once and each edge as one"
+        " short row, omits empty fields and prints JSON on one line; see th"
+        "e compact projection in contracts.md. A lineage name passed as --g"
+        "raph (or a graph as --lineage) fails with invalid_graph_role / inv"
+        "alid_lineage_role and the corrected source lists."
+    ),
+    "search": (
+        "With --workspace: --exclude GLOB leaves out matching graphs, --dive"
+        "rsity per_graph keeps at most --max-per-graph hits per graph (defau"
+        "lt 3) and counts the rest under diversity.omitted_by_graph, and --c"
+        "ollapse-duplicates folds copies of the same object and columns fro"
+        "m other graphs into the best hit's duplicates list. --role always f"
+        "ilters; on sparsely annotated scopes a warning gives role_coverage_pct."
+    ),
+    "annotation coverage": (
+        "Counts objects by annotation state with annotated, role and grain "
+        "coverage for one --graph or a --workspace (narrowed by --system), "
+        "and lists unannotated objects by stored row_count, then label. Pri"
+        "nts compact JSON on one line; --format pretty draws bars and tables."
+    ),
+    "lineage trace": (
+        "Defaults to the compact view. Without --lineage it reads every loc"
+        "al lineage document and, without --graph, the graphs their qualif"
+        "ied references name; the resolution block says what was chosen. -"
+        "-direction down lists impacts (what the reference feeds); both mar"
+        "ks downstream rows with dir=down. Freshness reports when each grap"
+        "h in the answer was last read; staleness stays unverified."
+    ),
+    "lineage batch": (
+        "Builds the lineage network once for all references and prints one "
+        "chain per reference (stored objects by distance, jobs counted in s"
+        "ummary.jobs). A reference that cannot be traced is reported under "
+        "errors and does not stop the others."
+    ),
+    "workspace show": (
+        "--depth index lists systems with graphs and counts, zones adds are"
+        "as and zones with member counts; both print JSON on one line. --st"
+        "ats adds object counts and annotated_pct read from the graphs. ful"
+        "l (default) is the stored document."
+    ),
+    "focus show": (
+        "--view compact keys members by reference, merges repeated hops, dr"
+        "ops self-loops and folds cycles; the stored snapshot is unchanged."
     ),
     "context expand": (        "--requests takes a JSON file or - for stdin, never inline JSON, "
         "and the array holds 1-32 typed targets. Do not combine --request"
@@ -547,7 +589,11 @@ NOTES = {
     "graph slice": (
         "Use exact object IDs from graph objects. The returned slice is a"
         " subset: preserve the complete source revision from its header r"
-        "ather than persisting the slice as the original graph."
+        "ather than persisting the slice as the original graph. --view com"
+        "pact nests fields under their objects, drops containment and annot"
+        "ation audit fields (evidence, provenance, confidence_reason) and k"
+        "eeps all field metadata; --no-containment drops catalog/namespace "
+        "nodes and contains edges from the full view as well."
     ),
 }
 MEANINGS = {
@@ -625,6 +671,9 @@ MEANINGS = {
     "max_fields_per_object": "Maximum fields per object.",
     "max_joins": "Maximum selected joins.",
     "max_hops": "Maximum traversal/expansion depth.",
+    "direction": "up (sources), down (impact) or both.",
+    "references": "Exact references to trace, one network for all.",
+    "max_per_graph": "Hits kept per graph with --diversity per_graph (default 3).",
     "max_trace_hops": "Maximum lineage-trace depth.",
     "max_characters": "Character budget; not a tokenizer-based token limit.",
     "max_input_chars": "Input character budget.",
@@ -890,6 +939,10 @@ def appendices():
             "rce.py), [stored records](../src/tarel/lineage/contracts.py) |"
         ),
         "| Runtime lineage | [Complete input and version rules](contracts.md#runtime-lineage) |",
+        (
+            "| Compact lineage / focus view, CLI errors | [Compact projections "
+            "and errors](contracts.md#compact-projections-and-errors) |"
+        ),
         (
             "| Discovery proposals and observations | [Complete worked payloa"
             "ds](contracts.md#discovery-protocol) |"
@@ -1264,13 +1317,34 @@ lines = [
     "## Exit status and errors",
     "",
     (
-        "The main dispatcher returns 2 for recognized domain errors and w"
-        "rites `error [code]: message` to stderr. Argument parsing errors"
+        "The main dispatcher returns 2 for recognized domain errors. With"
+        " --format text it writes `error [code]: message` and, when known"
+        ", `hint: ...` to stderr; with --format json it writes one `{\"err"
+        "or\": {...}}` object to stderr (code, message, retryable, option"
+        "al hint and details) and leaves stdout empty. Retryable errors n"
+        "ame the rejected parameter and the accepted values or a correcte"
+        "d `suggestion` in details. Argument parsing errors"
         " also normally use status 2. Successful operations normally retu"
         "rn 0. Some operations use 1 for an incomplete/unknown outcome (f"
         "or example context expansion omissions or unknown context impact"
         "). Inspect structured status and omissions, not only the exit co"
         "de. This is not an exhaustive external-driver failure catalog."
+    ),
+    "",
+    "## Human reading mode",
+    "",
+    (
+        "Read commands with a human layout accept --format pretty: worksp"
+        "ace show, graph header/objects/slice, lineage upstream/trace/down"
+        "stream/batch, focus show, search, context build and annotation co"
+        "verage. It draws titled sections, aligned tables and lineage trees"
+        " from the same payload as the other formats, uses colour only on a"
+        " terminal and never with NO_COLOR, falls back to ASCII on consoles"
+        " that cannot encode box-drawing symbols, and follows the terminal "
+        "width (COLUMNS overrides it). TAREL_FORMAT=pretty makes it the def"
+        "ault where a command would otherwise print text; JSON defaults and"
+        " --format text stay unchanged. Errors print as a short block with "
+        "the hint, suggestion and accepted values on stderr."
     ),
     "",
     "## Command index",

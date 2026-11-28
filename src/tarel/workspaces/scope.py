@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from tarel.graph.contracts import GraphDocument
 from tarel.workspaces.contracts import WorkspaceDocument, WorkspaceFailure, WorkspaceSystem
@@ -225,6 +225,18 @@ def intersect_scope_objects(
             scope.workspace, scope.selection, graph_names, objects,
         ),
         warnings=combined_warnings,
+    )
+
+
+def exclude_scope_graphs(scope: ResolvedScope, excluded: tuple[str, ...]) -> ResolvedScope:
+    """Drop whole graphs from a scope; the hash then describes the narrower boundary."""
+    graph_names = tuple(name for name in scope.graph_names if name not in excluded)
+    objects = tuple(item for item in scope.objects if item.graph not in excluded)
+    return replace(
+        scope,
+        graph_names=graph_names,
+        objects=objects,
+        scope_hash=_scope_hash(scope.workspace, scope.selection, graph_names, objects),
     )
 
 

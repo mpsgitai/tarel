@@ -8,6 +8,7 @@ from pathlib import Path
 from tarel.focus.contracts import FocusDocument, FocusFailure
 from tarel.focus.core import build_focus, graph_object_ids, require_current_focus
 from tarel.graph.contracts import GraphDocument
+from tarel.lineage.application import require_source_roles
 from tarel.lineage.contracts import LineageDocument
 from tarel.lineage.traversal import DEFAULT_LINEAGE_STATES, trace_upstream
 from tarel.runtime import TarelRuntime, resolve_runtime
@@ -38,6 +39,12 @@ def build_focus_use_case(
     _require_unique_names(graph_names, "graph")
     lineage_store = resolve_runtime(runtime).lineage_store()
     graph_store = resolve_runtime(runtime).graph_store()
+    require_source_roles(
+        lineage_names,
+        graph_names,
+        known_lineages=lineage_store.list(),
+        known_graphs=graph_store.list(),
+    )
     lineages = tuple(lineage_store.load(item) for item in lineage_names)
     graphs = tuple(graph_store.load(item) for item in graph_names)
     selected_states = DEFAULT_LINEAGE_STATES if states is None else states

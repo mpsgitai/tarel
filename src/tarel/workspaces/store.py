@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from tarel.atomic import write_atomic
+from tarel.errors import unknown_name_error
 from tarel.workspaces.contracts import (
     WorkspaceDocument,
     WorkspaceFailure,
@@ -50,9 +51,9 @@ class FileWorkspaceStore:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise WorkspaceFailure(
-                "workspace_not_found",
-                f"Workspace not found: {name}",
+            raise unknown_name_error(
+                WorkspaceFailure, "workspace_not_found", f"Workspace not found: {name}",
+                param="workspace", value=name, accepted=self.list(), noun="workspace",
             ) from exc
         except (OSError, json.JSONDecodeError) as exc:
             raise WorkspaceFailure(

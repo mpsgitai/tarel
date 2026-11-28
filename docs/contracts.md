@@ -27,6 +27,7 @@ The linked Python definitions are authoritative for exact field types and valida
 - [Targeted context expansion](#targeted-context-expansion)
 - [Local retrieval](#local-retrieval)
 - [Semantic model imports](#semantic-model-imports)
+- [Compact projections and errors](#compact-projections-and-errors)
 - [Runtime lineage](#runtime-lineage)
 - [Discovery protocol](#discovery-protocol)
 - [Entity-resolution candidates](#entity-resolution-candidates)
@@ -1390,6 +1391,221 @@ never contains the raw source snapshot.
 The reproducible three-format evidence and its precise scope are documented in
 [Experimental three-format contract test](contracts.md#semantic-model-imports).
 
+
+## Compact projections and errors
+
+Agents pay for every byte they read, so lineage and focus reads offer a compact view next to the
+complete record, and failures carry their own repair. Both are read-time shapes: nothing here is
+persisted, and `--view full` (the default) and every stored contract stay byte-identical.
+
+### Structured errors
+
+Every domain failure is a `TarelError` with a stable `code`. With `--format json` the CLI writes
+exactly one object to **stderr**, leaves stdout empty and exits with status 2:
+
+```json
+{"error": {
+  "code": "invalid_graph_role",
+  "message": "'lakehouse-dbt' is a lineage document, not a catalog graph.",
+  "retryable": true,
+  "hint": "Pass 'lakehouse-dbt' as a lineage (--lineage / lineages=) instead.",
+  "details": {
+    "param": "graphs",
+    "value": "lakehouse-dbt",
+    "accepted_preview": ["lakehouse-delta", "lakehouse-iceberg", "lakehouse-polaris"],
+    "accepted_count": 103,
+    "suggestion": {"lineages": ["lakehouse-airflow", "lakehouse-dbt"], "graphs": []}
+  }
+}}
+```
+
+`hint` and `details` are omitted when empty. With `--format text` stderr reads
+`error [code]: message` followed by `hint: ...` when a hint exists. The SDK raises the same
+exception; `TarelError.to_dict()` returns the payload above.
+
+`retryable: true` means the same call succeeds once the caller changes its arguments as described:
+
+| Code | Raised when | `details` |
+| --- | --- | --- |
+| `graph_not_found`, `lineage_not_found`, `focus_not_found`, `workspace_not_found` | A stored name does not exist | `param`, `value`, `accepted_preview` (at most 5; close spellings first, then sorted), `accepted_count` |
+| `invalid_graph_role` / `invalid_lineage_role` | A lineage document was passed as a graph, or a graph as a lineage | as above plus `suggestion` with corrected `lineages` and `graphs` lists that fix every misplaced name at once |
+| `ambiguous_lineage_reference` | A start reference, or a reference a trace depends on, matches several nodes | `candidates` (at most 10 `{id, reference, source}`), `candidate_count`; on a path also `at` and `lineage` |
+| `lineage_reference_not_found` | No exact reference matches | `param`, `value`; the hint points to `lineage find` |
+
+The suggestion only moves names between roles. It never adds a graph the caller did not name.
+
+### Compact lineage trace
+
+`tarel lineage upstream ... --view compact` (SDK: `trace.to_compact_dict()`) prints JSON on one
+line:
+
+```json
+{"view": "compact", "direction": "up", "query": "bi_lab.gold.customer_sales",
+ "start": "bi_lab.gold.customer_sales",
+ "nodes": {"bi_lab.gold.customer_sales": {"kind": "table", "src": "graph:lakehouse-iceberg"},
+           "dbt.open_lakehouse.gold.customer_sales": {"kind": "query", "src": "lineage:lakehouse-dbt"},
+           "bi_lab.silver.dim_customer": {"kind": "table", "src": "graph:lakehouse-iceberg"}},
+ "edges": [{"d": 1, "rel": "materializes_as", "from": "dbt.open_lakehouse.gold.customer_sales",
+            "to": "bi_lab.gold.customer_sales", "ev": "r1#model.bi_lab_lakehouse.customer_sales:1"},
+           {"d": 2, "rel": "reads_from", "from": "bi_lab.silver.dim_customer",
+            "to": "dbt.open_lakehouse.gold.customer_sales", "ev": "r2:1-6"}],
+ "files": {"r1": "/.../lakehouse-dbt.json", "r2": "/.../customer_sales.sql"},
+ "origins": ["bi_lab.silver.dim_customer"],
+ "summary": {"hops": 2, "edges": 2, "nodes": 3, "origins": 1, "max_depth": 2, "unresolved": 0,
+             "states": {"draft": 2}, "lineages": {"lakehouse-dbt": 2},
+             "evidence": {"declared_materialization": 1, "declared_reference": 1}},
+ "limits": ["declared_only", "table_level"],
+ "warnings": ["The trace contains lineage that has not been human-validated."],
+ "truncated": false, "null_policy": "omitted", "next": {"full": "view=full"}}
+```
+
+Rules, all deterministic for the same trace:
+
+- **Node keys** are the readable reference (an unresolved name's scoped `name`). A key shared by
+  two nodes becomes `source:reference`, and in the rare case that still collides, the node id.
+- **Nodes** carry `kind` and `src`, plus `desc`, `desc_kind` (`semantic` or `analysis`) and
+  `state` only for TAREL's own semantic annotations and lineage analysis summaries. Technical
+  source metadata (table comments, storage locations) stays in the full view.
+- **Edges** are merged by `(from, to, rel)`, which identifies a row: the shallowest hop provides
+  `d` and evidence, and `edge_count` reports more than one contributing hop. `ev` cites a key of
+  `files` plus the `#fragment` and lines. `via` names the job only when it is neither endpoint,
+  `through` lists intermediate references and `role`, `review` (latest decision) and `gran` appear
+  when set.
+- **Uniform fields are hoisted.** `state` appears on an edge only when lineage claims in the trace
+  have different states (`field_of` edges are graph structure, always "observed", and never
+  count). `lin` appears only when the trace spans several lineages and neither endpoint is a
+  definition node of that lineage.
+- **Self-loops** are dropped and counted in `self_loops_omitted`. **Cycles** (strongly connected
+  components with more than one member) fold their internal edges into
+  `cycles: [{"members": [...], "internal_edges": N}]`. Edges entering or leaving a cycle stay.
+- **Null policy:** no `null`, `""`, `[]` or `{}` inside nodes and edges. Optional top-level
+  sections (`cycles`, `files`, `limits`, `self_loops_omitted`) are omitted when empty, while
+  `nodes`, `edges`, `origins`, `warnings` and `truncated` are always present.
+- **`limits`** come from structure, never from free-text reasons: `declared_only` (every
+  evidence source is a `declared_*` kind), `no_write_evidence` (a `derived_from` edge without a
+  write record) and `table_level` (the trace contains no field node).
+
+### Compact focus
+
+`tarel focus show NAME --view compact` (SDK: `focus.to_compact_dict()`) applies the same key, merge,
+self-loop, cycle and null rules to a stored focus. Its nodes keep the full member `id`, `kind`,
+`depth` and annotation `state`. It adds `name`, `revision`, `sources` and
+`summary.duplicates_merged`. Its edges carry no evidence, because a focus snapshot stores none.
+
+### Human reading mode
+
+`--format pretty` is a third rendering of the same payload, for people at a terminal: titled
+sections, aligned tables, lineage as a tree, bars for coverage and budgets. It is offered only by
+read commands that have such a layout (`workspace show`, `graph header|objects|slice`,
+`lineage upstream|trace|downstream|batch`, `focus show`, `search`, `context build`,
+`annotation coverage`). Other commands reject the value instead of printing text under that name.
+Its layout is not a contract: scripts read `text` or `json`, which are unchanged.
+`TAREL_FORMAT=pretty` makes it the default only where the default would be `text`, and an unknown
+value prints a warning and is ignored. Colour appears only on a terminal and never with
+`NO_COLOR`, symbols fall back to ASCII where the console cannot encode them, and the width follows
+the terminal (`COLUMNS` overrides it). A column that is empty in every row is left out, and long
+cells end in an ellipsis; paths lose their beginning so the file name stays visible.
+
+### Annotation coverage
+
+`tarel annotation coverage --graph NAME | --workspace NAME [--system S]` (SDK:
+`annotation.coverage(...)`) counts tables and views by annotation state (`validated`,
+`review_required`, `draft`, `deferred`, `rejected`, `unannotated`). It reports `annotated_pct`
+(non-rejected annotations), `role_coverage_pct` (annotations naming a role) and
+`grain_coverage_pct` (objects whose metadata states a grain), and lists unannotated objects with
+their field count, ordered by stored `row_count` (largest first, objects without one last), then
+by label. A row count is never estimated. The default output is compact JSON on one line.
+
+### Source resolution
+
+`lineage find|upstream|trace|downstream|batch` choose their sources by one rule
+([trace_application](../src/tarel/lineage/trace_application.py)):
+
+1. Explicit `--lineage`, `--graph` and `--source` always win. `--source NAME` is classified as a
+   lineage or graph by its stored name; `lineage:NAME` / `graph:NAME` force the role, and a name
+   that exists in both roles fails with `ambiguous_source`.
+2. `--workspace NAME` adds every graph of that workspace.
+3. Without a lineage, every local lineage document is read (`lineages_from: "all_local"`). If no
+   graph was named either, the graphs whose catalog those documents name in a fully qualified
+   reference are added (`graphs_from: "declared_catalogs"`). `--no-auto-catalog` skips this.
+
+Naming only `--lineage` keeps its earlier meaning (no graphs), so existing calls and their full
+output are unchanged. Compact output includes `resolution` only when TAREL chose sources itself:
+`{"auto": true, "lineages": [...], "lineages_from": ..., "graphs": [...], "graphs_from": ...}`.
+An `invalid_graph_role` suggestion fills `graphs` the same way and marks it
+`"graphs_from": "declared_catalogs"`.
+
+### Directions and batches
+
+`lineage trace REF --direction up|down|both` (default compact; `lineage downstream` is the
+`down` shortcut). Downstream follows edges forward and lists `impacts`: reached nodes that feed
+nothing further. A table reaches a field through `field_of` only when that field feeds something,
+so unread columns are not impacts. An ambiguous reference cannot stop a downstream walk, but it may
+hide a consumer, so it adds a "Downstream may be incomplete" warning. In `both`, downstream edges
+carry `"dir": "down"`. The full JSON record has `upstream`, `downstream`, `origins` and `impacts`.
+
+`lineage batch REF [REF ...]` builds the network once and prints:
+
+```json
+{"view": "compact", "direction": "up",
+ "chains": {"bi_lab.silver.fct_orders": "bi_lab.silver.fct_orders <- bi_lab.bronze.orders"},
+ "errors": {"bi_lab.gold.nope": {"code": "lineage_reference_not_found", "retryable": true, "...": "..."}},
+ "summary": {"references": 2, "with_lineage": 1, "without_lineage": 0, "failed": 1,
+             "jobs": 1, "max_depth": 2},
+ "truncated": false, "null_policy": "omitted"}
+```
+
+A chain lists stored objects (tables, views, fields, unresolved names) by distance, nearest first.
+Objects at the same distance appear in brackets, and lineage definitions are counted in
+`summary.jobs` instead of being listed. Downstream chains use `->`; `both` joins the two with ` | `.
+`warnings` maps each warning text to the references it applies to (`["*"]` for all of them), so
+a trace that ambiguity may have left incomplete never reads as "no lineage".
+
+### Freshness
+
+Compact lineage, focus and graph-slice answers carry a `freshness` block for the graphs that
+appear in them:
+
+```json
+{"observed": {"lakehouse-iceberg": "2026-11-20T10:00:00Z"}, "missing": ["lakehouse-delta"],
+ "failed": {"erp": "login_failed"}, "stale": "unverified"}
+```
+
+`observed` is the last successful read recorded in `observation.json`. `missing` lists graphs
+imported before reads were recorded, and `failed` lists graphs whose latest read failed.
+`stale` is always `"unverified"`: TAREL does not contact sources for a read, so it cannot know
+whether a source changed since its last observation.
+
+### Compact graph slice
+
+`tarel graph slice NAME --object ... --view compact` (SDK: `slice.to_compact_dict()`) nests each
+field under its object and drops the containment forest (`catalog`/`namespace` nodes and
+`contains` edges). It also drops `object_id` and object metadata that only restates the label.
+Field metadata is kept unchanged. Annotations keep `description`, `role`, `state`, `synonyms`,
+`tags`, `warnings` and `confidence`; their audit fields (`confidence_reason`, `evidence`,
+`provenance`) stay in the full view. `annotation_context_documents` is listed once per slice.
+`--no-containment` removes the containment forest from the full view too.
+
+### Workspace tiers
+
+`tarel workspace show NAME --depth index|zones|full` (SDK: `workspace.overview(name, depth=...)`).
+`index` returns the workspace and each system with `graphs`, `graph_count`, `area_count`,
+`zone_count` and `zone_member_count`. `zones` adds `areas` (with `graph:namespace` schemas) and
+`zones` (with `member_count`, never member lists). `full` (the default) returns the stored
+document. `--stats` adds `objects` and `annotated_pct` (objects with a non-rejected annotation)
+per system, read from the graphs. The tiers never guess which lineage belongs to a system.
+
+### Search diversity
+
+Workspace search accepts `--exclude GLOB` (graphs left out before scoring, reported in
+`excluded_graphs`), `--diversity per_graph` with `--max-per-graph N` (default 3; the rest are
+counted in `diversity.omitted_by_graph` across all ranked candidates) and
+`--collapse-duplicates`. A structural duplicate has the same object name and column names,
+compared without case or punctuation, and lives in another graph, for example one schema
+exported to several SQL dialects. It folds into the best-ranked copy, which lists it under
+`duplicates`. Equal objects inside one graph never fold. A `--role` filter always filters. When
+less than 20 % of the objects in scope carry a role annotation, a warning states
+`role_coverage_pct`. Without these options the result keeps its earlier shape.
 
 ## Runtime lineage
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tarel.focus.application import focus_object_allowlist
 from tarel.graph.contracts import GraphDocument
+from tarel.graph.store import FileGraphStore
 from tarel.runtime import TarelRuntime, resolve_runtime
 from tarel.workspaces.contracts import (
     SchemaReference,
@@ -26,6 +27,7 @@ from tarel.workspaces.core import (
     require_system,
     resolve_zone,
 )
+from tarel.workspaces.overview import GraphStats, build_workspace_overview
 from tarel.workspaces.scope import (
     ResolvedScope,
     ScopeSelection,
@@ -71,6 +73,43 @@ def load_workspace_use_case(
     runtime: TarelRuntime | None = None,
 ) -> WorkspaceDocument:
     return resolve_runtime(runtime).workspace_store().load(name)
+
+
+def workspace_overview_use_case(
+    name: str,
+    *,
+    depth: str = "index",
+    include_stats: bool = False,
+    systems: tuple[str, ...] = (),
+    runtime: TarelRuntime | None = None,
+) -> dict[str, object]:
+    """A tiered overview (index, zones or full); ``include_stats`` reads object counts."""
+    state = resolve_runtime(runtime)
+    workspace = state.workspace_store().load(name)
+    stats = None
+    if include_stats and depth != "full":
+        store = state.graph_store()
+        graphs = sorted({
+            graph for system in workspace.systems if not systems or system.name in systems
+            for graph in system.graphs
+        })
+        stats = {graph: _graph_stats(store, graph) for graph in graphs}
+    return build_workspace_overview(workspace, depth=depth, stats=stats, systems=systems)
+
+
+def _graph_stats(store: FileGraphStore, name: str) -> GraphStats:
+    """Objects and objects carrying a non-rejected annotation, read page by page."""
+    objects = annotated = 0
+    offset: int | None = 0
+    while offset is not None:
+        page = store.list_objects(name, offset=offset, limit=1000)
+        objects += len(page.objects)
+        annotated += sum(
+            item.annotation is not None and item.annotation.state != "rejected"
+            for item in page.objects
+        )
+        offset = page.next_offset
+    return GraphStats(objects, annotated)
 
 
 def resolve_workspace_scope_use_case(

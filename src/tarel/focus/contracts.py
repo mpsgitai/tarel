@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from tarel.errors import TarelError
+from tarel.focus.projection import compact_focus_dict
 
 _CONTRACT_VERSION = "tarel.focus.v0.1"
 _SOURCE_KINDS = frozenset({"graph", "lineage"})
@@ -117,6 +118,12 @@ class FocusDocument:
         if include_revision:
             payload["revision"] = self.revision
         return payload
+
+    def to_compact_dict(
+        self, *, freshness: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Readable keys, merged edges, no self-loops; see :mod:`tarel.focus.projection`."""
+        return compact_focus_dict(self, freshness=freshness)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FocusDocument:

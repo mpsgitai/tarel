@@ -107,3 +107,73 @@ def render_probe(result: ProbeResult, *, output_format: str) -> None:
 def print_json(payload: object, *, ensure_ascii: bool = True) -> None:
     """Print ``payload`` as every ``--format json`` command does: indented, keys sorted."""
     print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=ensure_ascii))
+
+
+def render_compact(payload: dict[str, object], *, output_format: str) -> None:
+    """Render a compact lineage or focus projection.
+
+    JSON goes on one line without indentation: the compact view exists for readers that pay per
+    byte, and indentation would cost more than the remaining structure.
+    """
+    if output_format == "json":
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+        return
+    nodes = payload.get("nodes")
+    kinds = (
+        {key: value.get("kind") for key, value in nodes.items() if isinstance(value, dict)}
+        if isinstance(nodes, dict)
+        else {}
+    )
+    start = payload.get("start")
+    if isinstance(start, str):
+        print(f"Start: {start} [{kinds.get(start)}]")
+    edges = payload.get("edges")
+    for edge in edges if isinstance(edges, list) else ():
+        if not isinstance(edge, dict):
+            continue
+        extras = [
+            f"{key}={edge[key]}"
+            for key in ("via", "role", "lin", "state", "ev", "edge_count")
+            if key in edge
+        ]
+        detail = f"  ({'; '.join(extras)})" if extras else ""
+        depth, relation = edge.get("d"), edge.get("rel")
+        if edge.get("dir") == "down" or payload.get("direction") == "down":
+            print(f"d{depth} {edge.get('from')} -{relation}-> {edge.get('to')}{detail}")
+        else:
+            print(f"d{depth} {edge.get('to')} <-{relation}- {edge.get('from')}{detail}")
+    cycles = payload.get("cycles")
+    for cycle in cycles if isinstance(cycles, list) else ():
+        if isinstance(cycle, dict):
+            members = cycle.get("members")
+            rendered = ", ".join(str(item) for item in members) if isinstance(members, list) else ""
+            print(f"cycle: {rendered} ({cycle.get('internal_edges')} internal edges folded)")
+    if payload.get("self_loops_omitted"):
+        print(f"self-loops omitted: {payload['self_loops_omitted']}")
+    for key in ("origins", "impacts"):
+        values = payload.get(key)
+        if isinstance(values, list) and values:
+            print(f"{key.capitalize()}: {', '.join(str(item) for item in values)}")
+    resolution = payload.get("resolution")
+    if isinstance(resolution, dict):
+        print(
+            f"Sources (auto): {len(resolution['lineages'])} lineages "
+            f"[{resolution['lineages_from']}], {len(resolution['graphs'])} graphs "
+            f"[{resolution['graphs_from']}]; --format json lists them"
+        )
+    freshness = payload.get("freshness")
+    if isinstance(freshness, dict):
+        observed = freshness.get("observed")
+        parts = [f"{key}@{value}" for key, value in observed.items()] if isinstance(
+            observed, dict
+        ) else []
+        missing = freshness.get("missing")
+        if isinstance(missing, list) and missing:
+            parts.append(f"no observation: {', '.join(missing)}")
+        print(f"Freshness: {'; '.join(parts)} (stale: {freshness.get('stale')})")
+    for key in ("limits", "warnings"):
+        values = payload.get(key)
+        for value in values if isinstance(values, list) else ():
+            print(f"{key[:-1]}: {value}")
+    if payload.get("truncated"):
+        print("truncated: yes")
