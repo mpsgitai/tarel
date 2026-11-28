@@ -345,6 +345,17 @@ class TestTarelMcpServer(unittest.TestCase):
             self.assertEqual(
                 rw_dispatcher.available_tools(), READ_ONLY_TOOL_NAMES + WRITE_TOOL_NAMES
             )
+            # Plan via MCP directly (no external SDK call required)
+            planned = rw_dispatcher.annotate_draft(
+                "retail",
+                action="plan",
+                objects=["main.dim_customer"],
+            )
+            self.assertEqual(planned["status"], "ok")
+            self.assertEqual(planned["action"], "plan")
+            self.assertEqual(len(planned["tasks"]), 1)
+            self.assertEqual(planned["tasks"][0]["task_id"], task.id)
+
             ok_res = rw_dispatcher.annotate_draft("retail", proposal, source="mcp-test-agent")
             self.assertEqual(ok_res["status"], "ok")
             self.assertEqual(ok_res["state"], "draft")
@@ -368,6 +379,85 @@ class TestTarelMcpServer(unittest.TestCase):
             blocked = rw_dispatcher.annotate_draft("retail", proposal, source="mcp-test-agent")
             self.assertEqual(blocked["status"], "error")
             self.assertEqual(blocked["code"], "reviewed_annotation")
+
+    def test_grounding_budgets_and_direct_field_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, _ = _build_synthetic_workspace(Path(tmp))
+            dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta"))
+
+            # Enforce max_objects budget on concrete object_ids
+            capped = dispatcher.grounding(
+                graph="retail",
+                object_ids=["main.dim_customer", "main.fact_sales"],
+                max_objects=1,
+            )
+            self.assertEqual(capped["status"], "ok")
+            self.assertEqual(capped["returned_count"], 1)
+            self.assertEqual(capped["omitted_objects"], 1)
+            self.assertTrue(capped["truncated"])
+
+            # Direct field grounding retains column data_type, nullable, is_primary_key
+            field_ground = dispatcher.grounding(
+                graph="retail",
+                object_ids=["main.dim_customer.customer_id"],
+            )
+            self.assertEqual(field_ground["status"], "ok")
+            asset = field_ground["assets"][0]
+            self.assertEqual(asset["type"], "field")
+            self.assertEqual(asset["field"]["data_type"], "INTEGER")
+            self.assertFalse(asset["field"]["nullable"])
+            self.assertTrue(asset["field"]["is_primary_key"])
+
+    def test_downstream_preserves_temporary_table_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root, sdk = _build_synthetic_workspace(Path(tmp))
+            sdk.lineage.add_job(
+                "doc-one",
+                kind="script",
+                job_name="job_one",
+                qualified_name="etl.job_one",
+                language="sql",
+                source_reference="sql/one.sql",
+                description="Writes #tmp in doc-one",
+            )
+            sdk.lineage.add_hop(
+                "doc-one",
+                job="etl.job_one",
+                source="main.fact_sales",
+                target="#tmp",
+                operation="insert",
+                evidence_reference="sql/one.sql",
+                reason="Stages into #tmp",
+            )
+            sdk.lineage.add_job(
+                "doc-two",
+                kind="script",
+                job_name="job_two",
+                qualified_name="etl.job_two",
+                language="sql",
+                source_reference="sql/two.sql",
+                description="Reads unrelated #tmp in doc-two",
+            )
+            sdk.lineage.add_hop(
+                "doc-two",
+                job="etl.job_two",
+                source="#tmp",
+                target="main.vw_revenue_by_region",
+                operation="insert",
+                evidence_reference="sql/two.sql",
+                reason="Reads own #tmp",
+            )
+
+            dispatcher = TarelMcpDispatcher(McpServerConfig(state_root=state_root, profile="meta"))
+            res = dispatcher.lineage_trace(
+                mode="downstream",
+                reference="main.fact_sales",
+                lineages=["doc-one", "doc-two"],
+            )
+            self.assertEqual(res["status"], "ok")
+            targets = [hop["target"] for hop in res["hops"]]
+            self.assertEqual(targets, ["#tmp"])
+            self.assertNotIn("main.vw_revenue_by_region", targets)
 
     def test_policy_hook_seam_deny_and_redact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

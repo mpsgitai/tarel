@@ -7,12 +7,14 @@ and returns structured errors instead of raw tracebacks.
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from tarel.graph.contracts import GraphNode
+from tarel.lineage.resolution import temporary_scope
 from tarel.mcp.contracts import (
     DEFAULT_CONTEXT_MAX_CHARS,
     DEFAULT_CONTEXT_MAX_OBJECTS,
@@ -380,8 +382,8 @@ class TarelMcpDispatcher:
         namespace = _optional_str(args.get("namespace"))
         validated_only = bool(args.get("validated_only", False))
 
-        # Request one extra hit when possible to detect truncation accurately without full scans.
-        probe_limit = limit_val + 1 if limit_val < MAX_SEARCH_LIMIT else limit_val
+        # Always probe one extra hit so truncation is accurate even at MAX_SEARCH_LIMIT.
+        probe_limit = limit_val + 1
         if graph_name is not None:
             results = self._client.search.graph(
                 graph_name,
@@ -580,6 +582,19 @@ class TarelMcpDispatcher:
         source = _optional_str(args.get("source"))
         lineage_names = _string_tuple_arg(args.get("lineages"), "lineages")
 
+        max_obj, obj_clamped = clamp_int(
+            args.get("max_objects", DEFAULT_GROUNDING_MAX_OBJECTS),
+            minimum=1,
+            maximum=MAX_GROUNDING_MAX_OBJECTS,
+            field_name="max_objects",
+        )
+        max_chars, chars_clamped = clamp_int(
+            args.get("max_characters", DEFAULT_CONTEXT_MAX_CHARS),
+            minimum=1_000,
+            maximum=MAX_CONTEXT_MAX_CHARS,
+            field_name="max_characters",
+        )
+
         if raw_ids is not None:
             if not isinstance(raw_ids, list) or not raw_ids:
                 raise McpFailure(
@@ -595,19 +610,46 @@ class TarelMcpDispatcher:
                     hint="Pass the catalog `graph` name owning the requested `object_ids`.",
                 )
             cleaned_ids = tuple(str(item).strip() for item in raw_ids if str(item).strip())
-            truncated = len(cleaned_ids) > MAX_GROUNDING_MAX_OBJECTS
-            bounded_ids = cleaned_ids[:MAX_GROUNDING_MAX_OBJECTS]
-            assets = [
-                _compact_grounding_asset(
+            if not cleaned_ids:
+                raise McpFailure(
+                    "invalid_argument",
+                    "Parameter `object_ids` must contain at least one non-empty ID.",
+                )
+            bounded_ids = cleaned_ids[:max_obj]
+            assets: list[dict[str, Any]] = []
+            used_chars = 0
+            truncated_by_chars = False
+            for ref in bounded_ids:
+                asset_dict = _compact_grounding_asset(
                     self._client.grounding.describe(graph_name, ref, source=source)
                 )
-                for ref in bounded_ids
-            ]
+                serialized_len = len(json.dumps(asset_dict, ensure_ascii=False))
+                if assets and used_chars + serialized_len > max_chars:
+                    truncated_by_chars = True
+                    break
+                if not assets and serialized_len > max_chars:
+                    asset_dict = _trim_asset_to_budget(asset_dict, max_chars)
+                    truncated_by_chars = True
+                    used_chars += len(json.dumps(asset_dict, ensure_ascii=False))
+                    assets.append(asset_dict)
+                    break
+                used_chars += serialized_len
+                assets.append(asset_dict)
+
+            omitted_objects = len(cleaned_ids) - len(assets)
+            truncated = bool(
+                obj_clamped
+                or chars_clamped
+                or omitted_objects > 0
+                or truncated_by_chars
+            )
             return {
                 "status": "ok",
                 "mode": "assets",
                 "graph": graph_name,
+                "budget": {"max_objects": max_obj, "max_characters": max_chars},
                 "returned_count": len(assets),
+                "omitted_objects": omitted_objects,
                 "total_count": len(cleaned_ids),
                 "truncated": truncated,
                 "assets": assets,
@@ -624,18 +666,6 @@ class TarelMcpDispatcher:
                 ),
             )
 
-        max_obj, obj_clamped = clamp_int(
-            args.get("max_objects", DEFAULT_GROUNDING_MAX_OBJECTS),
-            minimum=1,
-            maximum=MAX_GROUNDING_MAX_OBJECTS,
-            field_name="max_objects",
-        )
-        max_chars, chars_clamped = clamp_int(
-            args.get("max_characters", DEFAULT_CONTEXT_MAX_CHARS),
-            minimum=1_000,
-            maximum=MAX_CONTEXT_MAX_CHARS,
-            field_name="max_characters",
-        )
         graph_name, ws_name = self._resolve_scope(args.get("graph"), args.get("workspace"))
         bundle = self._client.grounding.context(
             question,
@@ -834,14 +864,16 @@ class TarelMcpDispatcher:
         limit_clamped: bool,
     ) -> dict[str, Any]:
         needle = reference.strip().casefold()
-        adjacency: dict[str, list[dict[str, Any]]] = {}
-        canonical_names: dict[str, str] = {}
+        adjacency: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        canonical_names: dict[tuple[str, ...], str] = {}
         for lineage_name in lineage_names:
             for table_item in self._client.lineage.tables(lineage_name):
                 src = table_item.source
                 target = table_item.target
-                src_key = src.casefold()
-                target_key = target.casefold()
+                src_key = _scoped_downstream_key(lineage_name, table_item.via_definition, src)
+                target_key = _scoped_downstream_key(
+                    lineage_name, table_item.via_definition, target
+                )
                 canonical_names.setdefault(src_key, src)
                 canonical_names.setdefault(target_key, target)
                 adjacency.setdefault(src_key, []).append(
@@ -849,6 +881,7 @@ class TarelMcpDispatcher:
                         "lineage": lineage_name,
                         "source": src,
                         "target": target,
+                        "target_key": target_key,
                         "role": table_item.role,
                         "via_definition": table_item.via_definition,
                         "state": table_item.state,
@@ -859,7 +892,7 @@ class TarelMcpDispatcher:
         start_keys = [
             key
             for key in adjacency
-            if key == needle or key.endswith(f".{needle}") or needle.endswith(f".{key}")
+            if _downstream_key_matches(key, needle)
         ]
         if not start_keys:
             return {
@@ -874,9 +907,9 @@ class TarelMcpDispatcher:
                 "truncated": False,
             }
 
-        visited_nodes: set[str] = set(start_keys)
-        visited_edges: set[tuple[str, str, str]] = set()
-        queue: deque[tuple[str, int]] = deque((key, 0) for key in start_keys)
+        visited_nodes: set[tuple[str, ...]] = set(start_keys)
+        visited_edges: set[tuple[str, tuple[str, ...], tuple[str, ...]]] = set()
+        queue: deque[tuple[tuple[str, ...], int]] = deque((key, 0) for key in start_keys)
         hops: list[dict[str, Any]] = []
         terminals: set[str] = set()
         truncated = limit_clamped
@@ -885,22 +918,23 @@ class TarelMcpDispatcher:
             current_key, depth = queue.popleft()
             outgoing = adjacency.get(current_key, [])
             if not outgoing:
-                terminals.add(canonical_names.get(current_key, current_key))
+                terminals.add(canonical_names.get(current_key, current_key[-1]))
                 continue
             if depth >= max_hops:
                 truncated = True
-                terminals.add(canonical_names.get(current_key, current_key))
+                terminals.add(canonical_names.get(current_key, current_key[-1]))
                 continue
             for edge in outgoing:
-                edge_sig = (edge["lineage"], edge["source"].casefold(), edge["target"].casefold())
+                next_key: tuple[str, ...] = edge["target_key"]
+                edge_sig = (edge["lineage"], current_key, next_key)
                 if edge_sig in visited_edges:
                     continue
                 visited_edges.add(edge_sig)
                 if len(hops) >= limit:
                     truncated = True
                     continue
-                hops.append({"depth": depth + 1, **edge})
-                next_key = edge["target"].casefold()
+                hop_payload = {k: v for k, v in edge.items() if k != "target_key"}
+                hops.append({"depth": depth + 1, **hop_payload})
                 if next_key not in visited_nodes:
                     visited_nodes.add(next_key)
                     queue.append((next_key, depth + 1))
@@ -1002,29 +1036,87 @@ class TarelMcpDispatcher:
     def annotate_draft(
         self,
         graph: str,
-        proposal: dict[str, Any],
+        proposal: dict[str, Any] | None = None,
         *,
+        action: str = "apply",
+        objects: Sequence[str] | None = None,
+        limit: int = 5,
+        missing_only: bool = True,
         source: str = "mcp-agent",
     ) -> dict[str, Any]:
         return self._execute(
             "tarel_annotate_draft",
-            {"graph": graph, "proposal": proposal, "source": source},
+            {
+                "graph": graph,
+                "action": action,
+                "proposal": proposal,
+                "objects": list(objects) if objects is not None else None,
+                "limit": limit,
+                "missing_only": missing_only,
+                "source": source,
+            },
             self._handle_annotate_draft,
         )
 
     def _handle_annotate_draft(self, args: dict[str, Any]) -> dict[str, Any]:
         graph_name = _require_non_empty_str(args.get("graph"), "graph")
+        action = str(args.get("action") or "apply").strip().lower()
+        if action not in {"plan", "apply"}:
+            raise McpFailure(
+                "invalid_action",
+                f"Unsupported annotate_draft action: {action!r}.",
+                hint="Use `action='plan'` to get task IDs or `action='apply'` to submit a draft.",
+            )
+
+        if action == "plan":
+            limit_val, limit_clamped = clamp_int(
+                args.get("limit", 5),
+                minimum=1,
+                maximum=20,
+                field_name="limit",
+            )
+            obj_filter_tuple = _string_tuple_arg(args.get("objects"), "objects")
+            obj_filter = set(obj_filter_tuple) if obj_filter_tuple else None
+            missing_only = bool(args.get("missing_only", True))
+            tasks = self._client.annotation.plan_graph(
+                graph_name,
+                objects=obj_filter,
+                limit=limit_val + 1,
+                missing_only=missing_only,
+            )
+            has_more = len(tasks) > limit_val
+            returned = tasks[:limit_val]
+            return {
+                "status": "ok",
+                "action": "plan",
+                "graph": graph_name,
+                "returned_count": len(returned),
+                "total_count": len(tasks),
+                "truncated": has_more or limit_clamped,
+                "tasks": [
+                    {
+                        "task_id": task.id,
+                        "target_id": task.target_id,
+                        "mode": task.mode,
+                        "field_names": list(task.field_names),
+                    }
+                    for task in returned
+                ],
+            }
+
         proposal = args.get("proposal")
         if not isinstance(proposal, dict):
             raise McpFailure(
                 "invalid_proposal",
                 "Parameter `proposal` must be a JSON object matching TAREL's "
                 "annotation proposal contract.",
+                hint="Call `tarel_annotate_draft(graph=..., action='plan')` first to get task IDs.",
             )
         source = _optional_str(args.get("source")) or "mcp-agent"
         result = self._client.annotation.apply(graph_name, proposal, source=source)
         return {
             "status": "ok",
+            "action": "apply",
             "graph": graph_name,
             "target_id": result.target_id,
             "state": "draft",
@@ -1146,7 +1238,7 @@ def _compact_grounding_asset(asset: Any) -> dict[str, Any]:
                 "annotation_state": f_ann.state if f_ann else None,
             }
         )
-    return {
+    payload: dict[str, Any] = {
         "reference": asset.reference,
         "object_id": node.id,
         "label": node.label,
@@ -1168,3 +1260,44 @@ def _compact_grounding_asset(asset: Any) -> dict[str, Any]:
         ),
         "fields": fields_payload,
     }
+    if node.type == "field":
+        payload["field"] = {
+            "name": node.label,
+            "parent_object_id": node.metadata.get("object_id"),
+            "data_type": node.metadata.get("data_type"),
+            "nullable": node.metadata.get("nullable"),
+            "is_primary_key": bool(node.metadata.get("is_primary_key", False)),
+            "description": (
+                annotation.description if annotation else node.metadata.get("description")
+            ),
+            "annotation_state": annotation.state if annotation else None,
+        }
+    return payload
+
+
+def _trim_asset_to_budget(asset_dict: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    """Trim fields list on a single oversized grounding asset so it fits within `max_chars`."""
+    trimmed = dict(asset_dict)
+    fields = list(trimmed.get("fields", []))
+    while fields and len(json.dumps(trimmed, ensure_ascii=False)) > max_chars:
+        fields.pop()
+        trimmed["fields"] = fields
+        trimmed["fields_truncated"] = True
+    return trimmed
+
+
+def _scoped_downstream_key(
+    lineage_name: str,
+    via_definition: str,
+    reference: str,
+) -> tuple[str, ...]:
+    """Keep temporary tables scoped to their lineage document and definition."""
+    scope = temporary_scope(reference)
+    if scope is not None:
+        return ("temp", lineage_name, via_definition, scope, reference.strip().casefold())
+    return ("persistent", reference.strip().casefold())
+
+
+def _downstream_key_matches(key: tuple[str, ...], needle: str) -> bool:
+    name = key[-1]
+    return name == needle or name.endswith(f".{needle}") or needle.endswith(f".{name}")

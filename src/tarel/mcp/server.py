@@ -199,11 +199,25 @@ def create_mcp_server(
         @server.tool()
         def tarel_annotate_draft(
             graph: str,
-            proposal: dict[str, Any],
+            action: str = "apply",
+            proposal: dict[str, Any] | None = None,
+            objects: list[str] | None = None,
+            limit: int = 5,
+            missing_only: bool = True,
             source: str = "mcp-agent",
         ) -> str:
-            """Apply a draft annotation proposal with provenance (never overwrites reviewed)."""
-            return _dump(dispatcher.annotate_draft(graph, proposal, source=source))
+            """Plan (action='plan') or apply (action='apply') draft annotations safely."""
+            return _dump(
+                dispatcher.annotate_draft(
+                    graph,
+                    proposal,
+                    action=action,
+                    objects=objects,
+                    limit=limit,
+                    missing_only=missing_only,
+                    source=source,
+                )
+            )
 
     return server, dispatcher
 
