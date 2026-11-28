@@ -227,7 +227,8 @@ def _trace_downstream_on(network: Network, reference: str, *, max_hops: int) -> 
             if edge.resolution_note is not None:
                 warnings.add(edge.resolution_note)
             if edge.target_id in path:
-                warnings.add(f"Lineage cycle detected at: {hop.target.reference}")
+                if edge.target_id != edge.source_id:
+                    warnings.add(f"Lineage cycle detected at: {hop.target.reference}")
                 continue
             previous = seen_depth.get(edge.target_id)
             if previous is None or target_depth < previous:
@@ -245,7 +246,8 @@ def _trace_downstream_on(network: Network, reference: str, *, max_hops: int) -> 
             key=lambda item: (item.reference.casefold(), item.id),
         )
     )
-    if not hops:
+    if not any(hop.source.id != hop.target.id for hop in hops):
+        # A procedure that merges into its own table is a self-loop, not something it feeds.
         warnings.add("No downstream lineage was found for the selected reference.")
     if truncated:
         warnings.add(f"Trace stopped at the configured max_hops={max_hops} boundary.")

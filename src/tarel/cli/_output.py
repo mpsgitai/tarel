@@ -157,9 +157,9 @@ def render_compact(payload: dict[str, object], *, output_format: str) -> None:
     resolution = payload.get("resolution")
     if isinstance(resolution, dict):
         print(
-            f"Sources (auto): lineages={','.join(resolution['lineages'])} "
-            f"[{resolution['lineages_from']}]; graphs={','.join(resolution['graphs']) or '-'} "
-            f"[{resolution['graphs_from']}]"
+            f"Sources (auto): {len(resolution['lineages'])} lineages "
+            f"[{resolution['lineages_from']}], {len(resolution['graphs'])} graphs "
+            f"[{resolution['graphs_from']}]; --format json lists them"
         )
     freshness = payload.get("freshness")
     if isinstance(freshness, dict):

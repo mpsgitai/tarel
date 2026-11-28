@@ -8,7 +8,7 @@ from unittest import TestCase, mock
 from test_focus import _fixture, _run_cli
 
 from tarel.lineage import directions
-from tarel.lineage.contracts import LineageFailure
+from tarel.lineage.contracts import LineageFailure, LineageWriteSource, LineageWriteUnit
 from tarel.lineage.directions import trace_lineage, trace_lineage_batch
 from tarel.lineage.projection import compact_batch_dict
 from tarel.lineage.trace_application import resolve_lineage_sources_use_case
@@ -37,6 +37,28 @@ class DirectionTests(TestCase):
         self.assertEqual(trace.downstream, ())
         self.assertEqual(trace.impacts, ())
         self.assertIn("No downstream lineage was found for the selected reference.", trace.warnings)
+
+    def test_a_self_merge_is_not_downstream_lineage(self) -> None:
+        graph, lineage = _fixture()
+        evidence = lineage.claims[0].evidence
+        merge = LineageWriteUnit(
+            id="merge-into-itself",
+            definition_id=lineage.definitions[0].id,
+            operation="merge",
+            target="Demo.mart.Sales",
+            state="draft",
+            evidence=evidence,
+            sources=(LineageWriteSource("Demo.mart.Sales", "business_data", (), evidence),),
+        )
+
+        trace = trace_lineage(
+            (replace(lineage, write_units=(merge,)),), (graph,), "Demo.mart.Sales",
+            direction="down",
+        )
+
+        self.assertTrue(all(hop.source.id == hop.target.id for hop in trace.downstream))
+        self.assertIn("No downstream lineage was found for the selected reference.", trace.warnings)
+        self.assertFalse([item for item in trace.warnings if "cycle" in item])
 
     def test_up_matches_the_existing_upstream_trace(self) -> None:
         graph, lineage = _fixture()
