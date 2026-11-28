@@ -6473,7 +6473,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `object_family_source_unreadable` | [cli/family.py](../src/tarel/cli/family.py#L141) |
 | `object_not_found` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L339), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L448), [workspaces/core.py](../src/tarel/workspaces/core.py#L506) |
 | `object_outside_focus` | [relationships/core.py](../src/tarel/relationships/core.py#L208) |
-| `object_outside_scope` | [context/application.py](../src/tarel/context/application.py#L382), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L357), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L393), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L188) |
+| `object_outside_scope` | [context/application.py](../src/tarel/context/application.py#L382), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L361), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L397), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L188) |
 | `observation_failed` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L232) |
 | `observation_missing` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L227) |
 | `optional_metadata_too_large` | [ui/optional_metadata.py](../src/tarel/ui/optional_metadata.py#L168) |

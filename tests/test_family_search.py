@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
+from test_focus import _fixture as _demo_fixture
 from test_object_families import _graph
 
 from tarel.cli import main
@@ -189,3 +190,20 @@ class FamilyNameSearchTests(TestCase):
 
         self.assertEqual(len([hit for hit in result.hits if hit.source_graph == "commerce"]), 1)
         self.assertGreater(dict(result.omitted_by_diversity)["commerce"], 0)
+
+    def test_family_hits_do_not_crowd_out_other_graphs_under_the_limit(self) -> None:
+        other, _lineage = _demo_fixture()
+        self.sdk.runtime.graph_store().save(other)
+        workspace = define_system(
+            create_workspace("estate"), "sales", graph_names=("commerce", "demo"),
+            graphs={"commerce": self.graph, "demo": other},
+        )
+        self.sdk.runtime.workspace_store().save(workspace)
+
+        result = self.sdk.search.workspace(
+            "estate", "sales revenue", limit=2, family_mode="include_candidates",
+            diversity="per_graph", max_per_graph=1,
+        )
+
+        self.assertEqual(result.hits[0].type, "object_family")
+        self.assertEqual(sorted(hit.source_graph for hit in result.hits), ["commerce", "demo"])

@@ -238,8 +238,11 @@ def search_workspace_use_case(
         if collapse_duplicates
         else None
     )
+    # Under per_graph diversity, family hits may still push physical hits over a graph's cap,
+    # so the candidate list stays whole until the combined list is capped; only then is it cut.
+    pool = sum(len(item.hits) for item in results) if diversity == "per_graph" else limit
     combined = combine_workspace_search(
-        scope, results, query=query, mode=mode, limit=limit, signatures=signatures,
+        scope, results, query=query, mode=mode, limit=pool, signatures=signatures,
         diversity=diversity, max_per_graph=max_per_graph,
     )
     type_counts: dict[str, int] = {}
@@ -270,15 +273,16 @@ def search_workspace_use_case(
             object_ids=filtered_ids[graph_name], runtime=runtime,
         )
     )
-    combined = with_family_hits(combined, families, limit=limit)
-    if diversity == "per_graph" and families:
+    combined = with_family_hits(combined, families, limit=pool + len(families))
+    if diversity == "per_graph":
         # Family hits are prepended after the physical cap; cap the combined list again.
         capped, extra = cap_per_graph(list(combined.hits), max_per_graph or DEFAULT_MAX_PER_GRAPH)
         omitted = dict(combined.omitted_by_diversity)
         for graph, count in extra.items():
             omitted[graph] = omitted.get(graph, 0) + count
         combined = replace(
-            combined, hits=tuple(capped), omitted_by_diversity=tuple(sorted(omitted.items())),
+            combined, hits=tuple(capped[:limit]),
+            omitted_by_diversity=tuple(sorted(omitted.items())),
         )
     return rerank_results(
         combined, tuple(loaded[name] for name in scope.graph_names), runtime=runtime,

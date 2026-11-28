@@ -175,14 +175,15 @@ def _tree(
         relation = page.style.dim(f"{edge['rel']} {arrow}")
         children.setdefault(str(parent), []).append((relation, str(child), "  ".join(notes)))
     # A folded cycle drops the edges between its members, so the members are linked here again;
-    # otherwise branches entering the cycle elsewhere would hang loose from the start.
+    # otherwise branches entering the cycle elsewhere would hang loose from the start. A ring
+    # (each member to the next) reaches every member from any entry with one line per member.
     link = page.style.dim(f"{page.style.symbol('cycle')} same cycle as")
     for cycle in cycles:
         members = [str(item) for item in cycle.get("members", ())]
-        for member in members:
-            children.setdefault(member, []).extend(
-                (link, other, "") for other in members if other != member
-            )
+        if len(members) < 2:
+            continue
+        for member, following in zip(members, (*members[1:], members[0]), strict=True):
+            children.setdefault(member, []).append((link, following, ""))
     if not children.get(start):
         page.add("  " + _label(page, start, nodes))
         page.text("no edges in this direction", indent=4, styler=page.style.dim)

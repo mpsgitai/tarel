@@ -105,6 +105,21 @@ class PrimitiveTests(TestCase):
         self.assertIn("derived_from ← C [table]", text)
         self.assertNotIn("no edges in this direction", text)
 
+    def test_a_large_folded_cycle_renders_one_line_per_member(self) -> None:
+        members = [f"m{index:03d}" for index in range(300)]
+        payload = {
+            "direction": "up", "start": "m000", "summary": {"nodes": 300, "edges": 0},
+            "nodes": {key: {"kind": "table"} for key in members},
+            "edges": [], "cycles": [{"members": members, "internal_edges": 300}],
+            "origins": [], "warnings": [],
+        }
+        output = _Utf8Buffer()
+        with mock.patch.dict(os.environ, {"COLUMNS": "80"}), redirect_stdout(output):
+            render_lineage(payload)
+
+        self.assertLess(output.getvalue().count("same cycle as"), 310)
+        self.assertIn("same cycle as m299", output.getvalue())
+
     def test_deep_trees_render_without_recursion(self) -> None:
         page = Pretty(_PLAIN, 80)
         children = {f"n{index}": [("reads", f"n{index + 1}", "")] for index in range(5000)}
