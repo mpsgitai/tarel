@@ -14,6 +14,7 @@ from tarel.context.compiler import (
     compile_context_from_objects,
     compile_context_from_search,
     compile_context_prefix,
+    with_anomaly_signals,
 )
 from tarel.context.guidance import ContextBrief, ContextDelta, context_brief, context_delta
 from tarel.context.hints_application import add_logical_context_hints_use_case
@@ -457,7 +458,7 @@ def _attach_anomaly_signals(
         "observed_at": loaded.latest_observed_at,
         "stale_graphs": list(loaded.stale_graphs),
     }
-    return replace(result, anomaly_signals=anomaly_payload)
+    return with_anomaly_signals(result, anomaly_payload)
 
 
 def diff_context_packets_use_case(left: Path, right: Path) -> ContextPacketDiff:

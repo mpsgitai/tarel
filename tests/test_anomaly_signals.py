@@ -276,6 +276,48 @@ class ContextAnomalyIntegrationTests(unittest.TestCase):
             )
             self.assertNotIn("Active data signals:", describe_context_use_case(quiet).text())
 
+    def test_anomaly_signals_respect_max_characters_and_remeasure_counts(self) -> None:
+        graph = _sample_graph()
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = TarelRuntime.local(Path(tmp) / ".tarel")
+            runtime.graph_store().save(graph)
+            anomaly_dir = runtime.root / "anomaly"
+            anomaly_dir.mkdir(parents=True)
+            payload = _valid_signals_payload(graph)
+            objects = payload["objects"]
+            assert isinstance(objects, dict)
+            orders = objects["table:main.orders"]
+            assert isinstance(orders, dict)
+            findings = orders["active_findings"]
+            assert isinstance(findings, list)
+            findings[0]["evidence_sql"] = "SELECT " + ("x" * 50_000)
+            (anomaly_dir / "retail.signals.json").write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+
+            baseline = compile_context_use_case(
+                "retail",
+                "orders",
+                object_ids=("table:main.orders", "table:main.order_lines"),
+                max_characters=10_000,
+                runtime=runtime,
+            )
+            with_anomaly = compile_context_use_case(
+                "retail",
+                "orders",
+                object_ids=("table:main.orders", "table:main.order_lines"),
+                max_characters=10_000,
+                include_anomaly=True,
+                runtime=runtime,
+            )
+            self.assertEqual(baseline.stable_hash, with_anomaly.stable_hash)
+            self.assertEqual(with_anomaly.context_characters, len(with_anomaly.canonical_json()))
+            self.assertLessEqual(with_anomaly.context_characters, 10_000)
+            signals = with_anomaly.dynamic_dict()["anomaly_signals"]
+            assert isinstance(signals, dict)
+            self.assertTrue(signals.get("truncated"))
+            self.assertIn("table:main.orders", signals["objects"])
+
 
 class UIAnomalyBackendTests(unittest.TestCase):
     def test_bootstrap_is_identical_without_flag_and_enriches_with_flag(self) -> None:

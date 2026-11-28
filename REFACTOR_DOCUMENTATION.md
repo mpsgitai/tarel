@@ -1190,7 +1190,7 @@ Harness-neutral prompt blocks derived from a deterministic context packet.
 
 Compile bounded agent context from lexical search and reviewed graph relationships.
 
-- **Input:** parameters `annotation_states: frozenset[str]`, `graph: GraphDocument`, `hints: LogicalContextHints`, `max_characters: int`, `max_fields_per_object: int`, `max_hops: int`, `max_joins: int`, `max_objects: int`, `namespace: str | None`, `object_ids: tuple[str, ...]`, `query: str`, `result: ContextResult` …
+- **Input:** parameters `annotation_states: frozenset[str]`, `anomaly_signals: dict[str, object]`, `graph: GraphDocument`, `hints: LogicalContextHints`, `max_characters: int`, `max_fields_per_object: int`, `max_hops: int`, `max_joins: int`, `max_objects: int`, `namespace: str | None`, `object_ids: tuple[str, ...]`, `query: str` …
 - **Processing:**
     - `ContextFailure`: Raised when a context operation is rejected.
     - `compile_context`: Build context without querying source data or invoking an LLM. Calls `search_graph`.
@@ -1198,6 +1198,7 @@ Compile bounded agent context from lexical search and reviewed graph relationshi
     - `compile_context_from_objects`: Compile context from exact physical objects without another fuzzy search. Calls `SearchResults`, `SearchHit`.
     - `compile_context_prefix`: Compile one query-independent graph or workspace scope for prompt-prefix reuse. Calls `ContextResult`, `graph_revision`, `ContextScope`, `usable_relationships`.
     - `with_logical_context_hints`: Refit the existing total budget after attaching optional, non-traversable hints.
+    - `with_anomaly_signals`: Attach opt-in anomaly signals within ``max_characters`` without changing ``stable``.
 - **Output:** returns `ContextResult`
 - **Uses:** `tarel.annotations.states`, `tarel.context.hints`, `tarel.context.output`, `tarel.errors`, `tarel.graph.contracts`, `tarel.graph.revision`, `tarel.relationships.core`, `tarel.search`
 - **Used by:** `tarel.cli.context`, `tarel.cli.grounding`, `tarel.context.application`, `tarel.context.grounding`, `tarel.context.grounding_application`, `tarel.context.guidance`, `tarel.context.hints_application`, `tarel.context.packets`, `tarel.expansion.application`, `tarel.expansion.projections`, `tarel.sdk.context`, `tarel.ui.query_tools`, `tarel.ui.server`
