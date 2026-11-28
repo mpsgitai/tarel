@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tarel.errors import name_preview
+from tarel.graph.contracts import GraphDocument
 from tarel.lineage.contracts import (
     LineageDefinition,
     LineageDocument,
@@ -277,9 +279,7 @@ def find_lineage_references_use_case(
     n_threads: int | None = None,
     runtime: TarelRuntime | None = None,
 ) -> tuple[LineageReference, ...]:
-    documents = _load_lineage_documents(lineage_names, runtime=runtime)
-    graph_store = resolve_runtime(runtime).graph_store()
-    graphs = tuple(graph_store.load(name) for name in graph_names)
+    documents, graphs = _load_trace_sources(lineage_names, graph_names, runtime=runtime)
     embedder = None
     if mode in {"vector", "hybrid"}:
         embedder = load_local_embedding_plugin().create_embedder(
@@ -304,9 +304,7 @@ def trace_upstream_use_case(
     states: frozenset[str] | None = None,
     runtime: TarelRuntime | None = None,
 ) -> UpstreamTrace:
-    documents = _load_lineage_documents(lineage_names, runtime=runtime)
-    graph_store = resolve_runtime(runtime).graph_store()
-    graphs = tuple(graph_store.load(name) for name in graph_names)
+    documents, graphs = _load_trace_sources(lineage_names, graph_names, runtime=runtime)
     selected = states if states is not None else None
     if selected is None:
         return trace_upstream(documents, graphs, reference, max_hops=max_hops)
@@ -324,12 +322,75 @@ def _require_expected_revision(
         )
 
 
-def _load_lineage_documents(
-    names: tuple[str, ...],
+def _load_trace_sources(
+    lineage_names: tuple[str, ...],
+    graph_names: tuple[str, ...],
     *,
     runtime: TarelRuntime | None = None,
-) -> tuple[LineageDocument, ...]:
-    store = resolve_runtime(runtime).lineage_store()
-    if not names:
+) -> tuple[tuple[LineageDocument, ...], tuple[GraphDocument, ...]]:
+    state = resolve_runtime(runtime)
+    lineage_store = state.lineage_store()
+    graph_store = state.graph_store()
+    if not lineage_names:
         raise LineageFailure("lineage_not_found", "No local lineage documents are available.")
-    return tuple(store.load(name) for name in names)
+    require_source_roles(
+        lineage_names,
+        graph_names,
+        known_lineages=lineage_store.list(),
+        known_graphs=graph_store.list(),
+    )
+    return (
+        tuple(lineage_store.load(name) for name in lineage_names),
+        tuple(graph_store.load(name) for name in graph_names),
+    )
+
+
+def require_source_roles(
+    lineage_names: tuple[str, ...],
+    graph_names: tuple[str, ...],
+    *,
+    known_lineages: tuple[str, ...],
+    known_graphs: tuple[str, ...],
+) -> None:
+    """Reject a lineage name passed as a graph, or a graph name passed as a lineage.
+
+    Both mistakes are common for agents because lineage documents and catalog graphs share one
+    namespace of short names. The failure carries the corrected source lists in
+    ``details["suggestion"]``, so one retry repairs every misplaced name at once.
+    """
+    lineage_set, graph_set = set(known_lineages), set(known_graphs)
+    as_lineage = [item for item in graph_names if item not in graph_set and item in lineage_set]
+    as_graph = [item for item in lineage_names if item not in lineage_set and item in graph_set]
+    if not as_lineage and not as_graph:
+        return
+    kept_graphs = tuple(item for item in graph_names if item not in as_lineage)
+    kept_lineages = tuple(item for item in lineage_names if item not in as_graph)
+    suggestion = {
+        "graphs": _unique((*kept_graphs, *as_graph)),
+        "lineages": _unique((*kept_lineages, *as_lineage)),
+    }
+    if as_lineage:
+        name, code, param, role = as_lineage[0], "invalid_graph_role", "graphs", "lineage"
+        accepted = known_graphs
+        message = f"'{name}' is a lineage document, not a catalog graph."
+    else:
+        name, code, param, role = as_graph[0], "invalid_lineage_role", "lineages", "graph"
+        accepted = known_lineages
+        message = f"'{name}' is a catalog graph, not a lineage document."
+    raise LineageFailure(
+        code,
+        message,
+        hint=f"Pass '{name}' as a {role} (--{role} / {role}s=) instead.",
+        retryable=True,
+        details={
+            "accepted_count": len(accepted),
+            "accepted_preview": name_preview(name, accepted),
+            "param": param,
+            "suggestion": suggestion,
+            "value": name,
+        },
+    )
+
+
+def _unique(names: tuple[str, ...]) -> list[str]:
+    return list(dict.fromkeys(names))

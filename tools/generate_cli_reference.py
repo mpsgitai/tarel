@@ -464,7 +464,15 @@ NOTES = {
         "Same-named objects only stop a trace that depends on them. They ar"
         "e settled only by identity the referring document declares, and th"
         "e trace warns when that happened; otherwise the error lists the ca"
-        "ndidates."
+        "ndidates. --view compact lists each node once and each edge as one"
+        " short row, omits empty fields and prints JSON on one line; see th"
+        "e compact projection in contracts.md. A lineage name passed as --g"
+        "raph (or a graph as --lineage) fails with invalid_graph_role / inv"
+        "alid_lineage_role and the corrected source lists."
+    ),
+    "focus show": (
+        "--view compact keys members by reference, merges repeated hops, dr"
+        "ops self-loops and folds cycles; the stored snapshot is unchanged."
     ),
     "context expand": (        "--requests takes a JSON file or - for stdin, never inline JSON, "
         "and the array holds 1-32 typed targets. Do not combine --request"
@@ -891,6 +899,10 @@ def appendices():
         ),
         "| Runtime lineage | [Complete input and version rules](contracts.md#runtime-lineage) |",
         (
+            "| Compact lineage / focus view, CLI errors | [Compact projections "
+            "and errors](contracts.md#compact-projections-and-errors) |"
+        ),
+        (
             "| Discovery proposals and observations | [Complete worked payloa"
             "ds](contracts.md#discovery-protocol) |"
         ),
@@ -1264,8 +1276,13 @@ lines = [
     "## Exit status and errors",
     "",
     (
-        "The main dispatcher returns 2 for recognized domain errors and w"
-        "rites `error [code]: message` to stderr. Argument parsing errors"
+        "The main dispatcher returns 2 for recognized domain errors. With"
+        " --format text it writes `error [code]: message` and, when known"
+        ", `hint: ...` to stderr; with --format json it writes one `{\"err"
+        "or\": {...}}` object to stderr (code, message, retryable, option"
+        "al hint and details) and leaves stdout empty. Retryable errors n"
+        "ame the rejected parameter and the accepted values or a correcte"
+        "d `suggestion` in details. Argument parsing errors"
         " also normally use status 2. Successful operations normally retu"
         "rn 0. Some operations use 1 for an incomplete/unknown outcome (f"
         "or example context expansion omissions or unknown context impact"

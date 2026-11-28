@@ -62,6 +62,19 @@ def add_format_argument(parser: argparse.ArgumentParser, *, default: str = "text
     )
 
 
+def add_view_argument(parser: argparse.ArgumentParser) -> None:
+    """``--view full|compact``; ``full`` stays the default so existing callers see no change."""
+    parser.add_argument(
+        "--view",
+        choices=("full", "compact"),
+        default="full",
+        help=(
+            "full: the complete record (default). compact: each node once, edges as short rows, "
+            "empty fields omitted; JSON is printed on one line."
+        ),
+    )
+
+
 def add_logical_hint_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--logical-hints",

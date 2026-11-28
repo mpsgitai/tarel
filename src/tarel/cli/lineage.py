@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tarel.cli._args import add_format_argument
-from tarel.cli._output import print_json
+from tarel.cli._args import add_format_argument, add_view_argument
+from tarel.cli._output import print_json, render_compact
 from tarel.lineage.analysis_application import (
     run_lineage_analysis_use_case,
 )
@@ -205,6 +205,7 @@ def register(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -
         action="append",
         choices=("draft", "review_required", "validated"),
     )
+    add_view_argument(upstream)
     add_format_argument(upstream)
 
     add_job = commands.add_parser(
@@ -763,6 +764,9 @@ def _run_upstream(args: argparse.Namespace) -> int:
         max_hops=args.max_hops,
         states=frozenset(args.state) if args.state else None,
     )
+    if args.view == "compact":
+        render_compact(trace.to_compact_dict(), output_format=args.format)
+        return 0
     _render_upstream_trace(trace.to_dict(), output_format=args.format)
     return 0
 

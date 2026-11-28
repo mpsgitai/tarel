@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import sys
 from collections.abc import Sequence
 from types import ModuleType
@@ -93,6 +94,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _report_error(exc: TarelError, *, output_format: str) -> None:
+    """Write a failure to stderr; stdout stays empty so a pipe never reads half a result."""
+    if output_format == "json":
+        print(json.dumps(exc.to_dict(), ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return
+    print(f"error [{exc.code}]: {exc}", file=sys.stderr)
+    if exc.hint:
+        print(f"hint: {exc.hint}", file=sys.stderr)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one ``tarel`` invocation and return its process exit status."""
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -119,7 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if result is not None:
                 return result
         except TarelError as exc:
-            print(f"error [{exc.code}]: {exc}", file=sys.stderr)
+            _report_error(exc, output_format=getattr(args, "format", "text"))
             return 2
         parser.print_help()
         return 0

@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from tarel.atomic import write_atomic
+from tarel.errors import unknown_name_error
 from tarel.focus.contracts import FocusDocument, FocusFailure, validate_focus
 
 _FOCUS_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -34,7 +35,10 @@ class FileFocusStore:
         try:
             payload = json.loads(self.path(name).read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise FocusFailure("focus_not_found", f"Focus not found: {name}") from exc
+            raise unknown_name_error(
+                FocusFailure, "focus_not_found", f"Focus not found: {name}",
+                param="focus", value=name, accepted=self.list(), noun="focus",
+            ) from exc
         except (OSError, json.JSONDecodeError) as exc:
             raise FocusFailure("invalid_focus", f"Could not read focus: {name}") from exc
         if not isinstance(payload, dict):

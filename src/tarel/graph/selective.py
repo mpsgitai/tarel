@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tarel.atomic import write_atomic
+from tarel.errors import unknown_name_error
 from tarel.graph.contracts import GraphDocument, GraphEdge, GraphFailure, GraphNode
 from tarel.graph.revision import graph_revision, physical_graph_revision, physical_schema_revision
 
@@ -522,7 +523,11 @@ def _source_fingerprint(path: Path, name: str) -> list[int]:
     try:
         return _fingerprint(path)
     except FileNotFoundError as exc:
-        raise GraphFailure("graph_not_found", f"Graph not found: {name}") from exc
+        known = sorted(item.parent.name for item in path.parent.parent.glob("*/graph.json"))
+        raise unknown_name_error(
+            GraphFailure, "graph_not_found", f"Graph not found: {name}",
+            param="graph", value=name, accepted=known, noun="graph",
+        ) from exc
     except OSError as exc:
         raise GraphFailure("invalid_graph", f"Could not inspect graph: {name}") from exc
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from tarel.atomic import write_atomic
+from tarel.errors import unknown_name_error
 from tarel.lineage.contracts import (
     LineageDocument,
     LineageFailure,
@@ -47,7 +48,10 @@ class FileLineageStore:
         try:
             payload = json.loads(self.path(name).read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise LineageFailure("lineage_not_found", f"Lineage not found: {name}") from exc
+            raise unknown_name_error(
+                LineageFailure, "lineage_not_found", f"Lineage not found: {name}",
+                param="lineage", value=name, accepted=self.list(), noun="lineage",
+            ) from exc
         except (OSError, json.JSONDecodeError) as exc:
             raise LineageFailure("invalid_lineage", f"Could not read lineage: {name}") from exc
         if not isinstance(payload, dict):

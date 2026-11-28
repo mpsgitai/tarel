@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from tarel.atomic import write_atomic
+from tarel.errors import unknown_name_error
 from tarel.file_lock import file_lock
 from tarel.graph.contracts import GraphDocument, GraphFailure
 from tarel.graph.observation import OBSERVATION_FILE, GraphObservation, utc_now
@@ -104,7 +105,10 @@ class FileGraphStore:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise GraphFailure("graph_not_found", f"Graph not found: {name}") from exc
+            raise unknown_name_error(
+                GraphFailure, "graph_not_found", f"Graph not found: {name}",
+                param="graph", value=name, accepted=self.list(), noun="graph",
+            ) from exc
         except (OSError, json.JSONDecodeError) as exc:
             raise GraphFailure("invalid_graph", f"Could not read graph: {name}") from exc
         if not isinstance(data, dict):

@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from tarel.cli._args import Subcommands, add_format_argument
-from tarel.cli._output import print_json
+from tarel.cli._args import Subcommands, add_format_argument, add_view_argument
+from tarel.cli._output import print_json, render_compact
 from tarel.focus.application import build_focus_use_case, list_focuses_use_case, load_focus_use_case
 from tarel.focus.contracts import FocusDocument
 
@@ -36,6 +36,7 @@ def register(subcommands: Subcommands) -> None:
 
     focus_show = focus_commands.add_parser("show", help="Show one persisted focus snapshot.")
     focus_show.add_argument("name")
+    add_view_argument(focus_show)
     add_format_argument(focus_show)
 
     focus_list = focus_commands.add_parser("list", help="List persisted focus snapshots.")
@@ -102,7 +103,11 @@ def _run_build(args: argparse.Namespace) -> int:
 
 
 def _run_show(args: argparse.Namespace) -> int:
-    _render_focus(load_focus_use_case(args.name), output_format=args.format)
+    focus = load_focus_use_case(args.name)
+    if args.view == "compact":
+        render_compact(focus.to_compact_dict(), output_format=args.format)
+        return 0
+    _render_focus(focus, output_format=args.format)
     return 0
 
 

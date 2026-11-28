@@ -16,6 +16,7 @@ from tarel.lineage.contracts import (
     LineageReview,
     LineageWriteSource,
 )
+from tarel.lineage.projection import compact_trace_dict
 from tarel.lineage.resolution import (
     ReferenceIndex,
     ReferenceResolution,
@@ -34,6 +35,7 @@ from tarel.retrieval.contracts import EmbeddingBackend, RankedDocument, Retrieva
 DEFAULT_LINEAGE_STATES = frozenset({"draft", "review_required", "validated"})
 _LINEAGE_STATES = frozenset({"draft", "rejected", "review_required", "validated"})
 _MAX_VECTOR_DOCUMENTS = 32
+_CANDIDATE_LIMIT = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +118,10 @@ class UpstreamTrace:
             "truncated": self.truncated,
             "warnings": list(self.warnings),
         }
+
+    def to_compact_dict(self) -> dict[str, object]:
+        """Each node once and each edge as one short row; see :mod:`tarel.lineage.projection`."""
+        return compact_trace_dict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -796,6 +802,9 @@ def _resolve_start(network: _Network, reference: str) -> str:
     raise LineageFailure(
         "lineage_reference_not_found",
         f"Exact lineage reference not found: {reference}. Use lineage find first.",
+        hint="Run `tarel lineage find` (SDK: lineage.find) and retry with an exact reference.",
+        retryable=True,
+        details={"param": "reference", "value": reference},
     )
 
 
@@ -805,7 +814,26 @@ def _ambiguous(reference: str, matches: tuple[str, ...], network: _Network) -> L
     return LineageFailure(
         "ambiguous_lineage_reference",
         f"Lineage reference is ambiguous: {reference}. Candidates: {preview}",
+        hint="Retry with one candidate id as the reference.",
+        retryable=True,
+        details={
+            "candidate_count": len(matches),
+            "candidates": _candidate_details(matches, network),
+            "param": "reference",
+            "value": reference,
+        },
     )
+
+
+def _candidate_details(matches: tuple[str, ...], network: _Network) -> list[dict[str, str]]:
+    values = sorted(
+        (network.nodes[item].value for item in matches),
+        key=lambda item: (item.reference.casefold(), item.id),
+    )
+    return [
+        {"id": item.id, "reference": item.reference, "source": item.source}
+        for item in values[:_CANDIDATE_LIMIT]
+    ]
 
 
 def _candidate_label(value: LineageReference) -> str:
@@ -825,6 +853,19 @@ def _ambiguous_on_path(
         f"Lineage reference is ambiguous: {ambiguity.reference}. Candidates: {preview}. "
         f"The trace depends on it at {network.nodes[target_id].value.reference} "
         f"(lineage {ambiguity.lineage}).",
+        hint=(
+            "Select only the graph that lineage reads from, or declare its catalog in the "
+            "lineage document, then retry."
+        ),
+        retryable=True,
+        details={
+            "at": network.nodes[target_id].value.reference,
+            "candidate_count": len(ambiguity.candidates),
+            "candidates": _candidate_details(ambiguity.candidates, network),
+            "lineage": ambiguity.lineage,
+            "param": "graphs",
+            "value": ambiguity.reference,
+        },
     )
 
 
