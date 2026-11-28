@@ -6114,7 +6114,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_object_family_page` | [object_families/application.py](../src/tarel/object_families/application.py#L348) |
 | `invalid_object_family_path` | [object_families/store.py](../src/tarel/object_families/store.py#L98), [object_families/store.py](../src/tarel/object_families/store.py#L102), [object_families/store.py](../src/tarel/object_families/store.py#L109) |
 | `invalid_object_family_scope` | [object_families/application.py](../src/tarel/object_families/application.py#L339), [object_families/application.py](../src/tarel/object_families/application.py#L344) |
-| `invalid_object_reference` | [cli/_args.py](../src/tarel/cli/_args.py#L161), [context/application.py](../src/tarel/context/application.py#L397), [graph/reads.py](../src/tarel/graph/reads.py#L74), [workspaces/core.py](../src/tarel/workspaces/core.py#L495), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L179) |
+| `invalid_object_reference` | [cli/_args.py](../src/tarel/cli/_args.py#L161), [context/application.py](../src/tarel/context/application.py#L398), [graph/reads.py](../src/tarel/graph/reads.py#L74), [workspaces/core.py](../src/tarel/workspaces/core.py#L495), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L179) |
 | `invalid_observation` | [graph/store.py](../src/tarel/graph/store.py#L128) |
 | `invalid_optional_edge` | [ui/optional_metadata.py](../src/tarel/ui/optional_metadata.py#L97) |
 | `invalid_optional_endpoint` | [ui/optional_metadata.py](../src/tarel/ui/optional_metadata.py#L192) |
@@ -6151,7 +6151,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `invalid_reference_mapping_id` | [reference_mapping/store.py](../src/tarel/reference_mapping/store.py#L95) |
 | `invalid_reference_mapping_import` | [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L140) |
 | `invalid_reference_mapping_mode` | [reference_mapping/application.py](../src/tarel/reference_mapping/application.py#L213) |
-| `invalid_relationship` | [context/compiler.py](../src/tarel/context/compiler.py#L626), [context/compiler.py](../src/tarel/context/compiler.py#L659), [context/compiler.py](../src/tarel/context/compiler.py#L670), [context/compiler.py](../src/tarel/context/compiler.py#L693) |
+| `invalid_relationship` | [context/compiler.py](../src/tarel/context/compiler.py#L713), [context/compiler.py](../src/tarel/context/compiler.py#L746), [context/compiler.py](../src/tarel/context/compiler.py#L757), [context/compiler.py](../src/tarel/context/compiler.py#L780) |
 | `invalid_relationship_fields` | [relationships/core.py](../src/tarel/relationships/core.py#L122), [relationships/core.py](../src/tarel/relationships/core.py#L131), [relationships/core.py](../src/tarel/relationships/core.py#L138), [relationships/core.py](../src/tarel/relationships/core.py#L146) |
 | `invalid_relationship_pair` | [relationships/core.py](../src/tarel/relationships/core.py#L80), [workspaces/core.py](../src/tarel/workspaces/core.py#L191) |
 | `invalid_relationship_probe` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L200), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L512) |
@@ -6296,7 +6296,7 @@ The entries below are generated from explicit domain Failure constructors in thi
 | `object_family_source_unreadable` | [cli/family.py](../src/tarel/cli/family.py#L141) |
 | `object_not_found` | [sqlite/connector.py](../src/tarel/connectors/sqlite/connector.py#L339), [sqlserver/connector.py](../src/tarel/connectors/sqlserver/connector.py#L448), [workspaces/core.py](../src/tarel/workspaces/core.py#L506) |
 | `object_outside_focus` | [relationships/core.py](../src/tarel/relationships/core.py#L208) |
-| `object_outside_scope` | [context/application.py](../src/tarel/context/application.py#L402), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L308), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L344), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L188) |
+| `object_outside_scope` | [context/application.py](../src/tarel/context/application.py#L403), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L308), [retrieval/search_application.py](../src/tarel/retrieval/search_application.py#L344), [workspaces/scope.py](../src/tarel/workspaces/scope.py#L188) |
 | `observation_failed` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L232) |
 | `observation_missing` | [sync/publish_application.py](../src/tarel/sync/publish_application.py#L227) |
 | `optional_metadata_too_large` | [ui/optional_metadata.py](../src/tarel/ui/optional_metadata.py#L168) |
